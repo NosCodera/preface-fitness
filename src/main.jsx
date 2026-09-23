@@ -83,7 +83,7 @@ function getMembershipStatus(expiry) {
 
 function getCheckInPath() {
   const base = import.meta.env.BASE_URL || '/';
-  return `${base.replace(/\/$/, '')}/check-in`;
+  return `${base.replace(/\/$/, '')}/#check-in`;
 }
 
 function getCheckInUrl() {
@@ -975,7 +975,7 @@ function App() {
     );
   }
 
-  const isPublicCheckInRoute = window.location.pathname.replace(/\/+$/, '').endsWith('/check-in');
+  const isPublicCheckInRoute = window.location.hash === '#check-in';
 
   if (isPublicCheckInRoute) {
     return <PublicAttendancePage data={data} setData={setData} />;
