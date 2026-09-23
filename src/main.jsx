@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   Activity,
+  BarChart3,
   AlertCircle,
   ArrowDownRight,
   ArrowUpRight,
@@ -48,6 +49,10 @@ const MEMBERSHIP_PLANS = [
   { name: 'Half-yearly', months: 6, price: 7000, description: '6 month membership' },
   { name: 'Annual', months: 12, price: 12000, description: '12 month membership' },
 ];
+
+const DEFAULT_MEMBERSHIP_PRICES = Object.fromEntries(
+  MEMBERSHIP_PLANS.map((plan) => [plan.name, plan.price])
+);
 
 function addMonthsToDate(dateString, months) {
   const date = new Date(`${dateString}T00:00:00`);
@@ -288,7 +293,7 @@ const seed = {
     },
   ],
 
-  settings: { gymName: 'Preface Fitness', currency: '₹' },
+  settings: { gymName: 'Preface Fitness', currency: '₹', gymAddress: '', gymPhone: '', gymEmail: '', gstin: '', invoicePrefix: 'PF-INV', referralPointsPerReferral: 10 },
 };
 
 function loadLegacyData() {
@@ -345,17 +350,23 @@ function App() {
   const expiringMembers = data.members.filter((m) => m.status === 'Expiring').length;
   const overdue = data.members.reduce((sum, m) => sum + Number(m.due || 0), 0);
   const revenue = data.payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const planPrices = { ...DEFAULT_MEMBERSHIP_PRICES, ...(data.settings?.membershipPrices || {}) };
 
   const getMemberStatus = getMembershipStatus;
 
   const addMember = (member) => {
-    const id = `PF-${1000 + data.members.length + 1}`;
+    const requestedId = String(member.id || '').trim();
+    const id = requestedId || nextSystemMemberId(data.members);
+    if (data.members.some((item) => String(item.id).toLowerCase() === id.toLowerCase())) {
+      setToast(`Member ID ${id} is already in use`);
+      return;
+    }
     const clean = {
       ...member,
       id,
       visits: 0,
       due: Number(member.due || 0),
-      amount: Number(member.amount || 0),
+      amount: Number(member.amount || planPrices[member.plan] || 0),
       paid: Number(member.paid || 0),
       status: getMemberStatus(member.expiry),
       createdAt: new Date().toISOString(),
@@ -383,7 +394,7 @@ function App() {
     const currentDays = getDaysRemaining(member.expiry);
     const renewalStart = currentDays >= 0 && member.expiry ? member.expiry : today;
     const newExpiry = addMonthsToDate(renewalStart, plan.months);
-    const renewalAmount = Number(renewal.amount || plan.price);
+    const renewalAmount = Number(renewal.amount || planPrices[plan.name] || plan.price);
     const renewalPaid = Number(renewal.paid || 0);
     const oldDue = Number(member.due || 0);
     const renewalDue = Math.max(0, renewalAmount - renewalPaid);
@@ -817,7 +828,7 @@ function App() {
     }
 
     const newMember = {
-      id: `PF-${1001 + data.members.length}`,
+      id: nextSystemMemberId(data.members),
       name: lead.name,
       phone: lead.phone || '',
       email: lead.email || '',
@@ -827,6 +838,11 @@ function App() {
       status: 'Active',
       visits: 0,
       due: 0,
+      dietPreference: '',
+      birthday: '',
+      referral: lead.source || 'Walk-in',
+      referredBy: '',
+      referredClients: 0,
     };
 
     setData((d) => ({
@@ -850,6 +866,7 @@ function App() {
 
   const nav = [
     { label: 'Dashboard', icon: LayoutDashboard },
+    { label: 'Performance', icon: BarChart3 },
     { label: 'Members', icon: Users },
     { label: 'Leads', icon: Target },
     { label: 'Memberships', icon: ShieldCheck },
@@ -877,7 +894,18 @@ function App() {
 
   return (
     <div className="app-shell">
-      <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
+      <aside
+        className={`sidebar ${sidebarOpen ? 'open' : ''}`}
+        style={{
+          height: '100vh',
+          maxHeight: '100vh',
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          WebkitOverflowScrolling: 'touch',
+          overscrollBehavior: 'contain',
+          scrollbarWidth: 'thin',
+        }}
+      >
         <div className="brand-block">
           <div className="brand-logo"><img src={LOGO_URL} alt="Preface Fitness logo" /></div>
           <div>
@@ -918,10 +946,11 @@ function App() {
         </header>
 
         <div className="content">
+          {active === 'Performance' && <PerformancePage data={data} />}
           {active === 'Dashboard' && <Dashboard {...{ activeMembers, expiringMembers, overdue, revenue, data, navigate, setModal, markAttendance }} />}
-          {active === 'Members' && <MembersPage members={data.members} query={query} setQuery={setQuery} setModal={setModal} markAttendance={markAttendance} deleteMember={deleteMember} />}
+          {active === 'Members' && <MembersPage members={data.members} query={query} setQuery={setQuery} setModal={setModal} markAttendance={markAttendance} deleteMember={deleteMember} settings={data.settings || {}} />}
           {active === 'Leads' && <LeadsPage leads={data.leads} members={data.members} setModal={setModal} updateLeadStage={updateLeadStage} updateLeadDetails={updateLeadDetails} deleteLead={deleteLead} convertLeadToMember={convertLeadToMember} />}
-          {active === 'Memberships' && <MembershipsPage members={data.members} setModal={setModal} />}
+          {active === 'Memberships' && <MembershipsPage members={data.members} setModal={setModal} planPrices={planPrices} setData={setData} setToast={setToast} />}
           {active === 'Attendance' && <AttendancePage attendance={data.attendance} members={data.members} markAttendance={markAttendance} />}
           {active === 'Payments' && <PaymentsPage payments={data.payments} overdue={overdue} setModal={setModal} deletePayment={deletePayment} />}
           {active === 'Progress' && <ProgressPage progressRecords={data.progressRecords || []} members={data.members} setModal={setModal} deleteProgressRecord={deleteProgressRecord} />}
@@ -930,13 +959,13 @@ function App() {
           {active === 'Diet & Nutrition' && <DietPage plans={data.dietPlans || []} members={data.members} setModal={setModal} deleteDietPlan={deleteDietPlan} />}
           {active === 'Communication' && <CommunicationPage members={data.members} logs={data.communicationLogs || []} setModal={setModal} deleteCommunicationLog={deleteCommunicationLog} />}
           {active === 'Reports' && <ReportsPage data={data} revenue={revenue} />}
-          {active === 'Settings' && <SettingsPage exportBackup={exportBackup} importBackup={importBackup} data={data} dbReady={dbReady} resetData={() => { if (window.confirm('Reset the local Preface Fitness database to demo data?')) { clearState().then(() => { setData(seed); setToast('Local database reset'); }); } }} />}
+          {active === 'Settings' && <SettingsPage exportBackup={exportBackup} importBackup={importBackup} data={data} setData={setData} dbReady={dbReady} resetData={() => { if (window.confirm('Reset the local Preface Fitness database to demo data?')) { clearState().then(() => { setData(seed); setToast('Local database reset'); }); } }} />}
         </div>
       </main>
 
-      {modal === 'member' && <MemberModal onClose={() => setModal(null)} onSave={addMember} />}
-      {modal?.type === 'editMember' && <MemberModal member={modal.member} onClose={() => setModal(null)} onSave={updateMember} />}
-      {modal?.type === 'renewMembership' && <RenewalModal member={modal.member} onClose={() => setModal(null)} onRenew={renewMembership} />}
+      {modal === 'member' && <MemberModal onClose={() => setModal(null)} onSave={addMember} planPrices={planPrices} members={data.members} existingMemberIds={data.members.map((m) => m.id)} />}
+      {modal?.type === 'editMember' && <MemberModal member={modal.member} onClose={() => setModal(null)} onSave={updateMember} planPrices={planPrices} members={data.members} existingMemberIds={data.members.map((m) => m.id)} />}
+      {modal?.type === 'renewMembership' && <RenewalModal member={modal.member} onClose={() => setModal(null)} onRenew={renewMembership} planPrices={planPrices} />}
       {modal === 'lead' && <LeadModal onClose={() => setModal(null)} onSave={addLead} />}
       {modal?.type === 'editLead' && <LeadModal lead={modal.lead} onClose={() => setModal(null)} onSave={updateLeadDetails} />}
       {modal === 'trainer' && <TrainerModal onClose={() => setModal(null)} onSave={addTrainer} />}
@@ -1806,7 +1835,7 @@ function Dashboard({ activeMembers, expiringMembers, overdue, revenue, data, nav
   );
 }
 
-function MembersPage({ members, query, setQuery, setModal, markAttendance, deleteMember }) {
+function MembersPage({ members, query, setQuery, setModal, markAttendance, deleteMember, settings }) {
   const [statusFilter, setStatusFilter] = useState('All');
   const [selectedMember, setSelectedMember] = useState(null);
 
@@ -1824,82 +1853,169 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
       return null;
     }
 
+    const referralCount = members.filter((item) => item.referredBy === member.id).length;
+    const referralPointsPerClient = Number(settings?.referralPointsPerReferral || 0);
+    const referralPoints = referralCount * referralPointsPerClient;
+
+    const cardStyle = {
+      background: 'linear-gradient(180deg,#ffffff 0%,#fbfdff 100%)',
+      border: '1px solid #e4edf3',
+      borderRadius: '22px',
+      padding: '20px',
+      boxShadow: '0 10px 28px rgba(15,23,42,.055)',
+      minWidth: 0,
+      transition: 'transform .22s ease, box-shadow .22s ease, border-color .22s ease',
+    };
+
     return <>
-      <div className="member-profile-header">
-        <button className="btn btn-secondary" onClick={() => setSelectedMember(null)}>← Back to members</button>
-        <div className="member-profile-main">
-          <div className="avatar large">{initials(member.name)}</div>
-          <div><div className="eyebrow">MEMBER PROFILE</div><h1>{member.name}</h1><p>{member.id} · {member.phone}</p></div>
-          <StatusBadge status={member.status} />
+      <style>{`
+        .member-profile-premium { max-width:1180px; margin:0 auto; animation:profileIn .35s ease both; }
+        .members-list-table th,.members-list-table td{font-size:14px}.members-list-table td{padding-top:14px;padding-bottom:14px}.members-list-table .contact-cell strong{font-size:14px}.members-list-table .member-cell strong{font-size:14px}.member-profile-premium .profile-hero { position:relative; overflow:hidden; padding:26px; border:1px solid #e4edf3; border-radius:24px; background:linear-gradient(135deg,#ffffff 0%,#f6fbff 100%); box-shadow:0 14px 36px rgba(15,23,42,.07); }
+        .member-profile-premium .profile-hero:after { content:""; position:absolute; width:230px; height:230px; right:-80px; top:-120px; border-radius:50%; background:rgba(20,184,166,.08); pointer-events:none; }
+        .member-profile-premium .profile-avatar { width:84px;height:84px;min-width:84px;border-radius:50%;overflow:hidden;display:grid;place-items:center;background:linear-gradient(145deg,#dff8f4,#dcecff);border:4px solid #fff;box-shadow:0 10px 26px rgba(15,118,110,.14);font-size:27px;font-weight:800;color:#12877f; }
+        .member-profile-premium .profile-name { margin:3px 0 5px !important;font-size:clamp(30px,3vw,43px) !important;line-height:1.04 !important;letter-spacing:-.045em;font-weight:800 !important;color:#0b1f3a; }
+        .member-profile-premium .profile-meta { margin:0;color:#738298;font-size:14px;font-weight:600; }
+        .member-profile-premium .profile-summary { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:22px; }
+        .member-profile-premium .summary-card { position:relative;overflow:hidden;padding:16px 17px;border:1px solid #e5edf2;border-radius:17px;background:rgba(255,255,255,.88);box-shadow:0 7px 22px rgba(15,23,42,.04);transition:transform .22s ease,box-shadow .22s ease; }
+        .member-profile-premium .summary-card:hover { transform:translateY(-4px);box-shadow:0 15px 30px rgba(15,23,42,.09); }
+        .member-profile-premium .summary-card span { display:block;color:#8290a3;font-size:11px;font-weight:750;text-transform:uppercase;letter-spacing:.08em;margin-bottom:7px; }
+        .member-profile-premium .summary-card strong { color:#10233f;font-size:17px;font-weight:800; }
+        .member-profile-premium .profile-cards { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin-top:18px; }
+        .member-profile-premium .profile-card:hover { transform:translateY(-4px);box-shadow:0 20px 42px rgba(15,23,42,.10);border-color:#d2e5ec; }
+        .member-profile-premium .detail-list { display:grid;gap:0; }
+        .member-profile-premium .detail-list > div { display:grid;grid-template-columns:minmax(125px,38%) minmax(0,1fr);align-items:center;gap:14px;padding:12px 0;border-bottom:1px solid #edf2f6; }
+        .member-profile-premium .detail-list > div:last-child { border-bottom:0; }
+        .member-profile-premium .detail-list span { color:#8794a6;font-size:12px;font-weight:650;letter-spacing:.02em; }
+        .member-profile-premium .documents-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px; }
+        .member-profile-premium .documents-grid .quick-action { min-height:52px; }
+        .member-profile-premium .detail-list strong { min-width:0;color:#172b46;font-size:14px;font-weight:750;line-height:1.45;overflow-wrap:anywhere;text-align:right; }
+        .member-profile-premium .profile-actions { display:grid;gap:9px; }
+        .member-profile-premium .profile-actions .quick-action { min-height:52px;border:1px solid #e7edf2;border-radius:14px;background:#fff;transition:all .2s ease; }
+        .member-profile-premium .profile-actions .quick-action:hover { transform:translateX(4px);border-color:#bfe7e2;background:#f7fffd;box-shadow:0 8px 18px rgba(15,118,110,.08); }
+        .member-profile-premium .member-notes { margin:0;color:#63748a;font-size:14px;line-height:1.75; }
+        .member-profile-premium .activity-highlight { display:grid;grid-template-columns:1fr 1fr;gap:12px; }
+        .member-profile-premium .activity-highlight > div { padding:14px;border-radius:15px;background:#f7fafc;border:1px solid #edf2f6; }
+        .member-profile-premium .activity-highlight span { display:block;color:#8996a7;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px; }
+        .member-profile-premium .activity-highlight strong { color:#152a46;font-size:20px;font-weight:800; }
+        @keyframes profileIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
+        @media(max-width:900px){.member-profile-premium .profile-summary{grid-template-columns:repeat(2,minmax(0,1fr));}.member-profile-premium .profile-cards{grid-template-columns:1fr;}}
+        @media(max-width:620px){.member-profile-premium .documents-grid{grid-template-columns:1fr}.member-profile-premium .profile-hero{padding:20px 18px}.member-profile-premium .profile-avatar{width:70px;height:70px;min-width:70px}.member-profile-premium .detail-list > div{grid-template-columns:1fr;gap:4px}.member-profile-premium .detail-list strong{text-align:left}.member-profile-premium .activity-highlight{grid-template-columns:1fr;}}
+      `}</style>
+
+      <div className="member-profile-premium">
+        <div style={{ marginBottom: '18px' }}>
+          <button className="btn btn-secondary" onClick={() => setSelectedMember(null)}>← Back to members</button>
         </div>
-      </div>
 
-      <div className="profile-stats">
-        <div className="profile-stat"><span>Membership</span><strong>{member.plan}</strong></div>
-        <div className="profile-stat"><span>Expires</span><strong>{formatDate(member.expiry)}</strong></div>
-        <div className="profile-stat"><span>Visits</span><strong>{member.visits}</strong></div>
-        <div className="profile-stat"><span>Outstanding</span><strong>₹{Number(member.due || 0).toLocaleString('en-IN')}</strong></div>
-      </div>
+        <div className="profile-hero">
+          <div style={{ display:'flex', alignItems:'center', gap:'18px', flexWrap:'wrap', position:'relative', zIndex:1 }}>
+            <div style={{ flex:'1 1 420px', minWidth:0, display:'flex', alignItems:'center', gap:'16px' }}>
+              <div className="profile-avatar">
+                {member.photo ? <img src={member.photo} alt={member.name} style={{ width:'100%',height:'100%',objectFit:'cover' }} /> : initials(member.name)}
+              </div>
+              <div style={{ minWidth:0 }}>
+                <div className="eyebrow" style={{ color:'#0f8f87',fontWeight:800,letterSpacing:'.15em' }}>MEMBER PROFILE</div>
+                <h1 className="profile-name">{member.name}</h1>
+                <p className="profile-meta">{member.id} · {member.phone}</p>
+              </div>
+            </div>
+            <div style={{ marginLeft:'auto' }}><StatusBadge status={member.status} /></div>
+          </div>
 
-      <div className="profile-grid">
-        <div className="panel">
-          <PanelHeader title="Member information" subtitle="Personal and contact details" icon={Users} />
-          <div className="detail-list">
-            <div><span>Full name</span><strong>{member.name}</strong></div>
-            <div><span>Phone</span><strong>{member.phone}</strong></div>
-            <div><span>Email</span><strong>{member.email || 'Not provided'}</strong></div>
-            <div><span>Date of birth</span><strong>{formatDate(member.dob)}</strong></div>
-            <div><span>Gender</span><strong>{member.gender || 'Not provided'}</strong></div>
-            <div><span>Emergency contact</span><strong>{member.emergencyContact || 'Not provided'}</strong></div>
-            <div><span>Address</span><strong>{member.address || 'Not provided'}</strong></div>
+          <div className="profile-summary">
+            {[
+              ['Membership', member.plan],
+              ['Expires', formatDate(member.expiry)],
+              ['Visits', member.visits],
+              ['Outstanding', `₹${Number(member.due || 0).toLocaleString('en-IN')}`],
+            ].map(([label, value]) => (
+              <div key={label} className="summary-card"><span>{label}</span><strong>{value}</strong></div>
+            ))}
           </div>
         </div>
 
-        <div className="panel">
-          <PanelHeader title="Membership & billing" subtitle="Current plan and payment information" icon={ShieldCheck} />
-          <div className="detail-list">
-            <div><span>Plan</span><strong>{member.plan}</strong></div>
-            <div><span>Start date</span><strong>{formatDate(member.start)}</strong></div>
-            <div><span>Expiry date</span><strong>{formatDate(member.expiry)}</strong></div>
-            <div><span>Total amount</span><strong>₹{Number(member.amount || 0).toLocaleString('en-IN')}</strong></div>
-            <div><span>Paid</span><strong>₹{Number(member.paid || 0).toLocaleString('en-IN')}</strong></div>
-            <div><span>Due</span><strong>₹{Number(member.due || 0).toLocaleString('en-IN')}</strong></div>
+        <div className="profile-cards">
+          <div className="profile-card" style={cardStyle}>
+            <PanelHeader title="Member information" subtitle="Personal and contact details" icon={Users} />
+            <div className="detail-list">
+              <div><span>Member ID</span><strong>{member.id}</strong></div>
+              <div><span>Full name</span><strong>{member.name}</strong></div>
+              <div><span>Phone</span><strong>{member.phone}</strong></div>
+              <div><span>Email</span><strong>{member.email || 'Not provided'}</strong></div>
+              <div><span>Birthday</span><strong>{formatDate(member.dob)}</strong></div>
+              <div><span>Diet preference</span><strong>{member.dietPreference || 'Not provided'}</strong></div>
+              <div><span>Gender</span><strong>{member.gender || 'Not provided'}</strong></div>
+              <div><span>Emergency contact</span><strong>{member.emergencyContact || 'Not provided'}</strong></div>
+              <div><span>Address</span><strong>{member.address || 'Not provided'}</strong></div>
+            </div>
           </div>
-        </div>
 
-        <div className="panel">
-          <PanelHeader title="Fitness profile" subtitle="Baseline information for future training modules" icon={Activity} />
-          <div className="detail-list">
-            <div><span>Height</span><strong>{member.height ? `${member.height} cm` : 'Not provided'}</strong></div>
-            <div><span>Weight</span><strong>{member.weight ? `${member.weight} kg` : 'Not provided'}</strong></div>
-            <div><span>Body fat</span><strong>{member.bodyFat ? `${member.bodyFat}%` : 'Not provided'}</strong></div>
-            <div><span>Trainer</span><strong>{member.trainer || 'Not assigned'}</strong></div>
-            <div><span>Referral source</span><strong>{member.referral || 'Not provided'}</strong></div>
+          <div className="profile-card" style={cardStyle}>
+            <PanelHeader title="Membership & billing" subtitle="Current plan and payment information" icon={ShieldCheck} />
+            <div className="detail-list">
+              <div><span>Plan</span><strong>{member.plan}</strong></div>
+              <div><span>Start date</span><strong>{formatDate(member.start)}</strong></div>
+              <div><span>Expiry date</span><strong>{formatDate(member.expiry)}</strong></div>
+              <div><span>Total amount</span><strong>₹{Number(member.amount || 0).toLocaleString('en-IN')}</strong></div>
+              <div><span>Paid</span><strong>₹{Number(member.paid || 0).toLocaleString('en-IN')}</strong></div>
+              <div><span>Due</span><strong>₹{Number(member.due || 0).toLocaleString('en-IN')}</strong></div>
+            </div>
           </div>
-        </div>
 
-        <div className="panel">
-          <PanelHeader title="Quick actions" subtitle="Common front-desk actions" icon={Sparkles} />
-          <div className="profile-actions">
-            <button className="quick-action" onClick={() => setModal({ type: 'editMember', member })}><span><Settings size={18} /></span><strong>Edit member</strong><ArrowUpRight size={15} /></button>
-            <button className="quick-action" onClick={() => markAttendance(member.name)}><span><CheckCircle2 size={18} /></span><strong>Mark attendance</strong><ArrowUpRight size={15} /></button>
-            <button className="quick-action" onClick={() => window.open(`https://wa.me/91${member.phone}`, '_blank')}><span><MessageCircle size={18} /></span><strong>WhatsApp member</strong><ArrowUpRight size={15} /></button>
-            <button className="quick-action" onClick={() => window.location.href = `mailto:${member.email || ''}`}><span><MessageCircle size={18} /></span><strong>Send email</strong><ArrowUpRight size={15} /></button>
+          <div className="profile-card" style={cardStyle}>
+            <PanelHeader title="Fitness profile" subtitle="Baseline information for training" icon={Activity} />
+            <div className="detail-list">
+              <div><span>Height</span><strong>{member.height ? `${member.height} cm` : 'Not provided'}</strong></div>
+              <div><span>Weight</span><strong>{member.weight ? `${member.weight} kg` : 'Not provided'}</strong></div>
+              <div><span>Body fat</span><strong>{member.bodyFat ? `${member.bodyFat}%` : 'Not provided'}</strong></div>
+              <div><span>Trainer</span><strong>{member.trainer || 'Not assigned'}</strong></div>
+              <div><span>Referral source</span><strong>{member.referral || 'Not provided'}</strong></div>
+            </div>
           </div>
-        </div>
 
-        <div className="panel profile-notes-panel">
-          <PanelHeader title="Notes" subtitle="Internal notes for staff" icon={ClipboardList} />
-          <p className="member-notes">{member.notes || 'No notes added for this member.'}</p>
-        </div>
-
-        <div className="panel">
-          <PanelHeader title="Member activity" subtitle="Current engagement snapshot" icon={Activity} />
-          <div className="activity-highlight">
-            <div><span>Total gym visits</span><strong>{member.visits}</strong></div>
-            <div><span>Outstanding</span><strong>₹{Number(member.due || 0).toLocaleString('en-IN')}</strong></div>
+          <div className="profile-card" style={cardStyle}>
+            <PanelHeader title="Referral & loyalty" subtitle="Member referral activity and points" icon={Users} />
+            <div className="detail-list">
+              <div><span>Referred clients</span><strong>{referralCount}</strong></div>
+              <div><span>Points per referral</span><strong>{referralPointsPerClient}</strong></div>
+              <div><span>Referral points</span><strong>{referralPoints}</strong></div>
+              <div><span>Referred by</span><strong>{members.find((item) => item.id === member.referredBy)?.name || 'Direct / Walk-in'}</strong></div>
+            </div>
           </div>
-          {member.visits < 8 && <div className="warning-box"><AlertCircle size={18} /><div><strong>Low attendance detected</strong><p>This member may need a follow-up to improve engagement.</p></div></div>}
+
+          <div className="profile-card" style={cardStyle}>
+            <PanelHeader title="Documents" subtitle="Print, save as PDF or share member documents" icon={FileDown} />
+            <div className="documents-grid">
+              <button className="quick-action" onClick={() => printMemberIdCard(member, settings)}><span><FileDown size={18} /></span><strong>ID card / PDF</strong><ArrowUpRight size={15} /></button>
+              <button className="quick-action" onClick={() => shareMemberWhatsApp(member)}><span><MessageCircle size={18} /></span><strong>Share ID on WhatsApp</strong><ArrowUpRight size={15} /></button>
+              <button className="quick-action" onClick={() => printMemberBill(member, settings)}><span><CreditCard size={18} /></span><strong>Bill / PDF</strong><ArrowUpRight size={15} /></button>
+              <button className="quick-action" onClick={() => shareBillWhatsApp(member, settings)}><span><MessageCircle size={18} /></span><strong>Share bill on WhatsApp</strong><ArrowUpRight size={15} /></button>
+            </div>
+          </div>
+
+          <div className="profile-card" style={cardStyle}>
+            <PanelHeader title="Quick actions" subtitle="Common front-desk actions" icon={Sparkles} />
+            <div className="profile-actions">
+              <button className="quick-action" onClick={() => setModal({ type:'editMember', member })}><span><Settings size={18} /></span><strong>Edit member</strong><ArrowUpRight size={15} /></button>
+              <button className="quick-action" onClick={() => markAttendance(member.name)}><span><CheckCircle2 size={18} /></span><strong>Mark attendance</strong><ArrowUpRight size={15} /></button>
+              <button className="quick-action" onClick={() => window.open(`https://wa.me/91${member.phone}`, '_blank')}><span><MessageCircle size={18} /></span><strong>WhatsApp member</strong><ArrowUpRight size={15} /></button>
+              <button className="quick-action" onClick={() => window.location.href = `mailto:${member.email || ''}`}><span><MessageCircle size={18} /></span><strong>Send email</strong><ArrowUpRight size={15} /></button>
+            </div>
+          </div>
+
+          <div className="profile-card" style={cardStyle}>
+            <PanelHeader title="Notes" subtitle="Internal notes for staff" icon={ClipboardList} />
+            <p className="member-notes">{member.notes || 'No notes added for this member.'}</p>
+          </div>
+
+          <div className="profile-card" style={cardStyle}>
+            <PanelHeader title="Member activity" subtitle="Current engagement snapshot" icon={Activity} />
+            <div className="activity-highlight">
+              <div><span>Total gym visits</span><strong>{member.visits}</strong></div>
+              <div><span>Outstanding</span><strong>₹{Number(member.due || 0).toLocaleString('en-IN')}</strong></div>
+            </div>
+            {member.visits < 8 && <div className="warning-box" style={{ marginTop:'14px' }}><AlertCircle size={18} /><div><strong>Low attendance detected</strong><p>This member may need a follow-up to improve engagement.</p></div></div>}
+          </div>
         </div>
       </div>
     </>;
@@ -1918,21 +2034,26 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
         <div className="search-box member-search"><Search size={16} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by name, phone, email or member ID..." /></div>
         <select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option>All</option><option>Active</option><option>Expiring</option><option>Expired</option></select>
       </div>
-      <div className="table-wrap"><table><thead><tr><th>Member</th><th>Contact</th><th>Membership</th><th>Expiry</th><th>Visits</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>
+      <div className="table-wrap"><table className="members-list-table"><thead><tr><th>Member</th><th>Contact</th><th>Membership</th><th>Expiry</th><th>Visits</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>
         {filtered.map((member) => <tr key={member.id}>
-          <td><button className="member-name-button" onClick={() => setSelectedMember(member.id)}><div className="member-cell"><div className="avatar soft">{initials(member.name)}</div><div><strong>{member.name}</strong><span>{member.id}</span></div></div></button></td>
+          <td><button className="member-name-button" onClick={() => setSelectedMember(member.id)}><div className="member-cell"><div className="avatar soft" style={{ overflow: 'hidden' }}>
+            {member.photo ? (
+              <img src={member.photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              initials(member.name)
+            )}
+          </div><div><strong>{member.name}</strong><span>{member.id}</span></div></div></button></td>
           <td><div className="contact-cell"><strong>{member.phone}</strong><span>{member.email || 'No email'}</span></div></td>
           <td>{member.plan}</td><td>{formatDate(member.expiry)}</td><td><span className="data-pill"><Activity size={13} />{member.visits}</span></td>
           <td>{Number(member.due || 0) > 0 ? <strong className="danger-text">₹{Number(member.due).toLocaleString('en-IN')}</strong> : <span className="paid-text">Paid</span>}</td>
           <td><StatusBadge status={member.status} /></td>
-          <td><div className="row-actions"><button className="table-action" onClick={() => setSelectedMember(member.id)}>View</button><button className="table-action" onClick={() => setModal({ type: 'editMember', member })}>Edit</button><button className="table-action danger-text" onClick={() => deleteMember(member.id)}>Delete</button></div></td>
+          <td><div className="row-actions"><button className="table-action" onClick={() => setSelectedMember(member.id)}>View</button><button className="table-action" onClick={() => setModal({ type:'editMember', member })}>Edit</button><button className="table-action danger-text" onClick={() => deleteMember(member.id)}>Delete</button></div></td>
         </tr>)}
         {!filtered.length && <tr><td colSpan="8"><EmptyState title="No members found" text="Try another search or add a new member." /></td></tr>}
       </tbody></table></div>
     </div>
   </>;
 }
-
 
 function AttendancePage({ attendance, members, markAttendance }) {
   const [selectedDate, setSelectedDate] = useState(today);
@@ -2914,7 +3035,13 @@ function TrainingPage({ plans, members, setModal, deleteWorkoutPlan }) {
               {members.filter((member) => plans.some((plan) => (plan.assignedMemberIds || []).includes(member.id))).map((member) => {
                 const plan = plans.find((item) => (item.assignedMemberIds || []).includes(member.id));
                 return <tr key={member.id}>
-                  <td><div className="member-cell"><div className="avatar soft">{initials(member.name)}</div><div><strong>{member.name}</strong><span>{member.id}</span></div></div></td>
+                  <td><div className="member-cell"><div className="avatar soft" style={{ overflow: 'hidden' }}>
+            {member.photo ? (
+              <img src={member.photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              initials(member.name)
+            )}
+          </div><div><strong>{member.name}</strong><span>{member.id}</span></div></div></td>
                   <td>{member.plan || '—'}</td><td>{plan?.name || '—'}</td><td>{plan?.level || '—'}</td><td>{plan?.durationWeeks || 1} weeks</td><td>{plan?.trainer || '—'}</td>
                 </tr>;
               })}
@@ -3636,9 +3763,15 @@ function PaymentsPage({ payments, overdue, setModal, deletePayment }) {
   </div>;
 }
 
-function MembershipsPage({ members, setModal }) {
+function MembershipsPage({ members, setModal, planPrices, setData, setToast }) {
   const [planFilter, setPlanFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
+  const [editingPrices, setEditingPrices] = useState(false);
+  const [draftPrices, setDraftPrices] = useState(planPrices);
+
+  useEffect(() => {
+    setDraftPrices(planPrices);
+  }, [planPrices]);
 
   const stats = useMemo(() => ({
     total: members.length,
@@ -3653,6 +3786,19 @@ function MembershipsPage({ members, setModal }) {
       (statusFilter === 'All' || status === statusFilter);
   });
 
+  const savePrices = () => {
+    const cleaned = {};
+    MEMBERSHIP_PLANS.forEach((plan) => {
+      cleaned[plan.name] = Math.max(0, Number(draftPrices[plan.name] || 0));
+    });
+    setData((current) => ({
+      ...current,
+      settings: { ...(current.settings || {}), membershipPrices: cleaned },
+    }));
+    setEditingPrices(false);
+    setToast('Membership plan prices updated');
+  };
+
   return <>
     <PageTitle title="Memberships" subtitle="Manage membership plans, renewals and expiry." />
 
@@ -3664,16 +3810,42 @@ function MembershipsPage({ members, setModal }) {
     </div>
 
     <section className="panel">
-      <PanelHeader title="Membership plans" subtitle="Available plans at Preface Fitness" icon={ShieldCheck} />
-      <div className="plan-grid">
-        {MEMBERSHIP_PLANS.map((plan) => <div className="plan-card" key={plan.name}>
-          <div className="plan-card-top">
-            <div><div className="eyebrow">MEMBERSHIP</div><h3>{plan.name}</h3></div>
-            <span className="plan-price">₹{plan.price.toLocaleString('en-IN')}</span>
+      <div className="panel-header">
+        <PanelHeader title="Membership plans" subtitle="Set the prices your gym currently charges" icon={ShieldCheck} />
+        {!editingPrices ? (
+          <button className="btn btn-secondary btn-sm" onClick={() => setEditingPrices(true)}><Settings size={15} /> Edit prices</button>
+        ) : (
+          <div style={{ display:'flex', gap:'8px' }}>
+            <button className="btn btn-secondary btn-sm" onClick={() => { setDraftPrices(planPrices); setEditingPrices(false); }}>Cancel</button>
+            <button className="btn btn-primary btn-sm" onClick={savePrices}><Save size={15} /> Save prices</button>
           </div>
-          <p>{plan.description}</p>
-          <div className="plan-duration">{plan.months === 1 ? '1 month' : `${plan.months} months`}</div>
-        </div>)}
+        )}
+      </div>
+
+      <div className="plan-grid">
+        {MEMBERSHIP_PLANS.map((plan) => (
+          <div className="plan-card" key={plan.name}>
+            <div className="plan-card-top">
+              <div><div className="eyebrow">MEMBERSHIP</div><h3>{plan.name}</h3></div>
+              {!editingPrices ? (
+                <span className="plan-price">₹{Number(planPrices[plan.name] || 0).toLocaleString('en-IN')}</span>
+              ) : (
+                <div style={{ position:'relative', width:'110px' }}>
+                  <span style={{ position:'absolute', left:'10px', top:'9px', color:'#7b8797', fontWeight:700 }}>₹</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={draftPrices[plan.name] ?? ''}
+                    onChange={(e) => setDraftPrices((current) => ({ ...current, [plan.name]: e.target.value }))}
+                    style={{ width:'100%', padding:'8px 8px 8px 24px', border:'1px solid #dce5eb', borderRadius:'10px', fontWeight:800 }}
+                  />
+                </div>
+              )}
+            </div>
+            <p>{plan.description}</p>
+            <div className="plan-duration">{plan.months === 1 ? '1 month' : `${plan.months} months`}</div>
+          </div>
+        ))}
       </div>
     </section>
 
@@ -3701,14 +3873,20 @@ function MembershipsPage({ members, setModal }) {
               const days = getDaysRemaining(member.expiry);
               const status = getMembershipStatus(member.expiry);
               return <tr key={member.id}>
-                <td><div className="member-cell"><div className="avatar soft">{initials(member.name)}</div><div><strong>{member.name}</strong><span>{member.id}</span></div></div></td>
+                <td><div className="member-cell"><div className="avatar soft" style={{ overflow: 'hidden' }}>
+            {member.photo ? (
+              <img src={member.photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              initials(member.name)
+            )}
+          </div><div><strong>{member.name}</strong><span>{member.id}</span></div></div></td>
                 <td>{member.plan || '—'}</td>
                 <td>{formatDate(member.start)}</td>
                 <td>{formatDate(member.expiry)}</td>
                 <td>{days < 0 ? `${Math.abs(days)} days overdue` : `${days} days`}</td>
                 <td>{Number(member.due || 0) > 0 ? <strong className="danger-text">₹{Number(member.due).toLocaleString('en-IN')}</strong> : <span className="paid-text">Paid</span>}</td>
                 <td><StatusBadge status={status} /></td>
-                <td><button className="btn btn-secondary btn-sm" onClick={() => setModal({ type: 'renewMembership', member })}>Renew</button></td>
+                <td><button className="btn btn-secondary btn-sm" onClick={() => setModal({ type:'renewMembership', member })}>Renew</button></td>
               </tr>;
             })}
             {!filteredMembers.length && <tr><td colSpan="8"><EmptyState title="No memberships found" text="Try changing the filters." /></td></tr>}
@@ -3719,11 +3897,11 @@ function MembershipsPage({ members, setModal }) {
   </>;
 }
 
-function RenewalModal({ member, onClose, onRenew }) {
+function RenewalModal({ member, onClose, onRenew, planPrices }) {
   const defaultPlan = MEMBERSHIP_PLANS.some((p) => p.name === member.plan) ? member.plan : 'Monthly';
   const [form, setForm] = useState({
     plan: defaultPlan,
-    amount: Number(member.amount || MEMBERSHIP_PLANS.find((p) => p.name === defaultPlan)?.price || 0),
+    amount: Number(member.amount || planPrices[defaultPlan] || 0),
     paid: 0,
   });
 
@@ -3734,8 +3912,8 @@ function RenewalModal({ member, onClose, onRenew }) {
   const newDue = Math.max(0, Number(form.amount || 0) - Number(form.paid || 0));
 
   const handlePlanChange = (planName) => {
-    const plan = MEMBERSHIP_PLANS.find((item) => item.name === planName);
-    setForm((current) => ({ ...current, plan: planName, amount: plan?.price || 0 }));
+    const price = Number(planPrices[planName] || 0);
+    setForm((current) => ({ ...current, plan: planName, amount: price }));
   };
 
   return <Modal title={`Renew membership — ${member.name}`} onClose={onClose} wide>
@@ -3748,8 +3926,8 @@ function RenewalModal({ member, onClose, onRenew }) {
     <div className="form-section-title">Renewal details</div>
     <div className="form-grid three">
       <FormField label="Renewal plan"><select value={form.plan} onChange={(e) => handlePlanChange(e.target.value)}>{MEMBERSHIP_PLANS.map((plan) => <option key={plan.name} value={plan.name}>{plan.name}</option>)}</select></FormField>
-      <FormField label="Membership amount"><input type="number" min="0" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></FormField>
-      <FormField label="Amount paid"><input type="number" min="0" value={form.paid} onChange={(e) => setForm({ ...form, paid: e.target.value })} /></FormField>
+      <FormField label="Membership amount"><input type="number" min="0" value={form.amount} onChange={(e) => setForm({ ...form, amount:e.target.value })} /></FormField>
+      <FormField label="Amount paid"><input type="number" min="0" value={form.paid} onChange={(e) => setForm({ ...form, paid:e.target.value })} /></FormField>
     </div>
 
     <div className="renewal-preview">
@@ -3758,7 +3936,7 @@ function RenewalModal({ member, onClose, onRenew }) {
       <div><span>New amount due</span><strong>₹{newDue.toLocaleString('en-IN')}</strong></div>
     </div>
 
-    <ModalActions onClose={onClose} disabled={!form.plan} onSave={() => onRenew({ ...form, amount: Number(form.amount || 0), paid: Number(form.paid || 0) })} saveLabel="Renew membership" />
+    <ModalActions onClose={onClose} disabled={!form.plan} onSave={() => onRenew({ ...form, amount:Number(form.amount || 0), paid:Number(form.paid || 0) })} saveLabel="Renew membership" />
   </Modal>;
 }
 
@@ -3771,16 +3949,119 @@ function StatusBadge({ status }) { return <span className={`status ${status.toLo
 function EmptyState({ title, text }) { return <div className="empty-state"><CheckCircle2 size={24} /><strong>{title}</strong><span>{text}</span></div>; }
 function initials(name) { return name.split(' ').map((x) => x[0]).slice(0, 2).join('').toUpperCase(); }
 function formatDate(date) { if (!date) return '—'; const [y, m, d] = date.split('-'); return `${d}/${m}/${y}`; }
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
 
-function MemberModal({ onClose, onSave, member }) {
+function calculateAge(dob) {
+  if (!dob) return '—';
+  const birth = new Date(`${dob}T00:00:00`);
+  const now = new Date();
+  let age = now.getFullYear() - birth.getFullYear();
+  const month = now.getMonth() - birth.getMonth();
+  if (month < 0 || (month === 0 && now.getDate() < birth.getDate())) age -= 1;
+  return `${age} yrs`;
+}
+
+function nextSystemMemberId(members) {
+  const maxNumber = (members || []).reduce((max, member) => {
+    const match = String(member.id || '').match(/^PF-(\d+)$/i);
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 1000);
+  return `PF-${maxNumber + 1}`;
+}
+
+function openPrintWindow(title, html) {
+  const printWindow = window.open('', '_blank', 'width=900,height=800');
+  if (!printWindow) return false;
+  printWindow.document.open();
+  printWindow.document.write(`<!doctype html><html><head><title>${escapeHtml(title)}</title><meta charset="utf-8"><style>body{margin:0;background:#fff;font-family:Arial,Helvetica,sans-serif;color:#152238}*{box-sizing:border-box}@media print{.no-print{display:none!important}}</style></head><body>${html}<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),350));</script></body></html>`);
+  printWindow.document.close();
+  return true;
+}
+
+function printMemberIdCard(member, settings) {
+  const gymName = settings?.gymName || 'Preface Fitness';
+  const qrData = encodeURIComponent(`Preface Fitness | Member ID: ${member.id} | Name: ${member.name}`);
+  const html = `
+    <div style="width:760px;max-width:100%;margin:30px auto;padding:18px;background:#fff">
+      <div style="width:620px;max-width:100%;margin:auto;border:2px solid #171717;border-radius:22px;overflow:hidden;background:#fff;box-shadow:0 10px 30px rgba(0,0,0,.10)">
+        <div style="height:88px;background:#111;color:#fff;display:flex;align-items:center;padding:14px 20px;gap:14px">
+          <img src="${LOGO_URL}" style="width:58px;height:58px;object-fit:contain;background:#fff;border-radius:7px;padding:3px" />
+          <div style="font-size:25px;font-weight:800;letter-spacing:.02em">${escapeHtml(gymName)}</div>
+        </div>
+        <div style="text-align:center;padding:12px;border-bottom:1px solid #ddd;font-size:18px;font-weight:800;letter-spacing:.14em">MEMBER ID CARD</div>
+        <div style="display:flex;gap:24px;padding:22px">
+          <div style="width:150px;height:175px;border:1px solid #ddd;border-radius:10px;overflow:hidden;background:#f5f7f9;flex:0 0 auto;display:grid;place-items:center">
+            ${member.photo ? `<img src="${member.photo}" style="width:100%;height:100%;object-fit:cover" />` : `<div style="font-size:42px;font-weight:800;color:#159a91">${escapeHtml(initials(member.name))}</div>`}
+          </div>
+          <div style="display:grid;grid-template-columns:120px 1fr;gap:10px 16px;align-content:start;font-size:17px;line-height:1.2">
+            <span>Name</span><strong>${escapeHtml(member.name)}</strong>
+            <span>Member ID</span><strong>${escapeHtml(member.id)}</strong>
+            <span>Age</span><strong>${escapeHtml(calculateAge(member.dob))}</strong>
+            <span>Birthday</span><strong>${escapeHtml(formatDate(member.dob))}</strong>
+            <span>Contact</span><strong>${escapeHtml(member.phone)}</strong>
+            <span>Plan</span><strong>${escapeHtml(member.plan)}</strong>
+            <span>Diet</span><strong>${escapeHtml(member.dietPreference || 'Not provided')}</strong>
+          </div>
+        </div>
+        <div style="border-top:1px solid #ddd;padding:18px 22px;display:flex;align-items:center;gap:20px">
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${qrData}" style="width:115px;height:115px" alt="QR" />
+          <div><strong style="font-size:16px">Member verification</strong><div style="color:#526274;margin-top:6px">Scan to view the member ID information.</div><div style="font-size:12px;color:#8491a0;margin-top:8px">ID: ${escapeHtml(member.id)}</div></div>
+        </div>
+        <div style="text-align:center;border-top:1px solid #ddd;background:#f7f7f7;padding:9px;font-size:13px">© ${escapeHtml(gymName)}</div>
+      </div>
+    </div>`;
+  return openPrintWindow(`${gymName} - Member ID Card`, html);
+}
+
+function shareMemberWhatsApp(member) {
+  const text = `Preface Fitness Member ID Card%0A%0AName: ${encodeURIComponent(member.name)}%0AMember ID: ${encodeURIComponent(member.id)}%0APlan: ${encodeURIComponent(member.plan || '')}%0ABirthday: ${encodeURIComponent(formatDate(member.dob))}%0AContact: ${encodeURIComponent(member.phone || '')}`;
+  const phone = String(member.phone || '').replace(/\D/g, '');
+  const target = phone.length === 10 ? `91${phone}` : phone;
+  window.open(`https://wa.me/${target}?text=${text}`, '_blank');
+}
+
+function printMemberBill(member, settings) {
+  const gymName = settings?.gymName || 'Preface Fitness';
+  const prefix = settings?.invoicePrefix || 'PF-INV';
+  const invoice = `${prefix}-${String(member.id || '').replace(/[^a-zA-Z0-9-]/g,'')}-${today.replaceAll('-','')}`;
+  const html = `
+    <div style="width:820px;max-width:100%;margin:24px auto;border:1px solid #dbe3ea;border-radius:14px;overflow:hidden">
+      <div style="padding:24px;background:#10233f;color:#fff;display:flex;justify-content:space-between;gap:20px"><div><div style="font-size:25px;font-weight:800">${escapeHtml(gymName)}</div><div style="margin-top:7px;opacity:.85">${escapeHtml(settings?.gymAddress || '')}</div><div style="margin-top:4px;opacity:.85">${escapeHtml(settings?.gymPhone || '')} ${settings?.gymEmail ? ' · '+escapeHtml(settings.gymEmail) : ''}</div></div><div style="text-align:right"><div style="font-size:24px;font-weight:800">INVOICE</div><div style="margin-top:8px">${escapeHtml(invoice)}</div><div>${escapeHtml(formatDate(today))}</div></div></div>
+      <div style="padding:22px"><div style="font-size:13px;color:#7b899a;text-transform:uppercase;letter-spacing:.08em;font-weight:700">Bill to</div><div style="font-size:20px;font-weight:800;margin-top:5px">${escapeHtml(member.name)}</div><div style="color:#536477;margin-top:4px">Member ID: ${escapeHtml(member.id)} · ${escapeHtml(member.phone)}</div>
+      <table style="width:100%;border-collapse:collapse;margin-top:24px"><thead><tr><th style="text-align:left;padding:11px;border-bottom:2px solid #dfe6ec">Description</th><th style="text-align:left;padding:11px;border-bottom:2px solid #dfe6ec">Period</th><th style="text-align:right;padding:11px;border-bottom:2px solid #dfe6ec">Amount</th></tr></thead><tbody><tr><td style="padding:14px 11px;border-bottom:1px solid #e7edf2">${escapeHtml(member.plan)} Membership</td><td style="padding:14px 11px;border-bottom:1px solid #e7edf2">${escapeHtml(formatDate(member.start))} – ${escapeHtml(formatDate(member.expiry))}</td><td style="padding:14px 11px;border-bottom:1px solid #e7edf2;text-align:right">₹${Number(member.amount||0).toLocaleString('en-IN')}</td></tr></tbody></table>
+      <div style="width:330px;margin:20px 0 0 auto"><div style="display:flex;justify-content:space-between;padding:7px 0"><span>Total</span><strong>₹${Number(member.amount||0).toLocaleString('en-IN')}</strong></div><div style="display:flex;justify-content:space-between;padding:7px 0"><span>Paid</span><strong>₹${Number(member.paid||0).toLocaleString('en-IN')}</strong></div><div style="display:flex;justify-content:space-between;padding:10px 0;border-top:2px solid #10233f;font-size:18px"><span>Balance due</span><strong>₹${Number(member.due||0).toLocaleString('en-IN')}</strong></div></div>
+      ${settings?.gstin ? `<div style="margin-top:24px;color:#66768a;font-size:12px">GSTIN: ${escapeHtml(settings.gstin)}</div>` : ''}</div>
+      <div style="padding:14px 22px;background:#f7fafc;color:#657589;font-size:12px">Thank you for choosing ${escapeHtml(gymName)}.</div>
+    </div>`;
+  return openPrintWindow(`${gymName} - Bill ${invoice}`, html);
+}
+
+function shareBillWhatsApp(member, settings) {
+  const gymName = settings?.gymName || 'Preface Fitness';
+  const text = `Bill from ${gymName}%0A%0AMember: ${encodeURIComponent(member.name)}%0AMember ID: ${encodeURIComponent(member.id)}%0APlan: ${encodeURIComponent(member.plan || '')}%0ATotal: ₹${Number(member.amount||0).toLocaleString('en-IN')}%0APaid: ₹${Number(member.paid||0).toLocaleString('en-IN')}%0ABalance due: ₹${Number(member.due||0).toLocaleString('en-IN')}`;
+  const phone = String(member.phone || '').replace(/\D/g, '');
+  const target = phone.length === 10 ? `91${phone}` : phone;
+  window.open(`https://wa.me/${target}?text=${text}`, '_blank');
+}
+
+
+function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = [], members = [] }) {
   const [form, setForm] = useState(() => member ? {
     ...member,
+    id: member.id || '',
     due: member.due ?? 0,
     amount: member.amount ?? 0,
     paid: member.paid ?? 0,
   } : {
-    name: '', phone: '', email: '', dob: '', gender: 'Prefer not to say', address: '',
-    emergencyContact: '', plan: 'Monthly', start: today, expiry: '', amount: 0, paid: 0,
+    id: '', name: '', phone: '', email: '', dob: '', gender: 'Prefer not to say', address: '',
+    emergencyContact: '', dietPreference: 'Veg', referredBy: '', plan: 'Monthly', start: today, expiry: '', amount: Number(planPrices?.Monthly || 0), paid: 0,
     due: 0, height: '', weight: '', bodyFat: '', trainer: '', referral: 'Walk-in', notes: '',
   });
 
@@ -3792,26 +4073,119 @@ function MemberModal({ onClose, onSave, member }) {
     });
   };
 
-  const submit = () => onSave({ ...form, amount: Number(form.amount || 0), paid: Number(form.paid || 0), due: Number(form.due || 0) });
-  const valid = form.name.trim() && /^[0-9]{10}$/.test(form.phone.replace(/\D/g, '')) && form.expiry;
+  const handlePhotoChange = (file) => {
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setForm((current) => ({ ...current, photo: reader.result }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const normalizedId = String(form.id || '').trim().toLowerCase();
+  const duplicateId = normalizedId && existingMemberIds.some((id) => String(id).toLowerCase() === normalizedId && (!member || String(member.id).toLowerCase() !== normalizedId));
+  const submit = () => onSave({ ...form, id: String(form.id || '').trim(), amount: Number(form.amount || 0), paid: Number(form.paid || 0), due: Number(form.due || 0) });
+  const valid = form.name.trim() && /^[0-9]{10}$/.test(form.phone.replace(/\D/g, '')) && form.expiry && !duplicateId;
 
   return <Modal title={member ? 'Edit member' : 'Add member'} onClose={onClose} wide>
     <div className="form-section-title">Personal details</div>
+
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '16px',
+        marginBottom: '18px',
+        padding: '14px',
+        border: '1px solid #e7edf2',
+        borderRadius: '14px',
+        background: '#fbfcfd',
+      }}
+    >
+      <div
+        style={{
+          width: '68px',
+          height: '68px',
+          minWidth: '68px',
+          borderRadius: '50%',
+          overflow: 'hidden',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: '#dff6f3',
+          color: '#168f8a',
+          fontSize: '22px',
+          fontWeight: 800,
+          border: '3px solid #ffffff',
+          boxShadow: '0 3px 12px rgba(20, 50, 70, 0.10)',
+        }}
+      >
+        {form.photo ? (
+          <img
+            src={form.photo}
+            alt="Member preview"
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          />
+        ) : (
+          initials(form.name || 'Member')
+        )}
+      </div>
+
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontWeight: 700, color: '#243447', marginBottom: '4px' }}>
+          Member photo
+        </div>
+        <div style={{ fontSize: '12px', color: '#718096', marginBottom: '8px' }}>
+          Add a profile photo for this member.
+        </div>
+        <label
+          className="btn btn-secondary btn-sm"
+          style={{ cursor: 'pointer', display: 'inline-flex' }}
+        >
+          {form.photo ? 'Change photo' : 'Choose photo'}
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => handlePhotoChange(e.target.files?.[0])}
+            style={{ display: 'none' }}
+          />
+        </label>
+        {form.photo && (
+          <button
+            type="button"
+            className="link-btn"
+            style={{ marginLeft: '10px' }}
+            onClick={() => update('photo', '')}
+          >
+            Remove
+          </button>
+        )}
+      </div>
+    </div>
+
     <div className="form-grid three">
+      <FormField label="Member ID"><input value={form.id} readOnly={!!member} onChange={(e) => update('id', e.target.value)} placeholder="Leave blank for auto ID" /></FormField>
       <FormField label="Full name"><input autoFocus value={form.name} onChange={(e) => update('name', e.target.value)} placeholder="Rahul Sharma" /></FormField>
       <FormField label="Phone"><input value={form.phone} onChange={(e) => update('phone', e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="9876543210" inputMode="numeric" /></FormField>
       <FormField label="Email"><input type="email" value={form.email} onChange={(e) => update('email', e.target.value)} placeholder="name@email.com" /></FormField>
     </div>
     <div className="form-grid three">
-      <FormField label="Date of birth"><input type="date" value={form.dob} onChange={(e) => update('dob', e.target.value)} /></FormField>
+      <FormField label="Date of birth / Birthday"><input type="date" value={form.dob} onChange={(e) => update('dob', e.target.value)} /></FormField>
       <FormField label="Gender"><select value={form.gender} onChange={(e) => update('gender', e.target.value)}><option>Male</option><option>Female</option><option>Other</option><option>Prefer not to say</option></select></FormField>
       <FormField label="Emergency contact"><input value={form.emergencyContact} onChange={(e) => update('emergencyContact', e.target.value)} placeholder="Name / phone" /></FormField>
+    </div>
+    <div className="form-grid two">
+      <FormField label="Diet preference"><select value={form.dietPreference || ''} onChange={(e) => update('dietPreference', e.target.value)}><option value="">Not specified</option><option>Veg</option><option>Eggetarian</option><option>Non-veg</option></select></FormField>
+      <FormField label="Referred by member"><select value={form.referredBy || ''} onChange={(e) => { const value = e.target.value; update('referredBy', value); if (value) update('referral', 'Referral'); }}><option value="">None / Walk-in</option>{members.filter((item) => !member || item.id !== member.id).map((item) => <option key={item.id} value={item.id}>{item.name} · {item.id}</option>)}</select></FormField>
     </div>
     <FormField label="Address"><textarea rows="2" value={form.address} onChange={(e) => update('address', e.target.value)} placeholder="Member address" /></FormField>
 
     <div className="form-section-title">Membership & billing</div>
     <div className="form-grid three">
-      <FormField label="Plan"><select value={form.plan} onChange={(e) => update('plan', e.target.value)}><option>Monthly</option><option>Quarterly</option><option>Half-yearly</option><option>Annual</option><option>Custom</option></select></FormField>
+      <FormField label="Plan"><select value={form.plan} onChange={(e) => { const plan = e.target.value; update('plan', plan); if (plan !== 'Custom') update('amount', planPrices?.[plan] || 0); }}><option>Monthly</option><option>Quarterly</option><option>Half-yearly</option><option>Annual</option><option>Custom</option></select></FormField>
       <FormField label="Start date"><input type="date" value={form.start} onChange={(e) => update('start', e.target.value)} /></FormField>
       <FormField label="Expiry date"><input type="date" value={form.expiry} onChange={(e) => update('expiry', e.target.value)} /></FormField>
     </div>
@@ -3833,7 +4207,7 @@ function MemberModal({ onClose, onSave, member }) {
       <FormField label="Internal notes"><textarea rows="2" value={form.notes} onChange={(e) => update('notes', e.target.value)} placeholder="Anything staff should know..." /></FormField>
     </div>
 
-    {!valid && <div className="form-hint">Enter a name, a valid 10-digit phone number and an expiry date to continue.</div>}
+    {!valid && <div className="form-hint">Enter a name, a valid 10-digit phone number and an expiry date to continue.{duplicateId ? ' This Member ID is already in use.' : ''}</div>}
     <ModalActions onClose={onClose} disabled={!valid} onSave={submit} saveLabel={member ? 'Save changes' : 'Add member'} />
   </Modal>;
 }
@@ -3850,8 +4224,33 @@ function PaymentModal({ members, onClose, onSave }) {
   </Modal>; 
 }
 
-function Modal({ title, onClose, children, wide }) { 
-  return <div className="modal-backdrop" onMouseDown={onClose}><div className={`modal ${wide ? 'modal-wide' : ''}`.trim()} onMouseDown={(e) => e.stopPropagation()}><div className="modal-header"><div><div className="eyebrow">PREFACE FITNESS</div><h2>{title}</h2></div><button className="icon-btn" onClick={onClose}><X size={19} /></button></div>{children}</div></div>; 
+function Modal({ title, onClose, children, wide }) {
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <div
+        className={`modal ${wide ? 'modal-wide' : ''}`.trim()}
+        onMouseDown={(e) => e.stopPropagation()}
+        style={{
+          maxHeight: 'calc(100vh - 32px)',
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          WebkitOverflowScrolling: 'touch',
+          overscrollBehavior: 'contain',
+        }}
+      >
+        <div className="modal-header">
+          <div>
+            <div className="eyebrow">PREFACE FITNESS</div>
+            <h2>{title}</h2>
+          </div>
+          <button className="icon-btn" onClick={onClose}>
+            <X size={19} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
 }
 
 function FormField({ label, children }) { 
@@ -3860,6 +4259,510 @@ function FormField({ label, children }) {
 
 function ModalActions({ onClose, onSave, disabled, saveLabel }) { 
   return <div className="modal-actions"><button className="btn btn-secondary" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={disabled} onClick={onSave}><CheckCircle2 size={17} /> {saveLabel}</button></div>; 
+}
+
+
+function PerformancePage({ data }) {
+  const [search, setSearch] = useState('');
+  const [department, setDepartment] = useState('All departments');
+  const [tier, setTier] = useState('All tiers');
+
+  const members = data.members || [];
+  const payments = data.payments || [];
+  const leads = data.leads || [];
+  const attendance = data.attendance || [];
+  const ptSessions = data.ptSessions || [];
+  const communicationLogs = data.communicationLogs || [];
+  const planPrices = {
+    ...DEFAULT_MEMBERSHIP_PRICES,
+    ...(data.settings?.membershipPrices || {}),
+  };
+
+  const active = members.filter((m) => getMembershipStatus(m.expiry) === 'Active');
+  const activePaying = active.filter((m) => Number(m.due || 0) <= 0);
+  const expired = members.filter((m) => getMembershipStatus(m.expiry) === 'Expired');
+  const totalRevenue = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const outstanding = members.reduce((sum, m) => sum + Number(m.due || 0), 0);
+
+  const monthlyRecurringRevenue = active.reduce((sum, member) => {
+    const price = Number(member.amount || planPrices[member.plan] || 0);
+    const months = MEMBERSHIP_PLANS.find((p) => p.name === member.plan)?.months || 1;
+    return sum + (price / months);
+  }, 0);
+
+  const revenuePerActive = active.length ? totalRevenue / active.length : 0;
+
+  const newMembers30 = members.filter((m) => {
+    const start = new Date(`${m.start || ''}T00:00:00`);
+    const current = new Date(`${today}T00:00:00`);
+    const days = Math.round((current - start) / 86400000);
+    return Number.isFinite(days) && days >= 0 && days <= 30;
+  }).length;
+
+  const previousBase = Math.max(1, members.length - newMembers30);
+  const churnRate = members.length ? (expired.length / members.length) * 100 : 0;
+  const netGrowthRate = ((newMembers30 - expired.length) / previousBase) * 100;
+
+  const averageTenure = active.length
+    ? active.reduce((sum, member) => {
+        const start = new Date(`${member.start || today}T00:00:00`);
+        const current = new Date(`${today}T00:00:00`);
+        return sum + Math.max(0, (current - start) / 86400000 / 30.44);
+      }, 0) / active.length
+    : 0;
+
+  const dormant = active.filter((m) => Number(m.visits || 0) < 4).length;
+  const dormantRate = active.length ? (dormant / active.length) * 100 : 0;
+
+  const qualifiedLeads = leads.filter((l) =>
+    ['Contacted', 'Trial Booked', 'Converted', 'Qualified'].includes(l.stage)
+  ).length;
+
+  const referredNewMembers = members.filter((m) =>
+    ['Referral', 'Referred'].includes(m.referral)
+  ).length;
+  const referralShare = members.length
+    ? (referredNewMembers / members.length) * 100
+    : 0;
+
+  const uniqueVisitors = new Set(
+    attendance.map((a) => a.memberId || a.member)
+  ).size;
+
+  const visitsPerActive = active.length ? attendance.length / active.length : 0;
+
+  const completedPT = ptSessions.filter((s) => s.status === 'Completed').length;
+
+  const collectionRate =
+    totalRevenue + outstanding > 0
+      ? (totalRevenue / (totalRevenue + outstanding)) * 100
+      : 0;
+
+  const averageDailyRevenue = totalRevenue / 30;
+  const dso = averageDailyRevenue > 0 ? outstanding / averageDailyRevenue : 0;
+
+  const membershipRevenue = payments
+    .filter((p) => p.type === 'Membership')
+    .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+  const ptRevenue = payments
+    .filter((p) => p.type === 'PT')
+    .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+  const todayRevenue = payments
+    .filter((p) => p.date === today)
+    .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+  const allKpis = [
+    {
+      section: 'Executive & Ownership',
+      icon: CircleDollarSign,
+      items: [
+        { label: 'Total Revenue', value: `₹${Math.round(totalRevenue).toLocaleString('en-IN')}`, description: 'Total recorded payment revenue in the current browser database.', tier: 'Must-have', status: 'LIVE' },
+        { label: 'Monthly Recurring Revenue (MRR)', value: `₹${Math.round(monthlyRecurringRevenue).toLocaleString('en-IN')}`, description: 'Current active membership value normalized to a monthly run rate.', tier: 'Advanced', status: 'ESTIMATE' },
+        { label: 'Revenue per Active Member', value: `₹${Math.round(revenuePerActive).toLocaleString('en-IN')}`, description: 'Total recorded revenue divided by currently active members.', tier: 'Advanced', status: 'LIVE' },
+        { label: 'Today Revenue', value: `₹${Math.round(todayRevenue).toLocaleString('en-IN')}`, description: 'Payments recorded with today’s date.', tier: 'Must-have', status: 'LIVE' },
+      ],
+    },
+    {
+      section: 'Membership Lifecycle & Retention',
+      icon: Users,
+      items: [
+        { label: 'Active Paying Members', value: activePaying.length.toLocaleString('en-IN'), description: 'Active members with no outstanding membership balance.', tier: 'Must-have', status: 'LIVE' },
+        { label: 'Active Members', value: active.length.toLocaleString('en-IN'), description: 'Members whose membership is currently active.', tier: 'Must-have', status: 'LIVE' },
+        { label: 'Expired Members', value: expired.length.toLocaleString('en-IN'), description: 'Members whose recorded membership expiry date has passed.', tier: 'Must-have', status: 'LIVE' },
+        { label: 'Average Membership Tenure', value: `${averageTenure.toFixed(1)} mo`, description: 'Average elapsed membership duration for active members.', tier: 'Advanced', status: 'LIVE' },
+        { label: 'Dormant Member Rate', value: `${dormantRate.toFixed(0)}%`, description: 'Active members with fewer than four recorded visits.', tier: 'Advanced', status: 'ESTIMATE' },
+      ],
+    },
+    {
+      section: 'Sales & CRM',
+      icon: Target,
+      items: [
+        { label: 'New Leads', value: leads.length.toLocaleString('en-IN'), description: 'Total leads currently stored in the CRM.', tier: 'Must-have', status: 'LIVE' },
+        { label: 'Qualified / Progressed Leads', value: qualifiedLeads.toLocaleString('en-IN'), description: 'Leads currently in Contacted, Trial Booked, Converted or Qualified stages.', tier: 'Must-have', status: 'LIVE' },
+      ],
+    },
+    {
+      section: 'Marketing & Growth',
+      icon: TrendingUp,
+      items: [
+        { label: 'Referral Share of Members', value: `${referralShare.toFixed(0)}%`, description: 'Members whose referral source is recorded as Referral or Referred.', tier: 'Advanced', status: 'LIVE' },
+      ],
+    },
+    {
+      section: 'Front Desk, Attendance & Access',
+      icon: CheckCircle2,
+      items: [
+        { label: 'Total Check-Ins', value: attendance.length.toLocaleString('en-IN'), description: 'All attendance check-ins currently recorded.', tier: 'Must-have', status: 'LIVE' },
+        { label: 'Unique Visitors', value: uniqueVisitors.toLocaleString('en-IN'), description: 'Distinct members appearing in the attendance records.', tier: 'Must-have', status: 'LIVE' },
+        { label: 'Visits per Active Member', value: visitsPerActive.toFixed(1), description: 'Recorded attendance visits divided by active members.', tier: 'Must-have', status: 'LIVE' },
+      ],
+    },
+    {
+      section: 'Personal Training & Coaching',
+      icon: Dumbbell,
+      items: [
+        { label: 'PT Sessions Completed', value: completedPT.toLocaleString('en-IN'), description: 'Personal training sessions currently marked Completed.', tier: 'Must-have', status: 'LIVE' },
+        { label: 'PT Revenue', value: `₹${Math.round(ptRevenue).toLocaleString('en-IN')}`, description: 'Recorded payment transactions marked as PT.', tier: 'Advanced', status: 'LIVE' },
+      ],
+    },
+    {
+      section: 'Finance & Collections',
+      icon: CreditCard,
+      items: [
+        { label: 'Membership Revenue', value: `₹${Math.round(membershipRevenue).toLocaleString('en-IN')}`, description: 'Recorded payment transactions marked as Membership.', tier: 'Must-have', status: 'LIVE' },
+        { label: 'Outstanding Amount', value: `₹${Math.round(outstanding).toLocaleString('en-IN')}`, description: 'Outstanding balance currently recorded against members.', tier: 'Must-have', status: 'LIVE' },
+        { label: 'Collection Rate', value: `${collectionRate.toFixed(1)}%`, description: 'Recorded collections divided by recorded collections plus outstanding dues.', tier: 'Advanced', status: 'ESTIMATE' },
+      ],
+    },
+  ];
+
+  const departments = ['All departments', ...allKpis.map((group) => group.section)];
+  const tiers = ['All tiers', 'Must-have', 'Advanced', 'Estimate', 'Strategic'];
+
+  const filteredGroups = allKpis
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => {
+        const matchesDepartment =
+          department === 'All departments' || group.section === department;
+        const q = search.trim().toLowerCase();
+        const matchesSearch =
+          !q ||
+          `${group.section} ${item.label} ${item.description}`
+            .toLowerCase()
+            .includes(q);
+        const matchesTier = tier === 'All tiers' || item.tier === tier;
+        return matchesDepartment && matchesSearch && matchesTier;
+      }),
+    }))
+    .filter((group) => group.items.length);
+
+  const visibleCount = filteredGroups.reduce(
+    (sum, group) => sum + group.items.length,
+    0
+  );
+
+  const exportCsv = () => {
+    const rows = [['Category', 'KPI', 'Value', 'Tier', 'Status', 'Description']];
+    filteredGroups.forEach((group) => {
+      group.items.forEach((item) => {
+        rows.push([
+          group.section,
+          item.label,
+          item.value,
+          item.tier,
+          item.status,
+          item.description,
+        ]);
+      });
+    });
+
+    const csv = rows
+      .map((row) =>
+        row
+          .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
+          .join(',')
+      )
+      .join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `preface-fitness-kpis-${today}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const tierClass = (value) =>
+    value.toLowerCase().replace(/[^a-z]+/g, '-');
+
+  return (
+    <div className="page performance-page">
+      <style>{`
+        .performance-page {
+          --kpi-navy: #10243b;
+          --kpi-muted: #718096;
+          --kpi-border: #dfe8ef;
+          --kpi-soft: #f7fafc;
+        }
+        .kpi-toolbar {
+          display:flex;
+          gap:10px;
+          align-items:center;
+          flex-wrap:wrap;
+          padding:14px;
+          background:#fff;
+          border:1px solid var(--kpi-border);
+          border-radius:16px;
+          box-shadow:0 8px 24px rgba(15,23,42,.04);
+          margin-bottom:22px;
+        }
+        .kpi-toolbar .search-box {
+          flex:1 1 260px;
+          min-width:220px;
+        }
+        .kpi-toolbar select {
+          min-width:170px;
+        }
+        .kpi-tool-btn {
+          border:1px solid #dbe5eb;
+          background:#fff;
+          color:#203449;
+          border-radius:10px;
+          padding:10px 13px;
+          font-size:12px;
+          font-weight:700;
+          cursor:pointer;
+          display:inline-flex;
+          align-items:center;
+          gap:7px;
+        }
+        .kpi-tool-btn:hover {
+          transform:translateY(-1px);
+          box-shadow:0 5px 14px rgba(15,23,42,.08);
+        }
+        .kpi-section {
+          margin-bottom:24px;
+        }
+        .kpi-section-head {
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:12px;
+          border-bottom:1px solid #dce6ed;
+          padding:0 2px 9px;
+          margin-bottom:12px;
+        }
+        .kpi-section-title {
+          display:flex;
+          align-items:center;
+          gap:9px;
+          color:#1b3047;
+        }
+        .kpi-section-title .kpi-group-icon {
+          width:26px;
+          height:26px;
+          border-radius:8px;
+          display:grid;
+          place-items:center;
+          background:#e8f7f5;
+          color:#13958e;
+        }
+        .kpi-section-title h3 {
+          margin:0;
+          font-size:14px;
+          font-weight:800;
+          letter-spacing:-.01em;
+        }
+        .kpi-section-title span {
+          font-size:10px;
+          color:#8291a0;
+          margin-left:4px;
+        }
+        .kpi-grid {
+          display:grid;
+          grid-template-columns:repeat(4,minmax(0,1fr));
+          gap:10px;
+        }
+        .kpi-card {
+          position:relative;
+          min-height:144px;
+          padding:12px;
+          border:1px solid #dce7ee;
+          border-radius:12px;
+          background:linear-gradient(180deg,#ffffff 0%,#f8fbfd 100%);
+          box-shadow:0 5px 16px rgba(20,40,60,.045);
+          transition:transform .2s ease,box-shadow .2s ease,border-color .2s ease;
+          overflow:hidden;
+        }
+        .kpi-card::after {
+          content:'';
+          position:absolute;
+          inset:auto -20px -35px auto;
+          width:80px;
+          height:80px;
+          border-radius:50%;
+          background:rgba(20,160,150,.045);
+        }
+        .kpi-card:hover {
+          transform:translateY(-3px);
+          box-shadow:0 12px 28px rgba(20,40,60,.10);
+          border-color:#c8dde4;
+        }
+        .kpi-top {
+          display:flex;
+          justify-content:space-between;
+          align-items:center;
+          gap:6px;
+          margin-bottom:10px;
+        }
+        .kpi-badge {
+          font-size:8px;
+          line-height:1;
+          font-weight:900;
+          letter-spacing:.03em;
+          padding:5px 7px;
+          border-radius:6px;
+          background:#19bde0;
+          color:#fff;
+        }
+        .kpi-badge.estimate { background:#18b7d7; }
+        .kpi-tier {
+          font-size:8px;
+          font-weight:800;
+          padding:5px 7px;
+          border-radius:6px;
+          background:#e8ff8a;
+          color:#304700;
+        }
+        .kpi-tier.advanced { background:#d7f5fb; color:#05718a; }
+        .kpi-tier.strategic { background:#efe7ff; color:#6540a5; }
+        .kpi-tier.estimate { background:#eef3f6; color:#657482; }
+        .kpi-value {
+          color:#14283d;
+          font-size:22px;
+          line-height:1.05;
+          font-weight:850;
+          letter-spacing:-.035em;
+          margin-bottom:7px;
+        }
+        .kpi-label {
+          color:#20354a;
+          font-size:11px;
+          font-weight:800;
+          line-height:1.25;
+          margin-bottom:6px;
+        }
+        .kpi-description {
+          color:#81909e;
+          font-size:9px;
+          line-height:1.35;
+          max-width:95%;
+        }
+        .kpi-empty {
+          padding:30px;
+          text-align:center;
+          border:1px dashed #d5e0e7;
+          border-radius:14px;
+          color:#778897;
+          background:#fbfdfe;
+        }
+        .kpi-footer-note {
+          font-size:10px;
+          color:#81909e;
+          padding:3px 2px 20px;
+        }
+        @media (max-width: 1100px) {
+          .kpi-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+        }
+        @media (max-width: 760px) {
+          .kpi-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+          .kpi-card { min-height:132px; }
+        }
+        @media (max-width: 500px) {
+          .kpi-grid { grid-template-columns:1fr; }
+        }
+      `}</style>
+
+      <div className="page-heading compact">
+        <div>
+          <div className="eyebrow">PREFACE FITNESS</div>
+          <h1>Performance & KPIs</h1>
+          <p>Live operational indicators across revenue, retention, sales, attendance and compliance.</p>
+        </div>
+        <div className="heading-actions">
+          <button className="btn btn-secondary" onClick={exportCsv}>
+            <FileDown size={16} /> Export CSV
+          </button>
+          <button className="btn btn-primary" onClick={() => window.print()}>
+            <ClipboardList size={16} /> Print / PDF
+          </button>
+        </div>
+      </div>
+
+      <div className="kpi-toolbar">
+        <div className="search-box">
+          <Search size={16} />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search KPI, formula, data, owner..."
+          />
+        </div>
+
+        <select value={department} onChange={(e) => setDepartment(e.target.value)}>
+          {departments.map((item) => (
+            <option key={item}>{item}</option>
+          ))}
+        </select>
+
+        <select value={tier} onChange={(e) => setTier(e.target.value)}>
+          {tiers.map((item) => (
+            <option key={item}>{item}</option>
+          ))}
+        </select>
+
+        <button
+          className="kpi-tool-btn"
+          onClick={() => {
+            setSearch('');
+            setDepartment('All departments');
+            setTier('All tiers');
+          }}
+        >
+          Clear
+        </button>
+      </div>
+
+      {filteredGroups.map((group) => {
+        const GroupIcon = group.icon;
+        return (
+          <section className="kpi-section" key={group.section}>
+            <div className="kpi-section-head">
+              <div className="kpi-section-title">
+                <div className="kpi-group-icon">
+                  <GroupIcon size={15} />
+                </div>
+                <h3>{group.section}</h3>
+                <span>{group.items.length} KPI{group.items.length > 1 ? 's' : ''}</span>
+              </div>
+            </div>
+
+            <div className="kpi-grid">
+              {group.items.map((item) => (
+                <article className="kpi-card" key={`${group.section}-${item.label}`}>
+                  <div className="kpi-top">
+                    <span className={`kpi-badge ${item.status.toLowerCase()}`}>
+                      {item.status}
+                    </span>
+                    <span className={`kpi-tier ${tierClass(item.tier)}`}>
+                      {item.tier}
+                    </span>
+                  </div>
+                  <div className="kpi-value">{item.value}</div>
+                  <div className="kpi-label">{item.label}</div>
+                  <div className="kpi-description">{item.description}</div>
+                </article>
+              ))}
+            </div>
+          </section>
+        );
+      })}
+
+      {!filteredGroups.length && (
+        <div className="kpi-empty">
+          No KPIs match your current search and filters.
+        </div>
+      )}
+
+      <div className="kpi-footer-note">
+        {visibleCount} KPI{visibleCount !== 1 ? 's' : ''} shown · Values reflect the current data stored in Preface Fitness. Metrics marked ESTIMATE use the available Phase 1 data model.
+      </div>
+    </div>
+  );
 }
 
 function ReportsPage({ data, revenue }) {
@@ -3910,11 +4813,69 @@ function ReportsPage({ data, revenue }) {
   );
 }
 
-function SettingsPage({ exportBackup, importBackup, data, dbReady, resetData }) {
+function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, resetData }) {
+  const current = data.settings || {};
+  const [form, setForm] = useState({
+    gymName: current.gymName || 'Preface Fitness',
+    gymAddress: current.gymAddress || '',
+    gymPhone: current.gymPhone || '',
+    gymEmail: current.gymEmail || '',
+    gstin: current.gstin || '',
+    invoicePrefix: current.invoicePrefix || 'PF-INV',
+    referralPointsPerReferral: Number(current.referralPointsPerReferral ?? 10),
+  });
+
+  useEffect(() => {
+    setForm({
+      gymName: current.gymName || 'Preface Fitness',
+      gymAddress: current.gymAddress || '',
+      gymPhone: current.gymPhone || '',
+      gymEmail: current.gymEmail || '',
+      gstin: current.gstin || '',
+      invoicePrefix: current.invoicePrefix || 'PF-INV',
+      referralPointsPerReferral: Number(current.referralPointsPerReferral ?? 10),
+    });
+  }, [current.gymName, current.gymAddress, current.gymPhone, current.gymEmail, current.gstin, current.invoicePrefix, current.referralPointsPerReferral]);
+
+  const saveSettings = () => {
+    setData((d) => ({
+      ...d,
+      settings: {
+        ...(d.settings || {}),
+        ...form,
+        referralPointsPerReferral: Math.max(0, Number(form.referralPointsPerReferral || 0)),
+      },
+    }));
+  };
+
   return (
     <div className="page">
-      <PageTitle title="Settings" subtitle="Manage local app data and backups." />
+      <PageTitle title="Settings" subtitle="Manage gym identity, billing details, referral rewards and local app data." />
       <div className="grid-2">
+        <section className="card">
+          <div className="card-header"><div><h3>Gym & billing details</h3><p>These details are used on member bills and invoices.</p></div></div>
+          <div className="form-grid two">
+            <FormField label="Gym name"><input value={form.gymName} onChange={(e) => setForm((f) => ({...f,gymName:e.target.value}))} /></FormField>
+            <FormField label="Invoice prefix"><input value={form.invoicePrefix} onChange={(e) => setForm((f) => ({...f,invoicePrefix:e.target.value}))} placeholder="PF-INV" /></FormField>
+          </div>
+          <FormField label="Gym address"><textarea rows="2" value={form.gymAddress} onChange={(e) => setForm((f) => ({...f,gymAddress:e.target.value}))} placeholder="Full gym address" /></FormField>
+          <div className="form-grid two">
+            <FormField label="Gym phone"><input value={form.gymPhone} onChange={(e) => setForm((f) => ({...f,gymPhone:e.target.value}))} /></FormField>
+            <FormField label="Gym email"><input type="email" value={form.gymEmail} onChange={(e) => setForm((f) => ({...f,gymEmail:e.target.value}))} /></FormField>
+          </div>
+          <FormField label="GSTIN (optional)"><input value={form.gstin} onChange={(e) => setForm((f) => ({...f,gstin:e.target.value}))} placeholder="GSTIN" /></FormField>
+          <button className="btn btn-primary" onClick={saveSettings}><Save size={17}/> Save gym details</button>
+        </section>
+
+        <section className="card">
+          <div className="card-header"><div><h3>Referral rewards</h3><p>Choose how many points a member earns for each successful referral.</p></div></div>
+          <FormField label="Points per successful referral"><input type="number" min="0" step="1" value={form.referralPointsPerReferral} onChange={(e) => setForm((f) => ({...f,referralPointsPerReferral:e.target.value}))} /></FormField>
+          <div style={{padding:'14px 16px',borderRadius:'12px',background:'#f5fbfa',border:'1px solid #dcefeb',color:'#55706e',fontSize:'13px',lineHeight:1.6}}>
+            Example: if this is <strong>{Number(form.referralPointsPerReferral || 0)} points</strong>, a member who successfully refers 5 clients earns <strong>{Number(form.referralPointsPerReferral || 0) * 5} points</strong>.
+          </div>
+          <button className="btn btn-primary" style={{marginTop:'12px'}} onClick={saveSettings}><Save size={17}/> Save referral settings</button>
+        </section>
+
         <section className="card">
           <div className="card-header"><div><h3>Local database</h3><p>Data is stored in this browser.</p></div></div>
           <div className="report-list">
@@ -3928,10 +4889,7 @@ function SettingsPage({ exportBackup, importBackup, data, dbReady, resetData }) 
           <div className="card-header"><div><h3>Backup & restore</h3><p>Download a JSON backup or restore one later.</p></div></div>
           <div style={{display:'flex',gap:'10px',flexWrap:'wrap'}}>
             <button className="btn btn-primary" onClick={exportBackup}><FileDown size={17}/> Export backup</button>
-            <label className="btn btn-secondary" style={{cursor:'pointer'}}>
-              <FileUp size={17}/> Import backup
-              <input type="file" accept=".json,application/json" onChange={importBackup} style={{display:'none'}} />
-            </label>
+            <label className="btn btn-secondary" style={{cursor:'pointer'}}><FileUp size={17}/> Import backup<input type="file" accept=".json,application/json" onChange={importBackup} style={{display:'none'}} /></label>
             <button className="btn btn-danger" onClick={resetData}>Reset demo data</button>
           </div>
         </section>
