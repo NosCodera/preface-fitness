@@ -17,6 +17,7 @@ import {
   FileDown,
   FileUp,
   LayoutDashboard,
+  LogOut,
   Menu,
   MessageCircle,
   MoreHorizontal,
@@ -293,7 +294,7 @@ const seed = {
     },
   ],
 
-  settings: { gymName: 'Preface Fitness', currency: '₹', gymAddress: '', gymPhone: '', gymEmail: '', gstin: '', invoicePrefix: 'PF-INV', referralPointsPerReferral: 10 },
+  settings: { gymName: 'Preface Fitness', currency: '₹', gymAddress: '', gymPhone: '', gymEmail: '', gstin: '', invoicePrefix: 'PF-INV', referralPointsPerReferral: 10, auth: { username: 'admin', passwordHash: '' } },
 };
 
 function loadLegacyData() {
@@ -301,6 +302,20 @@ function loadLegacyData() {
     const raw = localStorage.getItem(STORAGE_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
+}
+
+async function hashPassword(password) {
+  const value = String(password || '');
+  if (window.crypto?.subtle) {
+    const buffer = await window.crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode(value)
+    );
+    return Array.from(new Uint8Array(buffer))
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('');
+  }
+  return window.btoa(unescape(encodeURIComponent(value)));
 }
 
 function App() {
@@ -311,6 +326,7 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState('');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -318,14 +334,14 @@ function App() {
       const stored = await readState(null);
       if (cancelled) return;
       if (stored) {
-        const normalized = { ...stored, workoutPlans: Array.isArray(stored.workoutPlans) ? stored.workoutPlans : [], dietPlans: Array.isArray(stored.dietPlans) ? stored.dietPlans : seed.dietPlans };
+        const normalized = { ...stored, workoutPlans: Array.isArray(stored.workoutPlans) ? stored.workoutPlans : [], dietPlans: Array.isArray(stored.dietPlans) ? stored.dietPlans : seed.dietPlans, settings: { ...seed.settings, ...(stored.settings || {}), auth: { ...seed.settings.auth, ...((stored.settings || {}).auth || {}) } } };
         setData(normalized);
         await writeState(normalized);
       }
       else {
         const legacy = loadLegacyData();
         if (legacy) {
-          const normalized = { ...legacy, workoutPlans: Array.isArray(legacy.workoutPlans) ? legacy.workoutPlans : [], dietPlans: Array.isArray(legacy.dietPlans) ? legacy.dietPlans : seed.dietPlans };
+          const normalized = { ...legacy, workoutPlans: Array.isArray(legacy.workoutPlans) ? legacy.workoutPlans : [], dietPlans: Array.isArray(legacy.dietPlans) ? legacy.dietPlans : seed.dietPlans, settings: { ...seed.settings, ...(legacy.settings || {}), auth: { ...seed.settings.auth, ...((legacy.settings || {}).auth || {}) } } };
           setData(normalized);
           await writeState(normalized);
         }
@@ -760,7 +776,18 @@ function App() {
       try {
         const imported = JSON.parse(reader.result);
         if (!imported.members || !imported.leads || !imported.payments) throw new Error('Invalid backup');
-        setData(imported);
+        const normalizedImported = {
+          ...imported,
+          settings: {
+            ...data.settings,
+            ...(imported.settings || {}),
+            auth: {
+              ...(data.settings?.auth || {}),
+              ...((imported.settings || {}).auth || {}),
+            },
+          },
+        };
+        setData(normalizedImported);
         setToast('Backup restored successfully');
       } catch {
         setToast('Invalid Preface Fitness backup');
@@ -892,6 +919,33 @@ function App() {
     setSidebarOpen(false);
   };
 
+  const logout = () => {
+    setIsAuthenticated(false);
+    setActive('Dashboard');
+    setSidebarOpen(false);
+    setModal(null);
+  };
+
+  if (!dbReady) {
+    return (
+      <div className="auth-screen">
+        <div className="auth-card">
+          <img src={LOGO_URL} alt="Preface Fitness" className="auth-logo" />
+          <div className="auth-loading">Loading Preface Fitness…</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <LoginScreen
+        settings={data.settings || {}}
+        onLogin={() => setIsAuthenticated(true)}
+      />
+    );
+  }
+
   return (
     <div className="app-shell">
       <aside
@@ -940,6 +994,7 @@ function App() {
             <div className="breadcrumb"><span>Preface Fitness</span><ChevronDown size={14} /><strong>{active}</strong></div>
           </div>
           <div className="topbar-actions">
+            <button className="icon-btn" title="Logout" onClick={logout}><LogOut size={18} /></button>
             <button className="icon-btn" title="Notifications"><Bell size={19} /><span className="notification-dot" /></button>
             <div className="admin-chip"><div className="avatar">A</div><div><strong>Administrator</strong><span>Owner</span></div><ChevronDown size={15} /></div>
           </div>
@@ -959,7 +1014,18 @@ function App() {
           {active === 'Diet & Nutrition' && <DietPage plans={data.dietPlans || []} members={data.members} setModal={setModal} deleteDietPlan={deleteDietPlan} />}
           {active === 'Communication' && <CommunicationPage members={data.members} logs={data.communicationLogs || []} setModal={setModal} deleteCommunicationLog={deleteCommunicationLog} />}
           {active === 'Reports' && <ReportsPage data={data} revenue={revenue} />}
-          {active === 'Settings' && <SettingsPage exportBackup={exportBackup} importBackup={importBackup} data={data} setData={setData} dbReady={dbReady} resetData={() => { if (window.confirm('Reset the local Preface Fitness database to demo data?')) { clearState().then(() => { setData(seed); setToast('Local database reset'); }); } }} />}
+          {active === 'Settings' && <SettingsPage exportBackup={exportBackup} importBackup={importBackup} data={data} setData={setData} dbReady={dbReady} resetData={() => {
+            if (window.confirm('Reset the local Preface Fitness database to demo data?')) {
+              const auth = data.settings?.auth;
+              clearState().then(() => {
+                setData({
+                  ...seed,
+                  settings: { ...seed.settings, ...(auth ? { auth } : {}) },
+                });
+                setToast('Local database reset');
+              });
+            }
+          }} />}
         </div>
       </main>
 
@@ -981,6 +1047,213 @@ function App() {
   );
 }
 
+
+function LoginScreen({ settings, onLogin }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const auth = settings.auth || {};
+  const configuredUsername = auth.username || 'admin';
+
+  const submit = async (event) => {
+    event.preventDefault();
+
+    if (!username.trim() || !password) {
+      setError('Enter your username and password.');
+      return;
+    }
+
+    setBusy(true);
+    const hash = await hashPassword(password);
+    const valid =
+      username.trim().toLowerCase() === configuredUsername.toLowerCase() &&
+      (auth.passwordHash ? hash === auth.passwordHash : password === 'admin123');
+
+    setBusy(false);
+
+    if (!valid) {
+      setError('Invalid username or password.');
+      return;
+    }
+
+    setError('');
+    onLogin();
+  };
+
+  const inputStyle = {
+    width: '100%',
+    boxSizing: 'border-box',
+    height: '46px',
+    border: '1px solid #dce5ea',
+    borderRadius: '10px',
+    padding: '0 13px',
+    fontSize: '14px',
+    color: '#203246',
+    background: '#fff',
+    outline: 'none',
+  };
+
+  return (
+    <div
+      style={{
+        minHeight: '100vh',
+        display: 'grid',
+        placeItems: 'center',
+        padding: '24px',
+        boxSizing: 'border-box',
+        background: 'linear-gradient(135deg, #f5f9fb 0%, #edf5f5 100%)',
+      }}
+    >
+      <div
+        style={{
+          width: '100%',
+          maxWidth: '420px',
+          background: '#fff',
+          border: '1px solid #e2eaee',
+          borderRadius: '20px',
+          padding: '34px',
+          boxSizing: 'border-box',
+          boxShadow: '0 20px 60px rgba(28, 52, 68, 0.12)',
+        }}
+      >
+        <div style={{ textAlign: 'center', marginBottom: '28px' }}>
+          <div
+            style={{
+              width: '82px',
+              height: '82px',
+              margin: '0 auto 18px',
+              borderRadius: '18px',
+              display: 'grid',
+              placeItems: 'center',
+              background: '#f7fafb',
+              border: '1px solid #e2eaee',
+              overflow: 'hidden',
+            }}
+          >
+            <img
+              src={LOGO_URL}
+              alt="Preface Fitness"
+              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+            />
+          </div>
+
+          <div
+            style={{
+              fontSize: '11px',
+              fontWeight: 800,
+              letterSpacing: '1.5px',
+              color: '#14958f',
+              marginBottom: '8px',
+            }}
+          >
+            OWNER LOGIN
+          </div>
+
+          <h1
+            style={{
+              margin: 0,
+              color: '#1d3044',
+              fontSize: '28px',
+              lineHeight: 1.2,
+            }}
+          >
+            Welcome back
+          </h1>
+
+          <p
+            style={{
+              margin: '9px 0 0',
+              color: '#718096',
+              fontSize: '14px',
+              lineHeight: 1.5,
+            }}
+          >
+            Sign in to access your Preface Fitness dashboard.
+          </p>
+        </div>
+
+        <form onSubmit={submit}>
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#34475a', marginBottom: '7px' }}>
+              Username
+            </label>
+            <input
+              autoFocus
+              autoComplete="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder={configuredUsername}
+              style={inputStyle}
+            />
+          </div>
+
+          <div style={{ marginBottom: '14px' }}>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#34475a', marginBottom: '7px' }}>
+              Password
+            </label>
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter password"
+              style={inputStyle}
+            />
+          </div>
+
+          {error && (
+            <div
+              style={{
+                marginBottom: '14px',
+                padding: '11px 13px',
+                borderRadius: '9px',
+                background: '#fff3f3',
+                border: '1px solid #ffd5d5',
+                color: '#c53d4a',
+                fontSize: '13px',
+              }}
+            >
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={busy}
+            style={{
+              width: '100%',
+              height: '46px',
+              border: 0,
+              borderRadius: '10px',
+              background: '#159b94',
+              color: '#fff',
+              fontSize: '14px',
+              fontWeight: 800,
+              cursor: busy ? 'default' : 'pointer',
+              opacity: busy ? 0.7 : 1,
+            }}
+          >
+            {busy ? 'Signing in…' : 'Sign in'}
+          </button>
+        </form>
+
+        <div
+          style={{
+            marginTop: '18px',
+            textAlign: 'center',
+            color: '#8996a3',
+            fontSize: '11px',
+            lineHeight: 1.5,
+          }}
+        >
+          Login credentials can be changed from Settings after signing in.
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function CommunicationPage({ members, logs, setModal, deleteCommunicationLog }) {
   const [search, setSearch] = useState('');
@@ -4824,6 +5097,13 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     invoicePrefix: current.invoicePrefix || 'PF-INV',
     referralPointsPerReferral: Number(current.referralPointsPerReferral ?? 10),
   });
+  const [authForm, setAuthForm] = useState({
+    username: current.auth?.username || 'admin',
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: '',
+  });
+  const [authMessage, setAuthMessage] = useState('');
 
   useEffect(() => {
     setForm({
@@ -4835,7 +5115,15 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
       invoicePrefix: current.invoicePrefix || 'PF-INV',
       referralPointsPerReferral: Number(current.referralPointsPerReferral ?? 10),
     });
-  }, [current.gymName, current.gymAddress, current.gymPhone, current.gymEmail, current.gstin, current.invoicePrefix, current.referralPointsPerReferral]);
+    setAuthForm((form) => ({
+      ...form,
+      username: current.auth?.username || 'admin',
+      currentPassword: '',
+      newPassword: '',
+      confirmPassword: '',
+    }));
+    setAuthMessage('');
+  }, [current.gymName, current.gymAddress, current.gymPhone, current.gymEmail, current.gstin, current.invoicePrefix, current.referralPointsPerReferral, current.auth?.username, current.auth?.passwordHash]);
 
   const saveSettings = () => {
     setData((d) => ({
@@ -4847,6 +5135,62 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
       },
     }));
   };
+
+  const saveAuthSettings = async () => {
+    const username = authForm.username.trim();
+
+    if (!username) {
+      setAuthMessage('Username cannot be empty.');
+      return;
+    }
+
+    if (!authForm.currentPassword) {
+      setAuthMessage('Enter your current password to make changes.');
+      return;
+    }
+
+    const currentHash = current.auth?.passwordHash || await hashPassword('admin123');
+    const enteredCurrentHash = await hashPassword(authForm.currentPassword);
+
+    if (enteredCurrentHash !== currentHash) {
+      setAuthMessage('Current password is incorrect.');
+      return;
+    }
+
+    if (!authForm.newPassword) {
+      setAuthMessage('Enter a new password.');
+      return;
+    }
+
+    if (authForm.newPassword.length < 6) {
+      setAuthMessage('New password must be at least 6 characters.');
+      return;
+    }
+
+    if (authForm.newPassword !== authForm.confirmPassword) {
+      setAuthMessage('New password and confirmation do not match.');
+      return;
+    }
+
+    const passwordHash = await hashPassword(authForm.newPassword);
+
+    setData((d) => ({
+      ...d,
+      settings: {
+        ...(d.settings || {}),
+        auth: { username, passwordHash },
+      },
+    }));
+
+    setAuthForm({
+      username,
+      currentPassword: '',
+      newPassword: '',
+      confirmPassword: '',
+    });
+    setAuthMessage('Login credentials updated successfully.');
+  };
+
 
   return (
     <div className="page">
@@ -4874,6 +5218,77 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
             Example: if this is <strong>{Number(form.referralPointsPerReferral || 0)} points</strong>, a member who successfully refers 5 clients earns <strong>{Number(form.referralPointsPerReferral || 0) * 5} points</strong>.
           </div>
           <button className="btn btn-primary" style={{marginTop:'12px'}} onClick={saveSettings}><Save size={17}/> Save referral settings</button>
+        </section>
+
+        <section className="card">
+          <div className="card-header">
+            <div>
+              <h3>Owner login</h3>
+              <p>Change the username and password required to open the app.</p>
+            </div>
+          </div>
+
+          <div className="form-grid two">
+            <FormField label="Username">
+              <input
+                value={authForm.username}
+                onChange={(e) => setAuthForm((f) => ({ ...f, username: e.target.value }))}
+                autoComplete="username"
+              />
+            </FormField>
+
+            <FormField label="Current password">
+              <input
+                type="password"
+                value={authForm.currentPassword}
+                onChange={(e) => setAuthForm((f) => ({ ...f, currentPassword: e.target.value }))}
+                autoComplete="current-password"
+              />
+            </FormField>
+          </div>
+
+          <div className="form-grid two">
+            <FormField label="New password">
+              <input
+                type="password"
+                value={authForm.newPassword}
+                onChange={(e) => setAuthForm((f) => ({ ...f, newPassword: e.target.value }))}
+                autoComplete="new-password"
+                placeholder="Minimum 6 characters"
+              />
+            </FormField>
+
+            <FormField label="Confirm new password">
+              <input
+                type="password"
+                value={authForm.confirmPassword}
+                onChange={(e) => setAuthForm((f) => ({ ...f, confirmPassword: e.target.value }))}
+                autoComplete="new-password"
+              />
+            </FormField>
+          </div>
+
+          {authMessage && (
+            <div style={{
+              marginBottom: '12px',
+              padding: '11px 13px',
+              borderRadius: '10px',
+              background: '#f5fbfa',
+              border: '1px solid #dcefeb',
+              color: '#356765',
+              fontSize: '13px',
+            }}>
+              {authMessage}
+            </div>
+          )}
+
+          <button className="btn btn-primary" onClick={saveAuthSettings}>
+            <Save size={17} /> Save login credentials
+          </button>
+
+          <div style={{ marginTop: '12px', fontSize: '12px', color: '#7b8794', lineHeight: 1.5 }}>
+            New installations start with <strong>admin</strong> / <strong>admin123</strong>. Change these from this section after signing in.
+          </div>
         </section>
 
         <section className="card">
