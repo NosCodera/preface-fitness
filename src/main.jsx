@@ -35,6 +35,7 @@ import {
   UserPlus,
   Users,
   X,
+  QrCode,
 } from 'lucide-react';
 import './styles.css';
 import { readState, writeState, clearState } from './db';
@@ -42,6 +43,8 @@ import { readState, writeState, clearState } from './db';
 const LOGO_URL = `${import.meta.env.BASE_URL}preface-logo.jpg`;
 
 const STORAGE_KEY = 'preface-fitness-v1';
+const AUTH_SESSION_KEY = 'preface-fitness-auth-session';
+const AUTH_SESSION_MS = 20 * 60 * 1000;
 const today = new Date().toISOString().slice(0, 10);
 
 const MEMBERSHIP_PLANS = [
@@ -78,13 +81,33 @@ function getMembershipStatus(expiry) {
   return 'Active';
 }
 
+function getCheckInPath() {
+  const base = import.meta.env.BASE_URL || '/';
+  return `${base.replace(/\/$/, '')}/check-in`;
+}
+
+function getCheckInUrl() {
+  return `${window.location.origin}${getCheckInPath()}`;
+}
+
+function distanceInMeters(lat1, lon1, lat2, lon2) {
+  const toRad = (value) => (value * Math.PI) / 180;
+  const earthRadius = 6371000;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+
 const seed = {
   members: [
-    { id: 'PF-1001', name: 'Rahul Sharma', phone: '9876543210', email: 'rahul@example.com', plan: 'Annual', start: '2025-10-12', expiry: '2026-10-12', status: 'Active', visits: 18, due: 0 },
-    { id: 'PF-1002', name: 'Priya Verma', phone: '9811112233', email: 'priya@example.com', plan: 'Quarterly', start: '2026-07-03', expiry: '2026-10-03', status: 'Expiring', visits: 14, due: 1200 },
-    { id: 'PF-1003', name: 'Amit Singh', phone: '9898989898', email: 'amit@example.com', plan: 'Monthly', start: '2026-09-01', expiry: '2026-10-01', status: 'Expiring', visits: 9, due: 0 },
-    { id: 'PF-1004', name: 'Neha Gupta', phone: '9911223344', email: 'neha@example.com', plan: 'Annual', start: '2025-09-20', expiry: '2026-09-20', status: 'Expired', visits: 6, due: 2500 },
-    { id: 'PF-1005', name: 'Arjun Mehta', phone: '9000011111', email: 'arjun@example.com', plan: 'Half-yearly', start: '2026-05-15', expiry: '2026-11-15', status: 'Active', visits: 22, due: 0 },
+    { id: 'PF-1001', attendanceNumber: '1', name: 'Rahul Sharma', phone: '9876543210', email: 'rahul@example.com', plan: 'Annual', start: '2025-10-12', expiry: '2026-10-12', status: 'Active', visits: 18, due: 0 },
+    { id: 'PF-1002', attendanceNumber: '2', name: 'Priya Verma', phone: '9811112233', email: 'priya@example.com', plan: 'Quarterly', start: '2026-07-03', expiry: '2026-10-03', status: 'Expiring', visits: 14, due: 1200 },
+    { id: 'PF-1003', attendanceNumber: '3', name: 'Amit Singh', phone: '9898989898', email: 'amit@example.com', plan: 'Monthly', start: '2026-09-01', expiry: '2026-10-01', status: 'Expiring', visits: 9, due: 0 },
+    { id: 'PF-1004', attendanceNumber: '4', name: 'Neha Gupta', phone: '9911223344', email: 'neha@example.com', plan: 'Annual', start: '2025-09-20', expiry: '2026-09-20', status: 'Expired', visits: 6, due: 2500 },
+    { id: 'PF-1005', attendanceNumber: '5', name: 'Arjun Mehta', phone: '9000011111', email: 'arjun@example.com', plan: 'Half-yearly', start: '2026-05-15', expiry: '2026-11-15', status: 'Active', visits: 22, due: 0 },
   ],
   leads: [
     { id: 'L-101', name: 'Karan Malhotra', phone: '9988776655', source: 'Instagram', stage: 'New', followUp: today },
@@ -294,7 +317,7 @@ const seed = {
     },
   ],
 
-  settings: { gymName: 'Preface Fitness', currency: '₹', gymAddress: '', gymPhone: '', gymEmail: '', gstin: '', invoicePrefix: 'PF-INV', referralPointsPerReferral: 10, auth: { username: 'admin', passwordHash: '' } },
+  settings: { gymName: 'Preface Fitness', currency: '₹', gymAddress: '', gymPhone: '', gymEmail: '', gstin: '', invoicePrefix: 'PF-INV', referralPointsPerReferral: 10, gymLatitude: '', gymLongitude: '', auth: { username: 'admin', passwordHash: '' } },
 };
 
 function loadLegacyData() {
@@ -348,6 +371,20 @@ function App() {
         else await writeState(seed);
       }
       setDbReady(true);
+
+      try {
+        const rawSession = localStorage.getItem(AUTH_SESSION_KEY);
+        if (rawSession) {
+          const session = JSON.parse(rawSession);
+          if (session?.expiresAt && Number(session.expiresAt) > Date.now()) {
+            setIsAuthenticated(true);
+          } else {
+            localStorage.removeItem(AUTH_SESSION_KEY);
+          }
+        }
+      } catch {
+        localStorage.removeItem(AUTH_SESSION_KEY);
+      }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -920,6 +957,7 @@ function App() {
   };
 
   const logout = () => {
+    localStorage.removeItem(AUTH_SESSION_KEY);
     setIsAuthenticated(false);
     setActive('Dashboard');
     setSidebarOpen(false);
@@ -935,6 +973,12 @@ function App() {
         </div>
       </div>
     );
+  }
+
+  const isPublicCheckInRoute = window.location.pathname.replace(/\/+$/, '').endsWith('/check-in');
+
+  if (isPublicCheckInRoute) {
+    return <PublicAttendancePage data={data} setData={setData} />;
   }
 
   if (!isAuthenticated) {
@@ -1079,6 +1123,19 @@ function LoginScreen({ settings, onLogin }) {
     }
 
     setError('');
+
+    try {
+      localStorage.setItem(
+        AUTH_SESSION_KEY,
+        JSON.stringify({
+          authenticatedAt: Date.now(),
+          expiresAt: Date.now() + AUTH_SESSION_MS,
+        })
+      );
+    } catch {
+      // If browser storage is unavailable, the login still works for the current page.
+    }
+
     onLogin();
   };
 
@@ -2326,6 +2383,140 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
       </tbody></table></div>
     </div>
   </>;
+}
+
+function PublicAttendancePage({ data, setData }) {
+  const settings = data.settings || {};
+  const [memberNumber, setMemberNumber] = useState('');
+  const [location, setLocation] = useState(null);
+  const [locationStatus, setLocationStatus] = useState('Requesting your location…');
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const gymLat = Number(settings.gymLatitude);
+  const gymLng = Number(settings.gymLongitude);
+  const hasGymLocation = Number.isFinite(gymLat) && Number.isFinite(gymLng) && settings.gymLatitude !== '' && settings.gymLongitude !== '';
+
+  const requestLocation = () => {
+    setResult(null);
+    if (!navigator.geolocation) {
+      setLocationStatus('Location is not supported by this browser.');
+      return;
+    }
+    setLocationStatus('Requesting your location…');
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocation({ latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy });
+        setLocationStatus(`Location detected (accuracy ±${Math.round(position.coords.accuracy || 0)} m)`);
+      },
+      (error) => {
+        const message = error.code === 1 ? 'Location permission was denied. Please allow location access and try again.' : 'Could not detect your location. Please try again.';
+        setLocationStatus(message);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  };
+
+  useEffect(() => { requestLocation(); }, []);
+
+  const markPresent = () => {
+    setResult(null);
+    const number = String(memberNumber || '').trim();
+    if (!number) {
+      setResult({ type: 'error', message: 'Enter your member number.' });
+      return;
+    }
+    if (!hasGymLocation) {
+      setResult({ type: 'error', message: 'Gym location has not been configured by the owner yet.' });
+      return;
+    }
+    if (!location) {
+      setResult({ type: 'error', message: 'Your location is not available yet. Allow location access and try again.' });
+      requestLocation();
+      return;
+    }
+
+    const distance = distanceInMeters(location.latitude, location.longitude, gymLat, gymLng);
+    if (distance > 50) {
+      setResult({ type: 'error', message: `Attendance denied. You are approximately ${Math.round(distance)} m from the gym. You must be within 50 m.` });
+      return;
+    }
+
+    const member = (data.members || []).find((item) => String(item.attendanceNumber || item.id || '').trim().toLowerCase() === number.toLowerCase());
+    if (!member) {
+      setResult({ type: 'error', message: 'Member number not found.' });
+      return;
+    }
+    if (getMembershipStatus(member.expiry) === 'Expired') {
+      setResult({ type: 'error', message: 'Attendance denied. Your membership has expired.' });
+      return;
+    }
+
+    const already = (data.attendance || []).some((record) => record.memberId === member.id && record.date === today);
+    if (already) {
+      setResult({ type: 'success', message: `${member.name} is already marked present today.` });
+      return;
+    }
+
+    setSubmitting(true);
+    const now = new Date();
+    const record = {
+      id: `A-${Date.now()}`,
+      member: member.name,
+      memberId: member.id,
+      memberNumber: member.attendanceNumber || number,
+      date: today,
+      time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      source: 'QR check-in',
+      latitude: location.latitude,
+      longitude: location.longitude,
+      distanceMeters: Math.round(distance),
+    };
+
+    setData((current) => ({
+      ...current,
+      attendance: [record, ...(current.attendance || [])],
+      members: (current.members || []).map((item) => item.id === member.id ? { ...item, visits: Number(item.visits || 0) + 1 } : item),
+    }));
+    setSubmitting(false);
+    setResult({ type: 'success', message: `Attendance marked successfully for ${member.name}.` });
+    setMemberNumber('');
+  };
+
+  return (
+    <div className="auth-screen" style={{ padding: '24px', minHeight: '100vh', background: '#f5f8fa' }}>
+      <div className="auth-card" style={{ width: 'min(460px, 100%)' }}>
+        <img src={LOGO_URL} alt="Preface Fitness" className="auth-logo" />
+        <div style={{ marginTop: '8px', textAlign: 'center' }}>
+          <div className="eyebrow">PREFACE FITNESS</div>
+          <h2 style={{ margin: '6px 0 8px' }}>Mark Attendance</h2>
+          <p style={{ color: '#718096', fontSize: '14px', lineHeight: 1.5, margin: 0 }}>Scan at the gym entrance and mark your attendance without logging into the owner dashboard.</p>
+        </div>
+
+        <div style={{ marginTop: '22px', padding: '12px 14px', borderRadius: '12px', background: location ? '#f0faf7' : '#fff8ed', border: `1px solid ${location ? '#cfece3' : '#f0dfbf'}`, color: '#53656f', fontSize: '13px' }}>
+          <strong>{location ? '✓ Location detected' : 'Location required'}</strong>
+          <div style={{ marginTop: '3px' }}>{locationStatus}</div>
+        </div>
+
+        <div style={{ marginTop: '18px' }}>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#334155', marginBottom: '7px' }}>Member number</label>
+          <input value={memberNumber} onChange={(e) => setMemberNumber(e.target.value.replace(/\D/g, '').slice(0, 8))} onKeyDown={(e) => { if (e.key === 'Enter') markPresent(); }} inputMode="numeric" autoFocus placeholder="e.g. 23" style={{ width: '100%', fontSize: '22px', textAlign: 'center', letterSpacing: '3px', padding: '13px 14px' }} />
+        </div>
+
+        <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '14px', minHeight: '48px' }} onClick={markPresent} disabled={submitting}>
+          <CheckCircle2 size={18} /> {submitting ? 'Marking…' : 'Mark Present'}
+        </button>
+
+        <button className="link-btn" style={{ width: '100%', justifyContent: 'center', marginTop: '10px' }} onClick={requestLocation}>Refresh location</button>
+
+        {result && (
+          <div style={{ marginTop: '14px', padding: '13px 14px', borderRadius: '12px', background: result.type === 'success' ? '#f0faf7' : '#fff4f3', border: `1px solid ${result.type === 'success' ? '#cfece3' : '#f2d1ce'}`, color: result.type === 'success' ? '#26735f' : '#a33a32', fontSize: '13px', lineHeight: 1.5 }}>
+            {result.message}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function AttendancePage({ attendance, members, markAttendance }) {
@@ -4333,7 +4524,7 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
     amount: member.amount ?? 0,
     paid: member.paid ?? 0,
   } : {
-    id: '', name: '', phone: '', email: '', dob: '', gender: 'Prefer not to say', address: '',
+    id: '', attendanceNumber: '', name: '', phone: '', email: '', dob: '', gender: 'Prefer not to say', address: '',
     emergencyContact: '', dietPreference: 'Veg', referredBy: '', plan: 'Monthly', start: today, expiry: '', amount: Number(planPrices?.Monthly || 0), paid: 0,
     due: 0, height: '', weight: '', bodyFat: '', trainer: '', referral: 'Walk-in', notes: '',
   });
@@ -4441,6 +4632,7 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
 
     <div className="form-grid three">
       <FormField label="Member ID"><input value={form.id} readOnly={!!member} onChange={(e) => update('id', e.target.value)} placeholder="Leave blank for auto ID" /></FormField>
+      <FormField label="Attendance number"><input value={form.attendanceNumber || ''} onChange={(e) => update('attendanceNumber', e.target.value.replace(/\D/g, '').slice(0, 8))} placeholder="e.g. 23" inputMode="numeric" /></FormField>
       <FormField label="Full name"><input autoFocus value={form.name} onChange={(e) => update('name', e.target.value)} placeholder="Rahul Sharma" /></FormField>
       <FormField label="Phone"><input value={form.phone} onChange={(e) => update('phone', e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="9876543210" inputMode="numeric" /></FormField>
       <FormField label="Email"><input type="email" value={form.email} onChange={(e) => update('email', e.target.value)} placeholder="name@email.com" /></FormField>
@@ -5096,6 +5288,8 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     gstin: current.gstin || '',
     invoicePrefix: current.invoicePrefix || 'PF-INV',
     referralPointsPerReferral: Number(current.referralPointsPerReferral ?? 10),
+    gymLatitude: current.gymLatitude || '',
+    gymLongitude: current.gymLongitude || '',
   });
   const [authForm, setAuthForm] = useState({
     username: current.auth?.username || 'admin',
@@ -5114,6 +5308,8 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
       gstin: current.gstin || '',
       invoicePrefix: current.invoicePrefix || 'PF-INV',
       referralPointsPerReferral: Number(current.referralPointsPerReferral ?? 10),
+      gymLatitude: current.gymLatitude || '',
+      gymLongitude: current.gymLongitude || '',
     });
     setAuthForm((form) => ({
       ...form,
@@ -5123,7 +5319,32 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
       confirmPassword: '',
     }));
     setAuthMessage('');
-  }, [current.gymName, current.gymAddress, current.gymPhone, current.gymEmail, current.gstin, current.invoicePrefix, current.referralPointsPerReferral, current.auth?.username, current.auth?.passwordHash]);
+  }, [current.gymName, current.gymAddress, current.gymPhone, current.gymEmail, current.gstin, current.invoicePrefix, current.referralPointsPerReferral, current.gymLatitude, current.gymLongitude, current.auth?.username, current.auth?.passwordHash]);
+
+  const useCurrentLocation = () => {
+    if (!navigator.geolocation) return setAuthMessage('This browser does not support location detection.');
+    navigator.geolocation.getCurrentPosition(
+      (position) => setForm((f) => ({ ...f, gymLatitude: position.coords.latitude.toFixed(7), gymLongitude: position.coords.longitude.toFixed(7) })),
+      () => setAuthMessage('Could not read the current location. Allow location access and try again.'),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  };
+
+  const saveGymLocation = () => {
+    const lat = Number(form.gymLatitude);
+    const lng = Number(form.gymLongitude);
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+      setAuthMessage('Enter valid gym latitude and longitude first.');
+      return;
+    }
+    setData((d) => ({ ...d, settings: { ...(d.settings || {}), gymLatitude: String(form.gymLatitude).trim(), gymLongitude: String(form.gymLongitude).trim() } }));
+    setAuthMessage('Gym location saved.');
+  };
+
+  const qrUrl = getCheckInUrl();
+  const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&data=${encodeURIComponent(qrUrl)}`;
+
+  const openQr = () => window.open(qrImageUrl, '_blank', 'noopener,noreferrer');
 
   const saveSettings = () => {
     setData((d) => ({
@@ -5208,6 +5429,16 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
             <FormField label="Gym email"><input type="email" value={form.gymEmail} onChange={(e) => setForm((f) => ({...f,gymEmail:e.target.value}))} /></FormField>
           </div>
           <FormField label="GSTIN (optional)"><input value={form.gstin} onChange={(e) => setForm((f) => ({...f,gstin:e.target.value}))} placeholder="GSTIN" /></FormField>
+          <div className="form-section-title" style={{ marginTop: '18px' }}>QR attendance location</div>
+          <p style={{ color: '#718096', fontSize: '13px', lineHeight: 1.5, marginTop: 0 }}>The public check-in page will only accept attendance when the member's phone is within 50 metres of these coordinates.</p>
+          <div className="form-grid two">
+            <FormField label="Gym latitude"><input value={form.gymLatitude} onChange={(e) => setForm((f) => ({...f,gymLatitude:e.target.value}))} placeholder="e.g. 26.8467007" /></FormField>
+            <FormField label="Gym longitude"><input value={form.gymLongitude} onChange={(e) => setForm((f) => ({...f,gymLongitude:e.target.value}))} placeholder="e.g. 80.9462007" /></FormField>
+          </div>
+          <div style={{display:'flex',gap:'10px',flexWrap:'wrap',marginBottom:'12px'}}>
+            <button className="btn btn-secondary" type="button" onClick={useCurrentLocation}><Target size={17}/> Use my current location</button>
+            <button className="btn btn-secondary" type="button" onClick={saveGymLocation}><Save size={17}/> Save gym location</button>
+          </div>
           <button className="btn btn-primary" onClick={saveSettings}><Save size={17}/> Save gym details</button>
         </section>
 
@@ -5291,6 +5522,16 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
           </div>
         </section>
 
+        <section className="card">
+          <div className="card-header"><div><h3>Attendance QR code</h3><p>This QR opens the password-free member check-in page.</p></div></div>
+          <div style={{padding:'12px 14px',borderRadius:'12px',background:'#f7fafc',border:'1px solid #e5ebf0',fontSize:'12px',color:'#64748b',wordBreak:'break-all',lineHeight:1.5}}>{qrUrl}</div>
+          <div style={{display:'flex',gap:'10px',flexWrap:'wrap',marginTop:'12px'}}>
+            <button className="btn btn-primary" onClick={openQr}><QrCode size={17}/> Generate / open QR</button>
+            <button className="btn btn-secondary" onClick={() => window.print()}><FileDown size={17}/> Print QR</button>
+          </div>
+          <p style={{margin:'12px 0 0',fontSize:'12px',color:'#7b8794',lineHeight:1.5}}>Print the QR and place it at the gym entrance. Members scan it with their phone camera; no owner password is required.</p>
+          <div style={{marginTop:'12px',padding:'12px 14px',borderRadius:'12px',background:'#fff8ed',border:'1px solid #f0dfbf',fontSize:'12px',color:'#7a5b22',lineHeight:1.5}}><strong>Phase 1 limitation:</strong> your current app stores data in each browser's local IndexedDB. A member scanning this QR from their own phone will not write into the owner's browser database. Shared cross-device attendance needs the Phase 2 backend/database.</div>
+        </section>
         <section className="card">
           <div className="card-header"><div><h3>Local database</h3><p>Data is stored in this browser.</p></div></div>
           <div className="report-list">
