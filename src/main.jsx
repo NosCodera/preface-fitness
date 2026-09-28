@@ -115,33 +115,22 @@ function getMembershipStatus(expiry) {
   return 'Active';
 }
 
-const PRODUCTION_APP_URL = 'https://noscodera.github.io/preface-fitness/';
-
 function getCheckInPath() {
-  return `${PRODUCTION_APP_URL.replace(/\/$/, '')}/#check-in`;
+  const base = import.meta.env.BASE_URL || '/';
+  return `${base.replace(/\/$/, '')}/#check-in`;
 }
 
 function getCheckInUrl() {
-  return `${PRODUCTION_APP_URL.replace(/\/$/, '')}/#check-in`;
+  return `${window.location.origin}${getCheckInPath()}`;
 }
 
 function getFeedbackUrl(gymId, gymName = 'Preface Fitness') {
+  const base = import.meta.env.BASE_URL || '/';
+  const cleanBase = base.replace(/\/$/, '');
   const params = new URLSearchParams();
-
-  if (gymId) {
-    params.set('gym', gymId);
-  }
-
-  if (gymName) {
-    params.set('name', gymName);
-  }
-
-  const query = params.toString();
-  const base = PRODUCTION_APP_URL.replace(/\/$/, '');
-
-  return query
-    ? `${base}/?${query}#feedback`
-    : `${base}/#feedback`;
+  if (gymId) params.set('gym', gymId);
+  if (gymName) params.set('name', gymName);
+  return `${window.location.origin}${cleanBase}/?${params.toString()}#feedback`;
 }
 
 function distanceInMeters(lat1, lon1, lat2, lon2) {
@@ -396,7 +385,8 @@ async function hashPassword(password) {
 }
 
 function openPublicGymPage() {
-  const url = `${PRODUCTION_APP_URL.replace(/\/$/, '')}/#gym`;
+  const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+  const url = `${window.location.origin}${base}/#gym`;
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
@@ -3153,15 +3143,22 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
 
 function PublicAttendancePage({ data, setData }) {
   const settings = data.settings || {};
+  const params = new URLSearchParams(window.location.search);
+  const gymId = params.get('gym') || data.gym?.id || '';
+  const qrGymLat = params.get('lat');
+  const qrGymLng = params.get('lng');
+
+  const gymLat = Number(qrGymLat ?? settings.gymLatitude);
+  const gymLng = Number(qrGymLng ?? settings.gymLongitude);
+  const hasGymLocation = Number.isFinite(gymLat) && Number.isFinite(gymLng)
+    && String(qrGymLat ?? settings.gymLatitude) !== ''
+    && String(qrGymLng ?? settings.gymLongitude) !== '';
+
   const [memberNumber, setMemberNumber] = useState('');
   const [location, setLocation] = useState(null);
   const [locationStatus, setLocationStatus] = useState('Requesting your location…');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
-
-  const gymLat = Number(settings.gymLatitude);
-  const gymLng = Number(settings.gymLongitude);
-  const hasGymLocation = Number.isFinite(gymLat) && Number.isFinite(gymLng) && settings.gymLatitude !== '' && settings.gymLongitude !== '';
 
   const requestLocation = () => {
     setResult(null);
@@ -3172,11 +3169,17 @@ function PublicAttendancePage({ data, setData }) {
     setLocationStatus('Requesting your location…');
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        setLocation({ latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy });
+        setLocation({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+        });
         setLocationStatus(`Location detected (accuracy ±${Math.round(position.coords.accuracy || 0)} m)`);
       },
       (error) => {
-        const message = error.code === 1 ? 'Location permission was denied. Please allow location access and try again.' : 'Could not detect your location. Please try again.';
+        const message = error.code === 1
+          ? 'Location permission was denied. Please allow location access and try again.'
+          : 'Could not detect your location. Please try again.';
         setLocationStatus(message);
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
@@ -3185,11 +3188,16 @@ function PublicAttendancePage({ data, setData }) {
 
   useEffect(() => { requestLocation(); }, []);
 
-  const markPresent = () => {
+  const markPresent = async () => {
     setResult(null);
     const number = String(memberNumber || '').trim();
+
     if (!number) {
       setResult({ type: 'error', message: 'Enter your member number.' });
+      return;
+    }
+    if (!gymId) {
+      setResult({ type: 'error', message: 'This attendance QR is not linked to a gym.' });
       return;
     }
     if (!hasGymLocation) {
@@ -3208,75 +3216,104 @@ function PublicAttendancePage({ data, setData }) {
       return;
     }
 
-    const member = (data.members || []).find((item) => String(item.attendanceNumber || item.id || '').trim().toLowerCase() === number.toLowerCase());
-    if (!member) {
-      setResult({ type: 'error', message: 'Member number not found.' });
-      return;
-    }
-    if (getMembershipStatus(member.expiry) === 'Expired') {
-      setResult({ type: 'error', message: 'Attendance denied. Your membership has expired.' });
-      return;
-    }
-
-    const already = (data.attendance || []).some((record) => record.memberId === member.id && record.date === today);
-    if (already) {
-      setResult({ type: 'success', message: `${member.name} is already marked present today.` });
-      return;
-    }
-
     setSubmitting(true);
-    const now = new Date();
-    const record = {
-      id: `A-${Date.now()}`,
-      member: member.name,
-      memberId: member.id,
-      memberNumber: member.attendanceNumber || number,
-      date: today,
-      time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      source: 'QR check-in',
-      latitude: location.latitude,
-      longitude: location.longitude,
-      distanceMeters: Math.round(distance),
-    };
+    try {
+      const response = await publicCheckIn({
+        gymId,
+        memberNumber: number,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        gymLatitude: gymLat,
+        gymLongitude: gymLng,
+      });
 
-    setData((current) => ({
-      ...current,
-      attendance: [record, ...(current.attendance || [])],
-      members: (current.members || []).map((item) => item.id === member.id ? { ...item, visits: Number(item.visits || 0) + 1 } : item),
-    }));
-    setSubmitting(false);
-    setResult({ type: 'success', message: `Attendance marked successfully for ${member.name}.` });
-    setMemberNumber('');
+      if (!response?.success) {
+        setResult({ type: 'error', message: response?.message || 'Attendance could not be marked.' });
+        return;
+      }
+
+      if (response?.already_present) {
+        setResult({
+          type: 'warning',
+          message: response?.message || 'Attendance already marked today.',
+        });
+        return;
+      }
+
+      const member = response.member;
+      const now = new Date();
+      const record = {
+        id: response.attendance?.legacy_id || response.attendance?.id || `A-${Date.now()}`,
+        cloudId: response.attendance?.id,
+        member: member?.name || '',
+        memberId: member?.member_code || member?.id || '',
+        memberNumber: member?.attendance_number || number,
+        date: today,
+        time: response.attendance?.check_in_time || now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        source: 'QR check-in',
+        latitude: location.latitude,
+        longitude: location.longitude,
+        distance: Math.round(distance),
+      };
+
+      setData((current) => ({
+        ...current,
+        attendance: [record, ...(current.attendance || [])],
+        members: (current.members || []).map((item) =>
+          item.id === record.memberId
+            ? { ...item, visits: Number(item.visits || 0) + 1 }
+            : item
+        ),
+      }));
+
+      setResult({ type: 'success', message: `${member?.name || 'Member'} — attendance marked successfully.` });
+      setMemberNumber('');
+    } catch (error) {
+      console.error('Public attendance failed:', error);
+      setResult({ type: 'error', message: error?.message || 'Unable to mark attendance.' });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
-    <div className="auth-screen" style={{ padding: '24px', minHeight: '100vh', background: '#f5f8fa' }}>
-      <div className="auth-card" style={{ width: 'min(460px, 100%)' }}>
-        <img src={LOGO_URL} alt="Preface Fitness" className="auth-logo" />
-        <div style={{ marginTop: '8px', textAlign: 'center' }}>
+    <div className="public-checkin-screen">
+      <div className="public-checkin-card">
+        <img src={LOGO_URL} alt="Preface Fitness" className="public-checkin-logo" />
+        <div className="public-checkin-heading">
           <div className="eyebrow">PREFACE FITNESS</div>
           <h2 style={{ margin: '6px 0 8px' }}>Mark Attendance</h2>
-          <p style={{ color: '#718096', fontSize: '14px', lineHeight: 1.5, margin: 0 }}>Scan at the gym entrance and mark your attendance without logging into the owner dashboard.</p>
+          <p style={{ color: '#718096', fontSize: '14px', lineHeight: 1.5, margin: 0 }}>
+            Scan the QR at the gym entrance, enter your member number and allow location access.
+          </p>
         </div>
 
-        <div style={{ marginTop: '22px', padding: '12px 14px', borderRadius: '12px', background: location ? '#f0faf7' : '#fff8ed', border: `1px solid ${location ? '#cfece3' : '#f0dfbf'}`, color: '#53656f', fontSize: '13px' }}>
+        <div className={`public-location-status ${location ? 'is-ready' : 'is-pending'}`}>
           <strong>{location ? '✓ Location detected' : 'Location required'}</strong>
           <div style={{ marginTop: '3px' }}>{locationStatus}</div>
         </div>
 
-        <div style={{ marginTop: '18px' }}>
-          <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#334155', marginBottom: '7px' }}>Member number</label>
-          <input value={memberNumber} onChange={(e) => setMemberNumber(e.target.value.replace(/\D/g, '').slice(0, 8))} onKeyDown={(e) => { if (e.key === 'Enter') markPresent(); }} inputMode="numeric" autoFocus placeholder="e.g. 23" style={{ width: '100%', fontSize: '22px', textAlign: 'center', letterSpacing: '3px', padding: '13px 14px' }} />
+        <div className="public-member-field">
+          <label className="public-member-label">Member number</label>
+          <input
+            value={memberNumber}
+            onChange={(e) => setMemberNumber(e.target.value.replace(/\D/g, '').slice(0, 8))}
+            onKeyDown={(e) => { if (e.key === 'Enter') markPresent(); }}
+            inputMode="numeric"
+            autoFocus
+            placeholder="e.g. 23"
+            className="public-member-input" 
+          />
         </div>
 
-        <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '14px', minHeight: '48px' }} onClick={markPresent} disabled={submitting}>
-          <CheckCircle2 size={18} /> {submitting ? 'Marking…' : 'Mark Present'}
+        <button className="btn btn-primary public-submit-button" onClick={markPresent} disabled={submitting}>
+          <CheckCircle2 size={18} /> {submitting ? 'Checking…' : 'Mark Present'}
         </button>
 
-        <button className="link-btn" style={{ width: '100%', justifyContent: 'center', marginTop: '10px' }} onClick={requestLocation}>Refresh location</button>
+        <button className="link-btn public-refresh-button" onClick={requestLocation}>Refresh location</button>
 
         {result && (
-          <div style={{ marginTop: '14px', padding: '13px 14px', borderRadius: '12px', background: result.type === 'success' ? '#f0faf7' : '#fff4f3', border: `1px solid ${result.type === 'success' ? '#cfece3' : '#f2d1ce'}`, color: result.type === 'success' ? '#26735f' : '#a33a32', fontSize: '13px', lineHeight: 1.5 }}>
+          <div className={`public-result ${result.type === 'success' ? 'is-success' : result.type === 'warning' ? 'is-warning' : 'is-error'}`}>
             {result.message}
           </div>
         )}
