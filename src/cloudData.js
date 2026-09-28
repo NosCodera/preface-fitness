@@ -1,13 +1,5 @@
 import { supabase } from './supabase';
 
-/*
-  Preface Fitness
-  Cloud data/service layer
-
-  UI should talk to this file instead of calling Supabase directly.
-  This keeps the application portable if the backend changes later.
-*/
-
 const TABLES = {
   membershipPlans: 'membership_plans',
   members: 'members',
@@ -51,13 +43,15 @@ export async function getCurrentUser() {
 export async function getCurrentGym() {
   const user = await getAuthenticatedUser();
 
-  const { data: membership, error: membershipError } =
-    await supabase
-      .from('gym_users')
-      .select('id, gym_id, role')
-      .eq('id', user.id)
-      .limit(1)
-      .maybeSingle();
+  const {
+    data: membership,
+    error: membershipError,
+  } = await supabase
+    .from('gym_users')
+    .select('id, gym_id, role')
+    .eq('id', user.id)
+    .limit(1)
+    .maybeSingle();
 
   throwIfError(
     membershipError,
@@ -70,7 +64,10 @@ export async function getCurrentGym() {
     );
   }
 
-  const { data: gym, error: gymError } = await supabase
+  const {
+    data: gym,
+    error: gymError,
+  } = await supabase
     .from('gyms')
     .select('*')
     .eq('id', membership.gym_id)
@@ -87,23 +84,34 @@ async function getGymId() {
 }
 
 async function selectTable(tableName, gymId) {
-  const { data, error } = await supabase
+  const {
+    data,
+    error,
+  } = await supabase
     .from(tableName)
     .select('*')
-    .eq('gym_id', gymId);
+    .eq('gym_id', gymId)
+    .order('created_at', { ascending: false });
 
-  throwIfError(
-    error,
-    `Unable to load ${tableName}`
-  );
+  throwIfError(error, `Unable to load ${tableName}`);
 
   return data || [];
 }
 
+const memberByCloudId = (members, id) =>
+  members.find((m) => m.cloudId === id);
+
+const memberByUiId = (members, id) =>
+  members.find((m) => m.id === id);
+
+const trainerByCloudId = (trainers, id) =>
+  trainers.find((t) => t.cloudId === id);
+
 function mapMembershipPlan(row) {
   return {
     id: row.id,
-    name: row.name,
+    cloudId: row.id,
+    name: row.name || '',
     months: Number(row.months || 0),
     price: Number(row.price || 0),
     description: row.description || '',
@@ -119,7 +127,8 @@ function mapMember(row) {
     phone: row.phone || '',
     email: row.email || '',
 
-    dob: row.dob || '',
+    dob: row.date_of_birth || row.dob || '',
+    birthday: row.date_of_birth || row.dob || '',
     gender: row.gender || '',
     address: row.address || '',
     emergencyContact: row.emergency_contact || '',
@@ -151,6 +160,7 @@ function mapMember(row) {
 
     height: row.height || '',
     weight: row.weight || '',
+    currentWeight: row.weight || '',
     bodyFat: row.body_fat || '',
 
     trainer: row.trainer_name || '',
@@ -161,20 +171,24 @@ function mapMember(row) {
 
     photo: row.photo || '',
 
-    dietPreference:
-      row.diet_preference || '',
+    dietPreference: row.diet_preference || '',
 
-    attendanceNumber:
-      row.attendance_number || '',
+    attendanceNumber: row.attendance_number || '',
 
-    referralPoints:
-      Number(row.referral_points || 0),
+    referralPoints: Number(
+      row.referral_points || 0
+    ),
 
     referredBy:
-      row.referred_by_member_id || '',
+      row.referred_by_member_code ||
+      row.referred_by_member_id ||
+      '',
 
-    createdAt:
-      row.created_at || '',
+    referredClients: Number(
+      row.referred_clients || 0
+    ),
+
+    createdAt: row.created_at || '',
   };
 }
 
@@ -188,15 +202,18 @@ function mapLead(row) {
     email: row.email || '',
 
     source: row.source || '',
+
     stage: row.stage || 'New',
 
-    followUp:
-      row.follow_up_date || '',
+    followUp: row.follow_up_date || '',
 
     interestedPlan:
       row.interested_plan || '',
 
     notes: row.notes || '',
+
+    lastContact:
+      row.last_contact || '',
 
     convertedMemberId:
       row.converted_member_code || '',
@@ -207,8 +224,9 @@ function mapLead(row) {
 }
 
 function mapPayment(row, members) {
-  const member = members.find(
-    (item) => item.cloudId === row.member_id
+  const member = memberByCloudId(
+    members,
+    row.member_id
   );
 
   return {
@@ -236,8 +254,9 @@ function mapPayment(row, members) {
 }
 
 function mapAttendance(row, members) {
-  const member = members.find(
-    (item) => item.cloudId === row.member_id
+  const member = memberByCloudId(
+    members,
+    row.member_id
   );
 
   return {
@@ -263,7 +282,7 @@ function mapAttendance(row, members) {
       row.distance_meters ?? null,
 
     source:
-      row.source || 'manual',
+      row.source || 'Manual',
   };
 }
 
@@ -279,7 +298,7 @@ function mapTrainer(row) {
       row.specialization || '',
 
     experience:
-      row.experience || '',
+      Number(row.experience || 0),
 
     status:
       row.status || 'Active',
@@ -292,24 +311,36 @@ function mapTrainer(row) {
   };
 }
 
-function mapPTSession(row, members, trainers) {
-  const member = members.find(
-    (item) => item.cloudId === row.member_id
+function mapPTSession(
+  row,
+  members,
+  trainers
+) {
+  const member = memberByCloudId(
+    members,
+    row.member_id
   );
 
-  const trainer = trainers.find(
-    (item) => item.cloudId === row.trainer_id
+  const trainer = trainerByCloudId(
+    trainers,
+    row.trainer_id
   );
 
   return {
     id: row.legacy_id || row.id,
     cloudId: row.id,
 
-    memberId: member?.id || '',
-    member: member?.name || '',
+    memberId:
+      member?.id || '',
 
-    trainerId: trainer?.id || '',
-    trainer: trainer?.name || '',
+    member:
+      member?.name || '',
+
+    trainerId:
+      trainer?.id || '',
+
+    trainer:
+      trainer?.name || '',
 
     date:
       row.session_date || '',
@@ -320,8 +351,22 @@ function mapPTSession(row, members, trainers) {
     endTime:
       row.end_time || '',
 
+    time:
+      row.start_time || '',
+
+    duration:
+      Number(row.duration_minutes || 0),
+
+    type:
+      row.session_type ||
+      'Personal Training',
+
     status:
-      row.status || 'Scheduled',
+      row.status ||
+      'Scheduled',
+
+    fee:
+      Number(row.amount || 0),
 
     amount:
       Number(row.amount || 0),
@@ -331,16 +376,21 @@ function mapPTSession(row, members, trainers) {
   };
 }
 
-function mapProgressRecord(row, members) {
-  const member = members.find(
-    (item) => item.cloudId === row.member_id
+function mapProgressRecord(
+  row,
+  members
+) {
+  const member = memberByCloudId(
+    members,
+    row.member_id
   );
 
   return {
     id: row.legacy_id || row.id,
     cloudId: row.id,
 
-    memberId: member?.id || '',
+    memberId:
+      member?.id || '',
 
     date:
       row.record_date || '',
@@ -381,29 +431,28 @@ function mapProgressRecord(row, members) {
   };
 }
 
-function mapWorkoutPlan(row, members) {
-  const assignedCloudIds =
-    Array.isArray(row.assigned_member_ids)
-      ? row.assigned_member_ids
-      : [];
-
-  const assignedMemberIds = assignedCloudIds
-    .map((cloudId) => {
-      const member = members.find(
-        (item) => item.cloudId === cloudId
-      );
-
-      return member?.id || null;
-    })
-    .filter(Boolean);
+function mapWorkoutPlan(
+  row,
+  members
+) {
+  const ids = Array.isArray(
+    row.assigned_member_ids
+  )
+    ? row.assigned_member_ids
+    : [];
 
   return {
     id: row.legacy_id || row.id,
     cloudId: row.id,
 
-    name: row.name || '',
-    goal: row.goal || '',
-    level: row.level || '',
+    name:
+      row.name || '',
+
+    goal:
+      row.goal || '',
+
+    level:
+      row.level || '',
 
     durationWeeks:
       Number(row.duration_weeks || 0),
@@ -414,7 +463,16 @@ function mapWorkoutPlan(row, members) {
     notes:
       row.notes || '',
 
-    assignedMemberIds,
+    assignedMemberIds:
+      ids
+        .map(
+          (x) =>
+            memberByCloudId(
+              members,
+              x
+            )?.id
+        )
+        .filter(Boolean),
 
     exercises:
       row.exercises || [],
@@ -424,28 +482,25 @@ function mapWorkoutPlan(row, members) {
   };
 }
 
-function mapDietPlan(row, members) {
-  const assignedCloudIds =
-    Array.isArray(row.assigned_member_ids)
-      ? row.assigned_member_ids
-      : [];
-
-  const assignedMemberIds = assignedCloudIds
-    .map((cloudId) => {
-      const member = members.find(
-        (item) => item.cloudId === cloudId
-      );
-
-      return member?.id || null;
-    })
-    .filter(Boolean);
+function mapDietPlan(
+  row,
+  members
+) {
+  const ids = Array.isArray(
+    row.assigned_member_ids
+  )
+    ? row.assigned_member_ids
+    : [];
 
   return {
     id: row.legacy_id || row.id,
     cloudId: row.id,
 
-    name: row.name || '',
-    goal: row.goal || '',
+    name:
+      row.name || '',
+
+    goal:
+      row.goal || '',
 
     calories:
       Number(row.calories || 0),
@@ -462,7 +517,16 @@ function mapDietPlan(row, members) {
     notes:
       row.notes || '',
 
-    assignedMemberIds,
+    assignedMemberIds:
+      ids
+        .map(
+          (x) =>
+            memberByCloudId(
+              members,
+              x
+            )?.id
+        )
+        .filter(Boolean),
 
     meals:
       row.meals || [],
@@ -472,9 +536,13 @@ function mapDietPlan(row, members) {
   };
 }
 
-function mapCommunicationLog(row, members) {
-  const member = members.find(
-    (item) => item.cloudId === row.member_id
+function mapCommunicationLog(
+  row,
+  members
+) {
+  const member = memberByCloudId(
+    members,
+    row.member_id
   );
 
   return {
@@ -493,6 +561,9 @@ function mapCommunicationLog(row, members) {
     direction:
       row.direction || '',
 
+    template:
+      row.template || '',
+
     subject:
       row.subject || '',
 
@@ -503,149 +574,235 @@ function mapCommunicationLog(row, members) {
       row.status || '',
 
     date:
-      row.sent_at || '',
+      row.communication_date ||
+      row.sent_at ||
+      '',
+
+    time:
+      row.communication_time ||
+      '',
+
+    createdAt:
+      row.created_at || '',
   };
 }
 
-function buildSettings(rows) {
-  const settings = {};
-
-  for (const row of rows) {
-    const key = row.setting_key;
-
-    if (!key) continue;
-
-    settings[key] = row.setting_value;
+function parseSetting(value) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return value;
   }
 
-  return settings;
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
 }
 
-/*
- * Load the complete cloud state in the same general shape
- * that the existing React application already understands.
- */
+function buildSettings(rows) {
+  const out = {};
+
+  for (const row of rows) {
+    if (row.setting_key) {
+      out[row.setting_key] =
+        parseSetting(row.setting_value);
+    }
+  }
+
+  return out;
+}
+
 export async function loadCloudState() {
-  const gymId = await getGymId();
+  const gym =
+    await getCurrentGym();
+
+  const gymId = gym.id;
 
   const [
-    membershipPlanRows,
-    memberRows,
-    leadRows,
-    paymentRows,
+    membershipPlans,
+    membersRows,
+    leads,
+    paymentsRows,
     attendanceRows,
-    trainerRows,
-    ptSessionRows,
+    trainersRows,
+    ptRows,
     progressRows,
-    workoutPlanRows,
-    dietPlanRows,
+    workoutRows,
+    dietRows,
     communicationRows,
-    settingRows,
+    settingsRows,
   ] = await Promise.all([
-    selectTable(TABLES.membershipPlans, gymId),
-    selectTable(TABLES.members, gymId),
-    selectTable(TABLES.leads, gymId),
-    selectTable(TABLES.payments, gymId),
-    selectTable(TABLES.attendance, gymId),
-    selectTable(TABLES.trainers, gymId),
-    selectTable(TABLES.ptSessions, gymId),
-    selectTable(TABLES.progressRecords, gymId),
-    selectTable(TABLES.workoutPlans, gymId),
-    selectTable(TABLES.dietPlans, gymId),
-    selectTable(TABLES.communicationLogs, gymId),
-    selectTable(TABLES.appSettings, gymId),
+    selectTable(
+      TABLES.membershipPlans,
+      gymId
+    ),
+
+    selectTable(
+      TABLES.members,
+      gymId
+    ),
+
+    selectTable(
+      TABLES.leads,
+      gymId
+    ),
+
+    selectTable(
+      TABLES.payments,
+      gymId
+    ),
+
+    selectTable(
+      TABLES.attendance,
+      gymId
+    ),
+
+    selectTable(
+      TABLES.trainers,
+      gymId
+    ),
+
+    selectTable(
+      TABLES.ptSessions,
+      gymId
+    ),
+
+    selectTable(
+      TABLES.progressRecords,
+      gymId
+    ),
+
+    selectTable(
+      TABLES.workoutPlans,
+      gymId
+    ),
+
+    selectTable(
+      TABLES.dietPlans,
+      gymId
+    ),
+
+    selectTable(
+      TABLES.communicationLogs,
+      gymId
+    ),
+
+    selectTable(
+      TABLES.appSettings,
+      gymId
+    ),
   ]);
 
   const members =
-    memberRows.map(mapMember);
+    membersRows.map(mapMember);
 
   const trainers =
-    trainerRows.map(mapTrainer);
-
-  const gym = await getCurrentGym();
+    trainersRows.map(mapTrainer);
 
   return {
     gym,
 
     membershipPlans:
-      membershipPlanRows.map(mapMembershipPlan),
+      membershipPlans.map(
+        mapMembershipPlan
+      ),
 
     members,
 
     leads:
-      leadRows.map(mapLead),
+      leads.map(mapLead),
 
     payments:
-      paymentRows.map((row) =>
-        mapPayment(row, members)
+      paymentsRows.map(
+        (r) =>
+          mapPayment(
+            r,
+            members
+          )
       ),
 
     attendance:
-      attendanceRows.map((row) =>
-        mapAttendance(row, members)
+      attendanceRows.map(
+        (r) =>
+          mapAttendance(
+            r,
+            members
+          )
       ),
 
     trainers,
 
     ptSessions:
-      ptSessionRows.map((row) =>
-        mapPTSession(
-          row,
-          members,
-          trainers
-        )
+      ptRows.map(
+        (r) =>
+          mapPTSession(
+            r,
+            members,
+            trainers
+          )
       ),
 
     progressRecords:
-      progressRows.map((row) =>
-        mapProgressRecord(
-          row,
-          members
-        )
+      progressRows.map(
+        (r) =>
+          mapProgressRecord(
+            r,
+            members
+          )
       ),
 
     workoutPlans:
-      workoutPlanRows.map((row) =>
-        mapWorkoutPlan(
-          row,
-          members
-        )
+      workoutRows.map(
+        (r) =>
+          mapWorkoutPlan(
+            r,
+            members
+          )
       ),
 
     dietPlans:
-      dietPlanRows.map((row) =>
-        mapDietPlan(
-          row,
-          members
-        )
+      dietRows.map(
+        (r) =>
+          mapDietPlan(
+            r,
+            members
+          )
       ),
 
     communicationLogs:
-      communicationRows.map((row) =>
-        mapCommunicationLog(
-          row,
-          members
-        )
+      communicationRows.map(
+        (r) =>
+          mapCommunicationLog(
+            r,
+            members
+          )
       ),
 
     settings:
-      buildSettings(settingRows),
+      buildSettings(
+        settingsRows
+      ),
   };
 }
-
-/*
- * Generic helpers for future CRUD functions.
- * Keeping these here means main.jsx doesn't need direct
- * Supabase-specific calls.
- */
 
 export async function insertRecord(
   tableName,
   payload
 ) {
-  const gymId = await getGymId();
+  const gymId =
+    await getGymId();
 
-  const { data, error } = await supabase
+  const {
+    data,
+    error,
+  } = await supabase
     .from(tableName)
     .insert({
       ...payload,
@@ -667,9 +824,13 @@ export async function updateRecord(
   id,
   payload
 ) {
-  const gymId = await getGymId();
+  const gymId =
+    await getGymId();
 
-  const { data, error } = await supabase
+  const {
+    data,
+    error,
+  } = await supabase
     .from(tableName)
     .update(payload)
     .eq('id', id)
@@ -689,9 +850,12 @@ export async function deleteRecord(
   tableName,
   id
 ) {
-  const gymId = await getGymId();
+  const gymId =
+    await getGymId();
 
-  const { error } = await supabase
+  const {
+    error,
+  } = await supabase
     .from(tableName)
     .delete()
     .eq('id', id)
@@ -705,17 +869,128 @@ export async function deleteRecord(
   return true;
 }
 
-export async function publicCheckIn({ gymId, memberNumber, latitude, longitude, gymLatitude, gymLongitude }) {
-  const { data, error } = await supabase.rpc('public_check_in', {
-    p_gym_id: gymId,
-    p_member_number: String(memberNumber || '').trim(),
-    p_lat: Number(latitude),
-    p_lng: Number(longitude),
-    p_gym_lat: Number(gymLatitude),
-    p_gym_lng: Number(gymLongitude),
-  });
+/*
+  Save one or more application settings.
 
-  throwIfError(error, 'Unable to mark attendance');
+  app_settings.setting_value is JSONB,
+  therefore values are explicitly JSON-stringified
+  before being written.
+*/
+export async function saveSettings(
+  settings
+) {
+  const gymId =
+    await getGymId();
 
-  return data || { success: false, message: 'Attendance service returned no response.' };
+  const entries =
+    Object.entries(
+      settings || {}
+    );
+
+  for (
+    const [key, value]
+    of entries
+  ) {
+    const {
+      data: existing,
+      error: findError,
+    } = await supabase
+      .from(TABLES.appSettings)
+      .select('id')
+      .eq('gym_id', gymId)
+      .eq('setting_key', key)
+      .maybeSingle();
+
+    throwIfError(
+      findError,
+      `Unable to read setting ${key}`
+    );
+
+    const row = {
+      gym_id: gymId,
+      setting_key: key,
+      setting_value:
+        JSON.stringify(value),
+    };
+
+    if (existing?.id) {
+      const {
+        error,
+      } = await supabase
+        .from(TABLES.appSettings)
+        .update({
+          setting_value:
+            row.setting_value,
+        })
+        .eq('id', existing.id)
+        .eq('gym_id', gymId);
+
+      throwIfError(
+        error,
+        `Unable to update setting ${key}`
+      );
+    } else {
+      const {
+        error,
+      } = await supabase
+        .from(TABLES.appSettings)
+        .insert(row);
+
+      throwIfError(
+        error,
+        `Unable to insert setting ${key}`
+      );
+    }
+  }
+
+  return settings;
+}
+
+export async function publicCheckIn({
+  gymId,
+  memberNumber,
+  latitude,
+  longitude,
+  gymLatitude,
+  gymLongitude,
+}) {
+  const {
+    data,
+    error,
+  } = await supabase.rpc(
+    'public_check_in',
+    {
+      p_gym_id: gymId,
+
+      p_member_number:
+        String(
+          memberNumber || ''
+        ).trim(),
+
+      p_lat:
+        Number(latitude),
+
+      p_lng:
+        Number(longitude),
+
+      p_gym_lat:
+        Number(gymLatitude),
+
+      p_gym_lng:
+        Number(gymLongitude),
+    }
+  );
+
+  throwIfError(
+    error,
+    'Unable to mark attendance'
+  );
+
+  return (
+    data || {
+      success: false,
+      message:
+        'Attendance service returned no response.',
+    }
+  );
 }

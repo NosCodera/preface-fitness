@@ -45,7 +45,7 @@ import {
   getSupabaseSession,
   subscribeToAuthChanges,
 } from './supabaseAuth';
-import { loadCloudState, insertRecord, updateRecord, deleteRecord, publicCheckIn } from './cloudData';
+import { loadCloudState, insertRecord, updateRecord, deleteRecord, saveSettings as saveCloudSettings, publicCheckIn } from './cloudData';
 
 const LOGO_URL = `${import.meta.env.BASE_URL}preface-logo.jpg`;
 
@@ -374,6 +374,10 @@ async function hashPassword(password) {
   return window.btoa(unescape(encodeURIComponent(value)));
 }
 
+function memberByUiIdLocal(members, id) { return (members || []).find((member) => member.id === id); }
+
+function addMinutesToTimeLocal(time, minutes) { if (!time) return ''; const p = String(time).split(':').map(Number); if (p.length < 2 || p.some(Number.isNaN)) return ''; const total = p[0] * 60 + p[1] + Number(minutes || 0); const h = Math.floor((total % 1440) / 60); const m = total % 60; return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`; }
+
 function App() {
   const [data, setData] = useState(seed);
   const [dbReady, setDbReady] = useState(false);
@@ -480,39 +484,17 @@ function App() {
           // Only replace a local collection when the cloud actually has
           // records. This prevents a newly-created/empty cloud database
           // from wiping the existing local browser data.
-          membershipPlans: cloud.membershipPlans?.length
-            ? cloud.membershipPlans
-            : current.membershipPlans,
-          members: cloud.members?.length
-            ? cloud.members
-            : current.members,
-          leads: cloud.leads?.length
-            ? cloud.leads
-            : current.leads,
-          payments: cloud.payments?.length
-            ? cloud.payments
-            : current.payments,
-          attendance: cloud.attendance?.length
-            ? cloud.attendance
-            : current.attendance,
-          trainers: cloud.trainers?.length
-            ? cloud.trainers
-            : current.trainers,
-          ptSessions: cloud.ptSessions?.length
-            ? cloud.ptSessions
-            : current.ptSessions,
-          progressRecords: cloud.progressRecords?.length
-            ? cloud.progressRecords
-            : current.progressRecords,
-          workoutPlans: cloud.workoutPlans?.length
-            ? cloud.workoutPlans
-            : current.workoutPlans,
-          dietPlans: cloud.dietPlans?.length
-            ? cloud.dietPlans
-            : current.dietPlans,
-          communicationLogs: cloud.communicationLogs?.length
-            ? cloud.communicationLogs
-            : current.communicationLogs,
+          membershipPlans: cloud.membershipPlans || [],
+          members: cloud.members || [],
+          leads: cloud.leads || [],
+          payments: cloud.payments || [],
+          attendance: cloud.attendance || [],
+          trainers: cloud.trainers || [],
+          ptSessions: cloud.ptSessions || [],
+          progressRecords: cloud.progressRecords || [],
+          workoutPlans: cloud.workoutPlans || [],
+          dietPlans: cloud.dietPlans || [],
+          communicationLogs: cloud.communicationLogs || [],
           settings: {
             ...(current.settings || {}),
             ...(cloud.settings || {}),
@@ -573,7 +555,7 @@ function App() {
         name: clean.name || '',
         phone: clean.phone || '',
         email: clean.email || '',
-        dob: clean.dob || clean.birthday || null,
+        date_of_birth: clean.dob || clean.birthday || null,
         gender: clean.gender || '',
         address: clean.address || '',
         emergency_contact: clean.emergencyContact || '',
@@ -753,46 +735,12 @@ function App() {
   };
 
   const addLead = async (lead) => {
-    const id = `L-${101 + data.leads.length}`;
-    const clean = {
-      ...lead,
-      id,
-      name: String(lead.name || '').trim(),
-      phone: String(lead.phone || '').trim(),
-      email: String(lead.email || '').trim(),
-      source: lead.source || 'Walk-in',
-      stage: lead.stage || 'New',
-      followUp: lead.followUp || today,
-      interestedPlan: lead.interestedPlan || '',
-      notes: lead.notes || '',
-    };
-
-    if (!clean.name) {
-      setToast('Lead name is required');
-      return;
-    }
-
+    const id = `L-${Date.now()}`;
     try {
-      const row = await insertRecord('leads', {
-        legacy_id: id,
-        name: clean.name,
-        phone: clean.phone,
-        email: clean.email,
-        source: clean.source,
-        stage: clean.stage,
-        follow_up_date: clean.followUp || null,
-        interested_plan: clean.interestedPlan,
-        notes: clean.notes,
-      });
-
-      const saved = { ...clean, cloudId: row.id, id: row.legacy_id || id };
-      setData((d) => ({ ...d, leads: [saved, ...d.leads] }));
-      setModal(null);
-      setToast('Lead added to Supabase');
-    } catch (error) {
-      console.error('Supabase lead insert failed:', error);
-      setToast(error?.message || 'Could not save lead to Supabase');
-    }
+      const row = await insertRecord('leads', { legacy_id: id, name: lead.name || '', phone: lead.phone || '', email: lead.email || '', source: lead.source || 'Walk-in', stage: lead.stage || 'New', follow_up_date: lead.followUp || today, interested_plan: lead.interestedPlan || '', notes: lead.notes || '', last_contact: lead.lastContact || today });
+      setData((d) => ({ ...d, leads: [{ ...lead, id: row.legacy_id || id, cloudId: row.id, stage: row.stage || 'New' }, ...d.leads] }));
+      setModal(null); setToast('Lead added successfully');
+    } catch (error) { setToast(error?.message || 'Unable to add lead to Supabase'); }
   };
 
   const addPayment = async (payment) => {
@@ -931,251 +879,112 @@ function App() {
     }
   };
 
-  const createWorkoutPlan = (plan) => {
-    const clean = {
-      ...plan,
-      id: `WP-${Date.now()}`,
-      durationWeeks: Number(plan.durationWeeks || 1),
-      assignedMemberIds: Array.isArray(plan.assignedMemberIds) ? plan.assignedMemberIds : [],
-      exercises: (plan.exercises || []).map((exercise, index) => ({
-        ...exercise,
-        id: exercise.id || `EX-${Date.now()}-${index}`,
-        sets: Number(exercise.sets || 1),
-      })),
-      createdAt: new Date().toISOString(),
-    };
-
-    setData((d) => ({ ...d, workoutPlans: [clean, ...(d.workoutPlans || [])] }));
-    setModal(null);
-    setToast('Workout plan created');
+  const createWorkoutPlan = async (plan) => {
+    const clean = { ...plan, id: `WP-${Date.now()}`, durationWeeks: Number(plan.durationWeeks || 1), assignedMemberIds: Array.isArray(plan.assignedMemberIds) ? plan.assignedMemberIds : [], exercises: (plan.exercises || []).map((e, i) => ({ ...e, id: e.id || `EX-${Date.now()}-${i}`, sets: Number(e.sets || 1) })), createdAt: new Date().toISOString() };
+    try {
+      const assigned = clean.assignedMemberIds.map((id) => memberByUiIdLocal(data.members, id)?.cloudId).filter(Boolean);
+      const row = await insertRecord('workoutPlans', { legacy_id: clean.id, name: clean.name || '', goal: clean.goal || '', level: clean.level || '', duration_weeks: clean.durationWeeks, trainer_name: clean.trainer || '', notes: clean.notes || '', assigned_member_ids: assigned, exercises: clean.exercises });
+      setData((d) => ({ ...d, workoutPlans: [{ ...clean, id: row.legacy_id || clean.id, cloudId: row.id }, ...(d.workoutPlans || [])] }));
+      setModal(null); setToast('Workout plan created');
+    } catch (error) { setToast(error?.message || 'Unable to save workout plan'); }
   };
 
-  const updateWorkoutPlan = (plan) => {
-    const clean = {
-      ...plan,
-      durationWeeks: Number(plan.durationWeeks || 1),
-      assignedMemberIds: Array.isArray(plan.assignedMemberIds) ? plan.assignedMemberIds : [],
-      exercises: (plan.exercises || []).map((exercise, index) => ({
-        ...exercise,
-        id: exercise.id || `EX-${Date.now()}-${index}`,
-        sets: Number(exercise.sets || 1),
-      })),
-    };
-
-    setData((d) => ({
-      ...d,
-      workoutPlans: (d.workoutPlans || []).map((item) => item.id === clean.id ? clean : item),
-    }));
-    setModal(null);
-    setToast('Workout plan updated');
+  const updateWorkoutPlan = async (plan) => {
+    const existing = (data.workoutPlans || []).find((x) => x.id === plan.id);
+    if (!existing?.cloudId) return setToast('This workout plan is not linked to Supabase');
+    const clean = { ...plan, durationWeeks: Number(plan.durationWeeks || 1), assignedMemberIds: Array.isArray(plan.assignedMemberIds) ? plan.assignedMemberIds : [], exercises: (plan.exercises || []).map((e, i) => ({ ...e, id: e.id || `EX-${Date.now()}-${i}`, sets: Number(e.sets || 1) })) };
+    try {
+      const assigned = clean.assignedMemberIds.map((id) => memberByUiIdLocal(data.members, id)?.cloudId).filter(Boolean);
+      await updateRecord('workoutPlans', existing.cloudId, { name: clean.name || '', goal: clean.goal || '', level: clean.level || '', duration_weeks: clean.durationWeeks, trainer_name: clean.trainer || '', notes: clean.notes || '', assigned_member_ids: assigned, exercises: clean.exercises });
+      setData((d) => ({ ...d, workoutPlans: (d.workoutPlans || []).map((x) => x.id === clean.id ? { ...clean, cloudId: existing.cloudId } : x) }));
+      setModal(null); setToast('Workout plan updated');
+    } catch (error) { setToast(error?.message || 'Unable to update workout plan'); }
   };
 
-  const deleteWorkoutPlan = (id) => {
+  const deleteWorkoutPlan = async (id) => {
     if (!window.confirm('Delete this workout plan?')) return;
-    setData((d) => ({
-      ...d,
-      workoutPlans: (d.workoutPlans || []).filter((plan) => plan.id !== id),
-    }));
-    setToast('Workout plan deleted');
+    const item = (data.workoutPlans || []).find((x) => x.id === id);
+    if (!item?.cloudId) return setToast('This workout plan is not linked to Supabase');
+    try { await deleteRecord('workoutPlans', item.cloudId); setData((d) => ({ ...d, workoutPlans: (d.workoutPlans || []).filter((x) => x.id !== id) })); setToast('Workout plan deleted'); } catch (error) { setToast(error?.message || 'Unable to delete workout plan'); }
   };
 
-  const createDietPlan = (plan) => {
-    const clean = {
-      ...plan,
-      id: `DP-${Date.now()}`,
-      calories: Number(plan.calories || 0),
-      protein: Number(plan.protein || 0),
-      durationWeeks: Number(plan.durationWeeks || 1),
-      assignedMemberIds: Array.isArray(plan.assignedMemberIds) ? plan.assignedMemberIds : [],
-      meals: (plan.meals || []).map((meal, index) => ({
-        ...meal,
-        id: meal.id || `MEAL-${Date.now()}-${index}`,
-        calories: Number(meal.calories || 0),
-        protein: Number(meal.protein || 0),
-      })),
-      createdAt: new Date().toISOString(),
-    };
-    setData((d) => ({ ...d, dietPlans: [clean, ...(d.dietPlans || [])] }));
-    setModal(null);
-    setToast('Diet plan created');
+  const createDietPlan = async (plan) => {
+    const clean = { ...plan, id: `DP-${Date.now()}`, calories: Number(plan.calories || 0), protein: Number(plan.protein || 0), durationWeeks: Number(plan.durationWeeks || 1), assignedMemberIds: Array.isArray(plan.assignedMemberIds) ? plan.assignedMemberIds : [], meals: (plan.meals || []).map((m, i) => ({ ...m, id: m.id || `MEAL-${Date.now()}-${i}`, calories: Number(m.calories || 0), protein: Number(m.protein || 0) })), createdAt: new Date().toISOString() };
+    try {
+      const assigned = clean.assignedMemberIds.map((id) => memberByUiIdLocal(data.members, id)?.cloudId).filter(Boolean);
+      const row = await insertRecord('dietPlans', { legacy_id: clean.id, name: clean.name || '', goal: clean.goal || '', calories: clean.calories, protein: clean.protein, duration_weeks: clean.durationWeeks, coach: clean.coach || '', notes: clean.notes || '', assigned_member_ids: assigned, meals: clean.meals });
+      setData((d) => ({ ...d, dietPlans: [{ ...clean, id: row.legacy_id || clean.id, cloudId: row.id }, ...(d.dietPlans || [])] })); setModal(null); setToast('Diet plan created');
+    } catch (error) { setToast(error?.message || 'Unable to save diet plan'); }
   };
 
-  const updateDietPlan = (plan) => {
-    const clean = {
-      ...plan,
-      calories: Number(plan.calories || 0),
-      protein: Number(plan.protein || 0),
-      durationWeeks: Number(plan.durationWeeks || 1),
-      assignedMemberIds: Array.isArray(plan.assignedMemberIds) ? plan.assignedMemberIds : [],
-      meals: (plan.meals || []).map((meal, index) => ({
-        ...meal,
-        id: meal.id || `MEAL-${Date.now()}-${index}`,
-        calories: Number(meal.calories || 0),
-        protein: Number(meal.protein || 0),
-      })),
-    };
-    setData((d) => ({ ...d, dietPlans: (d.dietPlans || []).map((item) => item.id === clean.id ? clean : item) }));
-    setModal(null);
-    setToast('Diet plan updated');
+  const updateDietPlan = async (plan) => {
+    const existing = (data.dietPlans || []).find((x) => x.id === plan.id);
+    if (!existing?.cloudId) return setToast('This diet plan is not linked to Supabase');
+    const clean = { ...plan, calories: Number(plan.calories || 0), protein: Number(plan.protein || 0), durationWeeks: Number(plan.durationWeeks || 1), assignedMemberIds: Array.isArray(plan.assignedMemberIds) ? plan.assignedMemberIds : [], meals: (plan.meals || []).map((m, i) => ({ ...m, id: m.id || `MEAL-${Date.now()}-${i}`, calories: Number(m.calories || 0), protein: Number(m.protein || 0) })) };
+    try { const assigned = clean.assignedMemberIds.map((id) => memberByUiIdLocal(data.members, id)?.cloudId).filter(Boolean); await updateRecord('dietPlans', existing.cloudId, { name: clean.name || '', goal: clean.goal || '', calories: clean.calories, protein: clean.protein, duration_weeks: clean.durationWeeks, coach: clean.coach || '', notes: clean.notes || '', assigned_member_ids: assigned, meals: clean.meals }); setData((d) => ({ ...d, dietPlans: (d.dietPlans || []).map((x) => x.id === clean.id ? { ...clean, cloudId: existing.cloudId } : x) })); setModal(null); setToast('Diet plan updated'); } catch (error) { setToast(error?.message || 'Unable to update diet plan'); }
   };
 
-  const deleteDietPlan = (id) => {
+  const deleteDietPlan = async (id) => {
     if (!window.confirm('Delete this diet plan?')) return;
-    setData((d) => ({ ...d, dietPlans: (d.dietPlans || []).filter((plan) => plan.id !== id) }));
-    setToast('Diet plan deleted');
+    const item = (data.dietPlans || []).find((x) => x.id === id); if (!item?.cloudId) return setToast('This diet plan is not linked to Supabase');
+    try { await deleteRecord('dietPlans', item.cloudId); setData((d) => ({ ...d, dietPlans: (d.dietPlans || []).filter((x) => x.id !== id) })); setToast('Diet plan deleted'); } catch (error) { setToast(error?.message || 'Unable to delete diet plan'); }
   };
 
-
-  const addTrainer = (trainer) => {
-    const clean = {
-      ...trainer,
-      id: `TR-${Date.now()}`,
-      experience: Number(trainer.experience || 0),
-      monthlySalary: Number(trainer.monthlySalary || 0),
-      status: trainer.status || 'Active',
-    };
-
-    setData((d) => ({
-      ...d,
-      trainers: [clean, ...(d.trainers || [])],
-    }));
-    setModal(null);
-    setToast('Trainer added');
+  const addTrainer = async (trainer) => {
+    const clean = { ...trainer, id: `TR-${Date.now()}`, experience: Number(trainer.experience || 0), monthlySalary: Number(trainer.monthlySalary || 0), status: trainer.status || 'Active' };
+    try { const row = await insertRecord('trainers', { legacy_id: clean.id, name: clean.name || '', phone: clean.phone || '', specialization: clean.specialization || '', experience: clean.experience, status: clean.status, monthly_salary: clean.monthlySalary, notes: clean.notes || '' }); setData((d) => ({ ...d, trainers: [{ ...clean, id: row.legacy_id || clean.id, cloudId: row.id }, ...(d.trainers || [])] })); setModal(null); setToast('Trainer added'); } catch (error) { setToast(error?.message || 'Unable to add trainer'); }
   };
 
-  const updateTrainer = (trainer) => {
-    const clean = {
-      ...trainer,
-      experience: Number(trainer.experience || 0),
-      monthlySalary: Number(trainer.monthlySalary || 0),
-    };
-
-    setData((d) => ({
-      ...d,
-      trainers: (d.trainers || []).map((item) =>
-        item.id === clean.id ? clean : item
-      ),
-    }));
-    setModal(null);
-    setToast('Trainer updated');
+  const updateTrainer = async (trainer) => {
+    const existing = (data.trainers || []).find((x) => x.id === trainer.id); if (!existing?.cloudId) return setToast('This trainer is not linked to Supabase');
+    const clean = { ...trainer, experience: Number(trainer.experience || 0), monthlySalary: Number(trainer.monthlySalary || 0) };
+    try { await updateRecord('trainers', existing.cloudId, { name: clean.name || '', phone: clean.phone || '', specialization: clean.specialization || '', experience: clean.experience, status: clean.status || 'Active', monthly_salary: clean.monthlySalary, notes: clean.notes || '' }); setData((d) => ({ ...d, trainers: (d.trainers || []).map((x) => x.id === clean.id ? { ...clean, cloudId: existing.cloudId } : x) })); setModal(null); setToast('Trainer updated'); } catch (error) { setToast(error?.message || 'Unable to update trainer'); }
   };
 
-  const deleteTrainer = (id) => {
-    const trainer = (data.trainers || []).find((item) => item.id === id);
-    if (!trainer || !window.confirm(`Delete ${trainer.name}?`)) return;
-
-    setData((d) => ({
-      ...d,
-      trainers: (d.trainers || []).filter((item) => item.id !== id),
-      ptSessions: (d.ptSessions || []).filter((session) => session.trainerId !== id),
-    }));
-    setToast('Trainer deleted');
+  const deleteTrainer = async (id) => {
+    const trainer = (data.trainers || []).find((x) => x.id === id); if (!trainer || !window.confirm(`Delete ${trainer.name}?`)) return; if (!trainer.cloudId) return setToast('This trainer is not linked to Supabase');
+    try { await deleteRecord('trainers', trainer.cloudId); setData((d) => ({ ...d, trainers: (d.trainers || []).filter((x) => x.id !== id) })); setToast('Trainer deleted'); } catch (error) { setToast(error?.message || 'Unable to delete trainer'); }
   };
 
-  const addPTSession = (session) => {
-    const clean = {
-      ...session,
-      id: `PT-${Date.now()}`,
-      duration: Number(session.duration || 60),
-      fee: Number(session.fee || 0),
-      status: session.status || 'Scheduled',
-      date: session.date || today,
-    };
-
-    setData((d) => ({
-      ...d,
-      ptSessions: [clean, ...(d.ptSessions || [])],
-    }));
-    setModal(null);
-    setToast('PT session scheduled');
+  const addPTSession = async (session) => {
+    const member = memberByUiIdLocal(data.members, session.memberId); const trainer = (data.trainers || []).find((x) => x.id === session.trainerId);
+    if (!member?.cloudId || !trainer?.cloudId) return setToast('Select a Supabase-linked member and trainer');
+    const clean = { ...session, id: `PT-${Date.now()}`, duration: Number(session.duration || 60), fee: Number(session.fee || 0), status: session.status || 'Scheduled', date: session.date || today };
+    const startTime = session.startTime || session.time || '';
+    const endTime = session.endTime || addMinutesToTimeLocal(startTime, clean.duration);
+    try { const row = await insertRecord('ptSessions', { legacy_id: clean.id, member_id: member.cloudId, trainer_id: trainer.cloudId, session_date: clean.date, start_time: startTime || null, end_time: endTime || null, duration_minutes: clean.duration, session_type: clean.type || 'Personal Training', status: clean.status, amount: clean.fee, notes: clean.notes || '' }); const saved = { ...clean, id: row.legacy_id || clean.id, cloudId: row.id, startTime: row.start_time || startTime, endTime: row.end_time || endTime, time: row.start_time || startTime }; setData((d) => ({ ...d, ptSessions: [saved, ...(d.ptSessions || [])] })); setModal(null); setToast('PT session scheduled'); } catch (error) { setToast(error?.message || 'Unable to schedule PT session'); }
   };
 
-  const updatePTSessionStatus = (id, status) => {
-    setData((d) => ({
-      ...d,
-      ptSessions: (d.ptSessions || []).map((session) =>
-        session.id === id ? { ...session, status } : session
-      ),
-    }));
-    setToast(`Session marked ${status.toLowerCase()}`);
+  const updatePTSessionStatus = async (id, status) => {
+    const session = (data.ptSessions || []).find((x) => x.id === id); if (!session?.cloudId) return setToast('This PT session is not linked to Supabase');
+    try { await updateRecord('ptSessions', session.cloudId, { status }); setData((d) => ({ ...d, ptSessions: (d.ptSessions || []).map((x) => x.id === id ? { ...x, status } : x) })); setToast(`Session marked ${status.toLowerCase()}`); } catch (error) { setToast(error?.message || 'Unable to update PT session'); }
   };
 
-  const deletePTSession = (id) => {
-    if (!window.confirm('Delete this PT session?')) return;
-
-    setData((d) => ({
-      ...d,
-      ptSessions: (d.ptSessions || []).filter((session) => session.id !== id),
-    }));
-    setToast('PT session deleted');
+  const deletePTSession = async (id) => {
+    if (!window.confirm('Delete this PT session?')) return; const session = (data.ptSessions || []).find((x) => x.id === id); if (!session?.cloudId) return setToast('This PT session is not linked to Supabase');
+    try { await deleteRecord('ptSessions', session.cloudId); setData((d) => ({ ...d, ptSessions: (d.ptSessions || []).filter((x) => x.id !== id) })); setToast('PT session deleted'); } catch (error) { setToast(error?.message || 'Unable to delete PT session'); }
   };
 
-  const addCommunicationLog = (log) => {
-    const clean = {
-      ...log,
-      id: `MSG-${Date.now()}`,
-      date: log.date || today,
-      time: new Date().toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-      status: log.status || 'Sent',
-    };
-
-    setData((d) => ({
-      ...d,
-      communicationLogs: [clean, ...(d.communicationLogs || [])],
-    }));
-    setModal(null);
-    setToast('Communication logged');
+  const addCommunicationLog = async (log) => {
+    const member = memberByUiIdLocal(data.members, log.memberId); if (!member?.cloudId) return setToast('Select a Supabase-linked member');
+    const clean = { ...log, id: `MSG-${Date.now()}`, date: log.date || today, time: log.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), status: log.status || 'Sent' };
+    try { const row = await insertRecord('communicationLogs', { legacy_id: clean.id, member_id: member.cloudId, channel: clean.channel || '', direction: clean.direction || 'Outgoing', template: clean.template || '', subject: clean.subject || '', message: clean.message || '', status: clean.status, communication_date: clean.date, communication_time: clean.time }); setData((d) => ({ ...d, communicationLogs: [{ ...clean, id: row.legacy_id || clean.id, cloudId: row.id }, ...(d.communicationLogs || [])] })); setModal(null); setToast('Communication logged'); } catch (error) { setToast(error?.message || 'Unable to save communication'); }
   };
 
-  const deleteCommunicationLog = (id) => {
-    if (!window.confirm('Delete this communication record?')) return;
-    setData((d) => ({
-      ...d,
-      communicationLogs: (d.communicationLogs || []).filter((item) => item.id !== id),
-    }));
-    setToast('Communication record deleted');
+  const deleteCommunicationLog = async (id) => {
+    if (!window.confirm('Delete this communication record?')) return; const item = (data.communicationLogs || []).find((x) => x.id === id); if (!item?.cloudId) return setToast('This communication is not linked to Supabase');
+    try { await deleteRecord('communicationLogs', item.cloudId); setData((d) => ({ ...d, communicationLogs: (d.communicationLogs || []).filter((x) => x.id !== id) })); setToast('Communication record deleted'); } catch (error) { setToast(error?.message || 'Unable to delete communication'); }
   };
 
-  const addProgressRecord = (record) => {
-    const clean = {
-      ...record,
-      id: `PR-${Date.now()}`,
-      memberId: record.memberId,
-      date: record.date || today,
-      weight: Number(record.weight || 0),
-      bodyFat: Number(record.bodyFat || 0),
-      chest: Number(record.chest || 0),
-      waist: Number(record.waist || 0),
-      hips: Number(record.hips || 0),
-      arms: Number(record.arms || 0),
-      thighs: Number(record.thighs || 0),
-      neck: Number(record.neck || 0),
-      photos: record.photos || { front: '', side: '', back: '' },
-    };
-
-    setData((d) => ({
-      ...d,
-      progressRecords: [clean, ...(d.progressRecords || [])],
-      members: d.members.map((member) =>
-        member.id === clean.memberId
-          ? { ...member, currentWeight: clean.weight }
-          : member
-      ),
-    }));
-    setModal(null);
-    setToast('Progress record added');
+  const addProgressRecord = async (record) => {
+    const member = memberByUiIdLocal(data.members, record.memberId); if (!member?.cloudId) return setToast('Select a Supabase-linked member');
+    const clean = { ...record, id: `PR-${Date.now()}`, memberId: record.memberId, date: record.date || today, weight: Number(record.weight || 0), bodyFat: Number(record.bodyFat || 0), chest: Number(record.chest || 0), waist: Number(record.waist || 0), hips: Number(record.hips || 0), arms: Number(record.arms || 0), thighs: Number(record.thighs || 0), neck: Number(record.neck || 0), photos: record.photos || { front: '', side: '', back: '' } };
+    try { const row = await insertRecord('progressRecords', { legacy_id: clean.id, member_id: member.cloudId, record_date: clean.date, weight: clean.weight, body_fat: clean.bodyFat, chest: clean.chest, waist: clean.waist, hips: clean.hips, arms: clean.arms, thighs: clean.thighs, neck: clean.neck, notes: clean.notes || '', photos: clean.photos }); await updateRecord('members', member.cloudId, { weight: clean.weight }); setData((d) => ({ ...d, progressRecords: [{ ...clean, id: row.legacy_id || clean.id, cloudId: row.id }, ...(d.progressRecords || [])], members: d.members.map((m) => m.id === clean.memberId ? { ...m, currentWeight: clean.weight, weight: clean.weight } : m) })); setModal(null); setToast('Progress record added'); } catch (error) { setToast(error?.message || 'Unable to save progress record'); }
   };
 
-  const deleteProgressRecord = (id) => {
-    if (!window.confirm('Delete this progress record?')) return;
-    setData((d) => ({
-      ...d,
-      progressRecords: (d.progressRecords || []).filter((record) => record.id !== id),
-    }));
-    setToast('Progress record deleted');
+  const deleteProgressRecord = async (id) => {
+    if (!window.confirm('Delete this progress record?')) return; const item = (data.progressRecords || []).find((x) => x.id === id); if (!item?.cloudId) return setToast('This progress record is not linked to Supabase');
+    try { await deleteRecord('progressRecords', item.cloudId); setData((d) => ({ ...d, progressRecords: (d.progressRecords || []).filter((x) => x.id !== id) })); setToast('Progress record deleted'); } catch (error) { setToast(error?.message || 'Unable to delete progress record'); }
   };
 
   const exportBackup = () => {
@@ -1238,189 +1047,33 @@ function App() {
   };
 
   const updateLeadStage = async (id, stage) => {
-    const lead = data.leads.find((item) => item.id === id);
-    if (!lead) return;
-
-    if (!lead.cloudId) {
-      setToast('This lead is not linked to Supabase yet');
-      return;
-    }
-
-    try {
-      await updateRecord('leads', lead.cloudId, { stage });
-      setData((d) => ({
-        ...d,
-        leads: d.leads.map((item) => item.id === id ? { ...item, stage } : item),
-      }));
-      setToast('Lead stage updated');
-    } catch (error) {
-      console.error('Supabase lead stage update failed:', error);
-      setToast(error?.message || 'Could not update lead stage');
-    }
+    const lead = data.leads.find((x) => x.id === id); if (!lead?.cloudId) return setToast('This lead is not linked to Supabase');
+    try { await updateRecord('leads', lead.cloudId, { stage }); setData((d) => ({ ...d, leads: d.leads.map((x) => x.id === id ? { ...x, stage } : x) })); } catch (error) { setToast(error?.message || 'Unable to update lead stage'); }
   };
 
   const updateLeadDetails = async (lead) => {
-    const existing = data.leads.find((item) => item.id === lead.id);
-    if (!existing?.cloudId) {
-      setToast('This lead is not linked to Supabase yet');
-      return;
-    }
-
-    const clean = {
-      ...existing,
-      ...lead,
-      name: String(lead.name || '').trim(),
-      phone: lead.phone || '',
-      email: lead.email || '',
-      source: lead.source || 'Walk-in',
-      stage: lead.stage || 'New',
-      followUp: lead.followUp || today,
-      notes: lead.notes || '',
-      interestedPlan: lead.interestedPlan || '',
-    };
-
-    if (!clean.name) {
-      setToast('Lead name is required');
-      return;
-    }
-
-    try {
-      await updateRecord('leads', existing.cloudId, {
-        name: clean.name,
-        phone: clean.phone,
-        email: clean.email,
-        source: clean.source,
-        stage: clean.stage,
-        follow_up_date: clean.followUp || null,
-        interested_plan: clean.interestedPlan,
-        notes: clean.notes,
-      });
-
-      setData((d) => ({
-        ...d,
-        leads: d.leads.map((item) => item.id === clean.id ? { ...clean, cloudId: existing.cloudId } : item),
-      }));
-      setModal(null);
-      setToast('Lead updated in Supabase');
-    } catch (error) {
-      console.error('Supabase lead update failed:', error);
-      setToast(error?.message || 'Could not update lead in Supabase');
-    }
+    const existing = data.leads.find((x) => x.id === lead.id); if (!existing?.cloudId) return setToast('This lead is not linked to Supabase');
+    const clean = { ...lead, phone: lead.phone || '', email: lead.email || '', source: lead.source || 'Walk-in', stage: lead.stage || 'New', followUp: lead.followUp || today, notes: lead.notes || '', interestedPlan: lead.interestedPlan || '', lastContact: lead.lastContact || today };
+    try { await updateRecord('leads', existing.cloudId, { name: clean.name || '', phone: clean.phone, email: clean.email, source: clean.source, stage: clean.stage, follow_up_date: clean.followUp, notes: clean.notes, interested_plan: clean.interestedPlan, last_contact: clean.lastContact }); setData((d) => ({ ...d, leads: d.leads.map((x) => x.id === clean.id ? { ...clean, cloudId: existing.cloudId } : x) })); setModal(null); setToast('Lead updated'); } catch (error) { setToast(error?.message || 'Unable to update lead'); }
   };
 
   const deleteLead = async (id) => {
-    const lead = data.leads.find((item) => item.id === id);
-    if (!lead || !window.confirm(`Delete ${lead.name}? This cannot be undone.`)) return;
-
-    if (!lead.cloudId) {
-      setToast('This lead is not linked to Supabase yet');
-      return;
-    }
-
-    try {
-      await deleteRecord('leads', lead.cloudId);
-      setData((d) => ({
-        ...d,
-        leads: d.leads.filter((item) => item.id !== id),
-      }));
-      setToast('Lead deleted from Supabase');
-    } catch (error) {
-      console.error('Supabase lead delete failed:', error);
-      setToast(error?.message || 'Could not delete lead from Supabase');
-    }
+    const lead = data.leads.find((x) => x.id === id); if (!lead || !window.confirm(`Delete ${lead.name}? This cannot be undone.`)) return; if (!lead.cloudId) return setToast('This lead is not linked to Supabase');
+    try { await deleteRecord('leads', lead.cloudId); setData((d) => ({ ...d, leads: d.leads.filter((x) => x.id !== id) })); setToast('Lead deleted'); } catch (error) { setToast(error?.message || 'Unable to delete lead'); }
   };
 
   const convertLeadToMember = async (lead) => {
     if (!lead) return;
-
-    if (!lead.cloudId) {
-      setToast('This lead is not linked to Supabase yet');
-      return;
-    }
-
-    const alreadyMember = data.members.some(
-      (member) =>
-        (lead.phone && member.phone === lead.phone) ||
-        (lead.email && member.email === lead.email)
-    );
-
-    if (alreadyMember) {
-      return setToast('This lead already exists as a member');
-    }
-
-    const plan = MEMBERSHIP_PLANS.find((item) => item.name === (lead.interestedPlan || 'Monthly')) || MEMBERSHIP_PLANS[0];
-    const memberId = nextSystemMemberId(data.members);
-    const amount = Number(planPrices[plan.name] || plan.price || 0);
-    const expiry = addMonthsToDate(today, plan.months);
-
+    const alreadyMember = data.members.some((m) => (lead.phone && m.phone === lead.phone) || (lead.email && m.email === lead.email));
+    if (alreadyMember) return setToast('This lead already exists as a member');
+    const plan = lead.interestedPlan || 'Monthly';
+    const months = plan === 'Quarterly' ? 3 : plan === 'Half-yearly' ? 6 : plan === 'Annual' ? 12 : 1;
+    const newMember = { id: nextSystemMemberId(data.members), name: lead.name, phone: lead.phone || '', email: lead.email || '', plan, start: today, expiry: addMonthsToDate(today, months), status: 'Active', visits: 0, due: 0, dietPreference: '', birthday: '', referral: lead.source || 'Walk-in', referredBy: '', referredClients: 0 };
     try {
-      const memberRow = await insertRecord('members', {
-        member_code: memberId,
-        name: lead.name || '',
-        phone: lead.phone || '',
-        email: lead.email || '',
-        plan_name: plan.name,
-        start_date: today,
-        expiry_date: expiry,
-        status: 'Active',
-        visits: 0,
-        due_amount: amount,
-        membership_amount: amount,
-        paid_amount: 0,
-        referral_source: lead.source || 'Walk-in',
-        notes: lead.notes || '',
-      });
-
-      await updateRecord('leads', lead.cloudId, {
-        stage: 'Converted',
-        converted_member_code: memberRow.member_code || memberId,
-        converted_at: new Date().toISOString(),
-      });
-
-      const newMember = {
-        id: memberRow.member_code || memberId,
-        cloudId: memberRow.id,
-        name: lead.name || '',
-        phone: lead.phone || '',
-        email: lead.email || '',
-        plan: plan.name,
-        start: today,
-        expiry,
-        status: 'Active',
-        visits: 0,
-        due: amount,
-        amount,
-        paid: 0,
-        dietPreference: '',
-        birthday: '',
-        referral: lead.source || 'Walk-in',
-        referredBy: '',
-        referredClients: 0,
-        referralPoints: 0,
-        notes: lead.notes || '',
-      };
-
-      setData((d) => ({
-        ...d,
-        members: [newMember, ...d.members],
-        leads: d.leads.map((item) =>
-          item.id === lead.id
-            ? {
-                ...item,
-                stage: 'Converted',
-                convertedMemberId: newMember.id,
-                convertedAt: new Date().toISOString(),
-                cloudId: lead.cloudId,
-              }
-            : item
-        ),
-      }));
-
-      setToast(`${lead.name} converted to member in Supabase`);
-    } catch (error) {
-      console.error('Supabase lead conversion failed:', error);
-      setToast(error?.message || 'Could not convert lead to member');
-    }
+      const row = await insertRecord('members', { member_code: newMember.id, name: newMember.name, phone: newMember.phone, email: newMember.email, plan_name: newMember.plan, start_date: newMember.start, expiry_date: newMember.expiry, status: newMember.status, visits: 0, due_amount: 0, membership_amount: 0, paid_amount: 0, referral_source: newMember.referral, diet_preference: '', attendance_number: '' });
+      await updateRecord('leads', lead.cloudId, { stage: 'Converted', converted_member_code: row.member_code || newMember.id, converted_at: today });
+      setData((d) => ({ ...d, members: [{ ...newMember, cloudId: row.id }, ...d.members], leads: d.leads.map((x) => x.id === lead.id ? { ...x, stage: 'Converted', convertedMemberId: newMember.id, convertedAt: today } : x) })); setToast(`${lead.name} converted to member`);
+    } catch (error) { setToast(error?.message || 'Unable to convert lead'); }
   };
 
   const deletePayment = async (id) => {
@@ -4829,17 +4482,10 @@ function MembershipsPage({ members, setModal, planPrices, setData, setToast, onR
       (statusFilter === 'All' || status === statusFilter);
   });
 
-  const savePrices = () => {
+  const savePrices = async () => {
     const cleaned = {};
-    MEMBERSHIP_PLANS.forEach((plan) => {
-      cleaned[plan.name] = Math.max(0, Number(draftPrices[plan.name] || 0));
-    });
-    setData((current) => ({
-      ...current,
-      settings: { ...(current.settings || {}), membershipPrices: cleaned },
-    }));
-    setEditingPrices(false);
-    setToast('Membership plan prices updated');
+    MEMBERSHIP_PLANS.forEach((plan) => { cleaned[plan.name] = Math.max(0, Number(draftPrices[plan.name] || 0)); });
+    try { await saveCloudSettings({ membershipPrices: cleaned }); setData((current) => ({ ...current, settings: { ...(current.settings || {}), membershipPrices: cleaned } })); setEditingPrices(false); setToast('Membership plan prices updated'); } catch (error) { setToast(error?.message || 'Unable to save membership prices'); }
   };
 
   return <>
@@ -5923,15 +5569,14 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     );
   };
 
-  const saveGymLocation = () => {
+  const saveGymLocation = async () => {
     const lat = Number(form.gymLatitude);
     const lng = Number(form.gymLongitude);
     if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
       setAuthMessage('Enter valid gym latitude and longitude first.');
       return;
     }
-    setData((d) => ({ ...d, settings: { ...(d.settings || {}), gymLatitude: String(form.gymLatitude).trim(), gymLongitude: String(form.gymLongitude).trim() } }));
-    setAuthMessage('Gym location saved.');
+    try { const patch = { gymLatitude: String(form.gymLatitude).trim(), gymLongitude: String(form.gymLongitude).trim() }; await saveCloudSettings(patch); setData((d) => ({ ...d, settings: { ...(d.settings || {}), ...patch } })); setAuthMessage('Gym location saved.'); } catch (error) { setAuthMessage(error?.message || 'Unable to save gym location.'); }
   };
 
   const qrUrl = getCheckInUrl(data.gym?.id || '', form.gymLatitude, form.gymLongitude);
@@ -5939,15 +5584,16 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
 
   const openQr = () => window.open(qrImageUrl, '_blank', 'noopener,noreferrer');
 
-  const saveSettings = () => {
-    setData((d) => ({
+  const saveSettings = async () => {
+    const cleaned = { ...form, referralPointsPerReferral: Math.max(0, Number(form.referralPointsPerReferral || 0)) };
+    try {
+      await saveCloudSettings(cleaned);
+      setData((d) => ({
       ...d,
-      settings: {
-        ...(d.settings || {}),
-        ...form,
-        referralPointsPerReferral: Math.max(0, Number(form.referralPointsPerReferral || 0)),
-      },
-    }));
+        settings: { ...(d.settings || {}), ...cleaned },
+      }));
+      setAuthMessage('Settings saved to Supabase.');
+    } catch (error) { setAuthMessage(error?.message || 'Unable to save settings.'); }
   };
 
   const saveAuthSettings = async () => {
