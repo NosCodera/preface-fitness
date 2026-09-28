@@ -752,11 +752,47 @@ function App() {
     }
   };
 
-  const addLead = (lead) => {
+  const addLead = async (lead) => {
     const id = `L-${101 + data.leads.length}`;
-    setData((d) => ({ ...d, leads: [{ ...lead, id, stage: 'New' }, ...d.leads] }));
-    setModal(null);
-    setToast('Lead added successfully');
+    const clean = {
+      ...lead,
+      id,
+      name: String(lead.name || '').trim(),
+      phone: String(lead.phone || '').trim(),
+      email: String(lead.email || '').trim(),
+      source: lead.source || 'Walk-in',
+      stage: lead.stage || 'New',
+      followUp: lead.followUp || today,
+      interestedPlan: lead.interestedPlan || '',
+      notes: lead.notes || '',
+    };
+
+    if (!clean.name) {
+      setToast('Lead name is required');
+      return;
+    }
+
+    try {
+      const row = await insertRecord('leads', {
+        legacy_id: id,
+        name: clean.name,
+        phone: clean.phone,
+        email: clean.email,
+        source: clean.source,
+        stage: clean.stage,
+        follow_up_date: clean.followUp || null,
+        interested_plan: clean.interestedPlan,
+        notes: clean.notes,
+      });
+
+      const saved = { ...clean, cloudId: row.id, id: row.legacy_id || id };
+      setData((d) => ({ ...d, leads: [saved, ...d.leads] }));
+      setModal(null);
+      setToast('Lead added to Supabase');
+    } catch (error) {
+      console.error('Supabase lead insert failed:', error);
+      setToast(error?.message || 'Could not save lead to Supabase');
+    }
   };
 
   const addPayment = async (payment) => {
@@ -1201,14 +1237,39 @@ function App() {
     }
   };
 
-  const updateLeadStage = (id, stage) => {
-    setData((d) => ({ ...d, leads: d.leads.map((l) => l.id === id ? { ...l, stage } : l) }));
+  const updateLeadStage = async (id, stage) => {
+    const lead = data.leads.find((item) => item.id === id);
+    if (!lead) return;
+
+    if (!lead.cloudId) {
+      setToast('This lead is not linked to Supabase yet');
+      return;
+    }
+
+    try {
+      await updateRecord('leads', lead.cloudId, { stage });
+      setData((d) => ({
+        ...d,
+        leads: d.leads.map((item) => item.id === id ? { ...item, stage } : item),
+      }));
+      setToast('Lead stage updated');
+    } catch (error) {
+      console.error('Supabase lead stage update failed:', error);
+      setToast(error?.message || 'Could not update lead stage');
+    }
   };
 
+  const updateLeadDetails = async (lead) => {
+    const existing = data.leads.find((item) => item.id === lead.id);
+    if (!existing?.cloudId) {
+      setToast('This lead is not linked to Supabase yet');
+      return;
+    }
 
-  const updateLeadDetails = (lead) => {
     const clean = {
+      ...existing,
       ...lead,
+      name: String(lead.name || '').trim(),
       phone: lead.phone || '',
       email: lead.email || '',
       source: lead.source || 'Walk-in',
@@ -1216,30 +1277,66 @@ function App() {
       followUp: lead.followUp || today,
       notes: lead.notes || '',
       interestedPlan: lead.interestedPlan || '',
-      lastContact: lead.lastContact || today,
     };
 
-    setData((d) => ({
-      ...d,
-      leads: d.leads.map((item) => item.id === clean.id ? clean : item),
-    }));
-    setModal(null);
-    setToast('Lead updated');
+    if (!clean.name) {
+      setToast('Lead name is required');
+      return;
+    }
+
+    try {
+      await updateRecord('leads', existing.cloudId, {
+        name: clean.name,
+        phone: clean.phone,
+        email: clean.email,
+        source: clean.source,
+        stage: clean.stage,
+        follow_up_date: clean.followUp || null,
+        interested_plan: clean.interestedPlan,
+        notes: clean.notes,
+      });
+
+      setData((d) => ({
+        ...d,
+        leads: d.leads.map((item) => item.id === clean.id ? { ...clean, cloudId: existing.cloudId } : item),
+      }));
+      setModal(null);
+      setToast('Lead updated in Supabase');
+    } catch (error) {
+      console.error('Supabase lead update failed:', error);
+      setToast(error?.message || 'Could not update lead in Supabase');
+    }
   };
 
-  const deleteLead = (id) => {
+  const deleteLead = async (id) => {
     const lead = data.leads.find((item) => item.id === id);
     if (!lead || !window.confirm(`Delete ${lead.name}? This cannot be undone.`)) return;
 
-    setData((d) => ({
-      ...d,
-      leads: d.leads.filter((item) => item.id !== id),
-    }));
-    setToast('Lead deleted');
+    if (!lead.cloudId) {
+      setToast('This lead is not linked to Supabase yet');
+      return;
+    }
+
+    try {
+      await deleteRecord('leads', lead.cloudId);
+      setData((d) => ({
+        ...d,
+        leads: d.leads.filter((item) => item.id !== id),
+      }));
+      setToast('Lead deleted from Supabase');
+    } catch (error) {
+      console.error('Supabase lead delete failed:', error);
+      setToast(error?.message || 'Could not delete lead from Supabase');
+    }
   };
 
-  const convertLeadToMember = (lead) => {
+  const convertLeadToMember = async (lead) => {
     if (!lead) return;
+
+    if (!lead.cloudId) {
+      setToast('This lead is not linked to Supabase yet');
+      return;
+    }
 
     const alreadyMember = data.members.some(
       (member) =>
@@ -1251,35 +1348,79 @@ function App() {
       return setToast('This lead already exists as a member');
     }
 
-    const newMember = {
-      id: nextSystemMemberId(data.members),
-      name: lead.name,
-      phone: lead.phone || '',
-      email: lead.email || '',
-      plan: lead.interestedPlan || 'Monthly',
-      start: today,
-      expiry: addMonthsToDate(today, lead.interestedPlan === 'Quarterly' ? 3 : lead.interestedPlan === 'Half-yearly' ? 6 : lead.interestedPlan === 'Annual' ? 12 : 1),
-      status: 'Active',
-      visits: 0,
-      due: 0,
-      dietPreference: '',
-      birthday: '',
-      referral: lead.source || 'Walk-in',
-      referredBy: '',
-      referredClients: 0,
-    };
+    const plan = MEMBERSHIP_PLANS.find((item) => item.name === (lead.interestedPlan || 'Monthly')) || MEMBERSHIP_PLANS[0];
+    const memberId = nextSystemMemberId(data.members);
+    const amount = Number(planPrices[plan.name] || plan.price || 0);
+    const expiry = addMonthsToDate(today, plan.months);
 
-    setData((d) => ({
-      ...d,
-      members: [newMember, ...d.members],
-      leads: d.leads.map((item) =>
-        item.id === lead.id
-          ? { ...item, stage: 'Converted', convertedMemberId: newMember.id, convertedAt: today }
-          : item
-      ),
-    }));
+    try {
+      const memberRow = await insertRecord('members', {
+        member_code: memberId,
+        name: lead.name || '',
+        phone: lead.phone || '',
+        email: lead.email || '',
+        plan_name: plan.name,
+        start_date: today,
+        expiry_date: expiry,
+        status: 'Active',
+        visits: 0,
+        due_amount: amount,
+        membership_amount: amount,
+        paid_amount: 0,
+        referral_source: lead.source || 'Walk-in',
+        notes: lead.notes || '',
+      });
 
-    setToast(`${lead.name} converted to member`);
+      await updateRecord('leads', lead.cloudId, {
+        stage: 'Converted',
+        converted_member_code: memberRow.member_code || memberId,
+        converted_at: new Date().toISOString(),
+      });
+
+      const newMember = {
+        id: memberRow.member_code || memberId,
+        cloudId: memberRow.id,
+        name: lead.name || '',
+        phone: lead.phone || '',
+        email: lead.email || '',
+        plan: plan.name,
+        start: today,
+        expiry,
+        status: 'Active',
+        visits: 0,
+        due: amount,
+        amount,
+        paid: 0,
+        dietPreference: '',
+        birthday: '',
+        referral: lead.source || 'Walk-in',
+        referredBy: '',
+        referredClients: 0,
+        referralPoints: 0,
+        notes: lead.notes || '',
+      };
+
+      setData((d) => ({
+        ...d,
+        members: [newMember, ...d.members],
+        leads: d.leads.map((item) =>
+          item.id === lead.id
+            ? {
+                ...item,
+                stage: 'Converted',
+                convertedMemberId: newMember.id,
+                convertedAt: new Date().toISOString(),
+                cloudId: lead.cloudId,
+              }
+            : item
+        ),
+      }));
+
+      setToast(`${lead.name} converted to member in Supabase`);
+    } catch (error) {
+      console.error('Supabase lead conversion failed:', error);
+      setToast(error?.message || 'Could not convert lead to member');
+    }
   };
 
   const deletePayment = async (id) => {
