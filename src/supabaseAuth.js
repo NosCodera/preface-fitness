@@ -76,7 +76,7 @@ export function subscribeToAuthChanges(callback) {
   return () => subscription?.unsubscribe();
 }
 
-/* Change the currently logged-in user's password */
+/* Change currently logged-in user's password */
 export async function changeSupabasePassword(newPassword) {
   const password = String(newPassword || '');
 
@@ -101,7 +101,7 @@ export async function changeSupabasePassword(newPassword) {
   return data?.user || null;
 }
 
-/* Change the currently logged-in user's email */
+/* Change currently logged-in user's email */
 export async function changeSupabaseEmail(newEmail) {
   const email = String(newEmail || '').trim();
 
@@ -155,7 +155,7 @@ export async function changeSupabaseCredentials({
     updates.password = cleanPassword;
   }
 
-  if (Object.keys(updates).length === 0) {
+  if (!Object.keys(updates).length) {
     throw new Error('No account changes were provided.');
   }
 
