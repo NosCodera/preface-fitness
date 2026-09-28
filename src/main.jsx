@@ -45,7 +45,7 @@ import {
   getSupabaseSession,
   subscribeToAuthChanges,
 } from './supabaseAuth';
-import { loadCloudState, insertRecord, updateRecord, deleteRecord, saveSettings as saveCloudSettings, publicCheckIn } from './cloudData';
+import { loadCloudState, insertRecord, updateRecord, deleteRecord, saveSettings as saveCloudSettings, publicSubmitFeedback } from './cloudData';
 
 const LOGO_URL = `${import.meta.env.BASE_URL}preface-logo.jpg`;
 
@@ -74,6 +74,33 @@ function addMonthsToDate(dateString, months) {
   return target.toISOString().slice(0, 10);
 }
 
+function timeTo24Hour(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const match = raw.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+  if (!match) return null;
+  let hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const meridiem = match[3]?.toUpperCase();
+  if (minute > 59) return null;
+  if (meridiem) {
+    if (hour < 1 || hour > 12) return null;
+    if (meridiem === 'AM' && hour === 12) hour = 0;
+    if (meridiem === 'PM' && hour !== 12) hour += 12;
+  }
+  if (hour > 23) return null;
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function addMinutesToTime(value, minutes) {
+  const base = timeTo24Hour(value);
+  if (!base) return null;
+  const [hour, minute] = base.split(':').map(Number);
+  const total = hour * 60 + minute + Number(minutes || 0);
+  const normalized = ((total % 1440) + 1440) % 1440;
+  return `${String(Math.floor(normalized / 60)).padStart(2, '0')}:${String(normalized % 60).padStart(2, '0')}`;
+}
+
 function getDaysRemaining(expiry) {
   if (!expiry) return 0;
   const todayDate = new Date(`${today}T00:00:00`);
@@ -88,39 +115,22 @@ function getMembershipStatus(expiry) {
   return 'Active';
 }
 
-function formatAttendanceTime(value) {
-  if (!value) return '';
-  const parsed = new Date(value);
-  if (!Number.isNaN(parsed.getTime())) {
-    return parsed.toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  }
-  return String(value);
+function getCheckInPath() {
+  const base = import.meta.env.BASE_URL || '/';
+  return `${base.replace(/\/$/, '')}/#check-in`;
 }
 
-const PRODUCTION_APP_URL = 'https://noscodera.github.io/preface-fitness/';
+function getCheckInUrl() {
+  return `${window.location.origin}${getCheckInPath()}`;
+}
 
-function getCheckInUrl(gymId = '', gymLat = '', gymLng = '') {
+function getFeedbackUrl(gymId, gymName = 'Preface Fitness') {
+  const base = import.meta.env.BASE_URL || '/';
+  const cleanBase = base.replace(/\/$/, '');
   const params = new URLSearchParams();
-
   if (gymId) params.set('gym', gymId);
-
-  if (gymLat !== '' && gymLng !== '') {
-    params.set('lat', gymLat);
-    params.set('lng', gymLng);
-  }
-
-  const query = params.toString();
-  const baseUrl = PRODUCTION_APP_URL.replace(/\/$/, '');
-
-  // Query parameters must come BEFORE the hash.
-  // Example:
-  // https://noscodera.github.io/preface-fitness/?gym=...&lat=...&lng=...#check-in
-  return query
-    ? `${baseUrl}/?${query}#check-in`
-    : `${baseUrl}/#check-in`;
+  if (gymName) params.set('name', gymName);
+  return `${window.location.origin}${cleanBase}/?${params.toString()}#feedback`;
 }
 
 function distanceInMeters(lat1, lon1, lat2, lon2) {
@@ -350,7 +360,7 @@ const seed = {
     },
   ],
 
-  settings: { gymName: 'Preface Fitness', currency: '₹', gymAddress: '', gymPhone: '', gymEmail: '', gstin: '', invoicePrefix: 'PF-INV', referralPointsPerReferral: 10, gymLatitude: '', gymLongitude: '', auth: { username: 'admin', passwordHash: '' } },
+  settings: { gymName: 'Preface Fitness', currency: '₹', gymAddress: '', gymPhone: '', gymEmail: '', gstin: '', invoicePrefix: 'PF-INV', defaultGstRate: 5, referralPointsPerReferral: 10, gymLatitude: '', gymLongitude: '', notice: { enabled: false, text: '', priority: 'medium' }, gymIntro: { description: 'A modern fitness destination focused on strength, conditioning, personal training and sustainable results.', facilities: ['Strength & cardio zone', 'Personal training', 'Functional training', 'Locker & changing facilities', 'Member progress tracking', 'Diet & nutrition guidance'] }, auth: { username: 'admin', passwordHash: '' } },
 };
 
 function loadLegacyData() {
@@ -374,9 +384,11 @@ async function hashPassword(password) {
   return window.btoa(unescape(encodeURIComponent(value)));
 }
 
-function memberByUiIdLocal(members, id) { return (members || []).find((member) => member.id === id); }
-
-function addMinutesToTimeLocal(time, minutes) { if (!time) return ''; const p = String(time).split(':').map(Number); if (p.length < 2 || p.some(Number.isNaN)) return ''; const total = p[0] * 60 + p[1] + Number(minutes || 0); const h = Math.floor((total % 1440) / 60); const m = total % 60; return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`; }
+function openPublicGymPage() {
+  const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+  const url = `${window.location.origin}${base}/#gym`;
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
 
 function App() {
   const [data, setData] = useState(seed);
@@ -480,21 +492,45 @@ function App() {
 
         setData((current) => ({
           ...current,
-          gym: cloud.gym || current.gym,
           // Only replace a local collection when the cloud actually has
           // records. This prevents a newly-created/empty cloud database
           // from wiping the existing local browser data.
-          membershipPlans: cloud.membershipPlans || [],
-          members: cloud.members || [],
-          leads: cloud.leads || [],
-          payments: cloud.payments || [],
-          attendance: cloud.attendance || [],
-          trainers: cloud.trainers || [],
-          ptSessions: cloud.ptSessions || [],
-          progressRecords: cloud.progressRecords || [],
-          workoutPlans: cloud.workoutPlans || [],
-          dietPlans: cloud.dietPlans || [],
-          communicationLogs: cloud.communicationLogs || [],
+          membershipPlans: cloud.membershipPlans?.length
+            ? cloud.membershipPlans
+            : current.membershipPlans,
+          members: cloud.members?.length
+            ? cloud.members
+            : current.members,
+          leads: cloud.leads?.length
+            ? cloud.leads
+            : current.leads,
+          payments: cloud.payments?.length
+            ? cloud.payments
+            : current.payments,
+          attendance: cloud.attendance?.length
+            ? cloud.attendance
+            : current.attendance,
+          trainers: cloud.trainers?.length
+            ? cloud.trainers
+            : current.trainers,
+          ptSessions: cloud.ptSessions?.length
+            ? cloud.ptSessions
+            : current.ptSessions,
+          progressRecords: cloud.progressRecords?.length
+            ? cloud.progressRecords
+            : current.progressRecords,
+          workoutPlans: cloud.workoutPlans?.length
+            ? cloud.workoutPlans
+            : current.workoutPlans,
+          dietPlans: cloud.dietPlans?.length
+            ? cloud.dietPlans
+            : current.dietPlans,
+          communicationLogs: cloud.communicationLogs?.length
+            ? cloud.communicationLogs
+            : current.communicationLogs,
+          feedbacks: cloud.feedbacks?.length
+            ? cloud.feedbacks
+            : current.feedbacks,
           settings: {
             ...(current.settings || {}),
             ...(cloud.settings || {}),
@@ -545,6 +581,9 @@ function App() {
       amount: Number(member.amount || planPrices[member.plan] || 0),
       paid: Number(member.paid || 0),
       status: getMemberStatus(member.expiry),
+      paymentMode: member.paymentMode || 'Cash',
+      gstMode: member.gstMode || 'without',
+      gstRate: Number(member.gstRate || data.settings?.defaultGstRate || 5),
       createdAt: new Date().toISOString(),
     };
 
@@ -555,7 +594,7 @@ function App() {
         name: clean.name || '',
         phone: clean.phone || '',
         email: clean.email || '',
-        date_of_birth: clean.dob || clean.birthday || null,
+        dob: clean.dob || clean.birthday || null,
         gender: clean.gender || '',
         address: clean.address || '',
         emergency_contact: clean.emergencyContact || '',
@@ -581,9 +620,61 @@ function App() {
       });
 
       const saved = { ...clean, cloudId: row.id, id: row.member_code || clean.id };
-      setData((d) => ({ ...d, members: [saved, ...d.members] }));
+
+      let initialPayment = null;
+      if (Number(clean.paid || 0) > 0) {
+        const paymentId = `PAY-${Date.now()}`;
+        const gst = clean.gstMode === 'gst' ? calculateGstBreakdown(clean.amount, clean.gstRate) : calculateGstBreakdown(clean.amount, 0);
+        const invoiceNumber = `${data.settings?.invoicePrefix || 'PF-INV'}-${paymentId}`;
+        const paymentRow = await insertRecord('payments', {
+          member_id: row.id,
+          legacy_id: paymentId,
+          amount: Number(clean.paid || 0),
+          payment_type: 'Membership',
+          payment_mode: clean.paymentMode || 'Cash',
+          payment_date: today,
+          notes: 'Initial membership payment',
+          invoice_number: invoiceNumber,
+          gst_applicable: clean.gstMode === 'gst',
+          gst_rate: gst.rate,
+          taxable_amount: gst.taxable,
+          cgst_amount: gst.cgst,
+          sgst_amount: gst.sgst,
+          invoice_amount: Number(clean.amount || 0),
+          paid_amount_at_invoice: Number(clean.paid || 0),
+          balance_at_invoice: Number(clean.due || 0),
+          description: `${clean.plan || 'Membership'} membership`,
+        });
+        initialPayment = {
+          id: paymentRow.legacy_id || paymentId,
+          cloudId: paymentRow.id,
+          memberId: saved.id,
+          member: saved.name,
+          amount: Number(clean.paid || 0),
+          type: 'Membership',
+          mode: clean.paymentMode || 'Cash',
+          date: today,
+          notes: 'Initial membership payment',
+          invoiceNumber,
+          gstApplicable: clean.gstMode === 'gst',
+          gstRate: gst.rate,
+          taxableAmount: gst.taxable,
+          cgstAmount: gst.cgst,
+          sgstAmount: gst.sgst,
+          invoiceAmount: Number(clean.amount || 0),
+          paidAmountAtInvoice: Number(clean.paid || 0),
+          balanceAtInvoice: Number(clean.due || 0),
+          description: `${clean.plan || 'Membership'} membership`,
+        };
+      }
+
+      setData((d) => ({
+        ...d,
+        members: [saved, ...d.members],
+        payments: initialPayment ? [initialPayment, ...d.payments] : d.payments,
+      }));
       setModal(null);
-      setToast('Member added successfully');
+      setToast(initialPayment ? 'Member added and payment recorded successfully' : 'Member added successfully');
     } catch (error) {
       console.error('Supabase member insert failed:', error);
       setToast(error?.message || 'Could not save member to Supabase');
@@ -734,13 +825,11 @@ function App() {
     }
   };
 
-  const addLead = async (lead) => {
-    const id = `L-${Date.now()}`;
-    try {
-      const row = await insertRecord('leads', { legacy_id: id, name: lead.name || '', phone: lead.phone || '', email: lead.email || '', source: lead.source || 'Walk-in', stage: lead.stage || 'New', follow_up_date: lead.followUp || today, interested_plan: lead.interestedPlan || '', notes: lead.notes || '', last_contact: lead.lastContact || today });
-      setData((d) => ({ ...d, leads: [{ ...lead, id: row.legacy_id || id, cloudId: row.id, stage: row.stage || 'New' }, ...d.leads] }));
-      setModal(null); setToast('Lead added successfully');
-    } catch (error) { setToast(error?.message || 'Unable to add lead to Supabase'); }
+  const addLead = (lead) => {
+    const id = `L-${101 + data.leads.length}`;
+    setData((d) => ({ ...d, leads: [{ ...lead, id, stage: 'New' }, ...d.leads] }));
+    setModal(null);
+    setToast('Lead added successfully');
   };
 
   const addPayment = async (payment) => {
@@ -768,6 +857,11 @@ function App() {
     const nextDue = Math.max(0, currentDue - paidAgainstDue);
 
     try {
+      const gstApplicable = payment.gstMode === 'gst';
+      const invoiceAmount = payment.type === 'Membership' ? Number(member.amount || amount) : amount;
+      const gst = calculateGstBreakdown(invoiceAmount, gstApplicable ? Number(payment.gstRate || data.settings?.defaultGstRate || 5) : 0);
+      const invoiceNumber = `${data.settings?.invoicePrefix || 'PF-INV'}-${paymentId}`;
+
       await insertRecord('payments', {
         member_id: member.cloudId,
         legacy_id: paymentId,
@@ -776,6 +870,16 @@ function App() {
         payment_mode: payment.mode || 'Cash',
         payment_date: payment.date || today,
         notes: payment.notes || '',
+        invoice_number: invoiceNumber,
+        gst_applicable: gstApplicable,
+        gst_rate: gst.rate,
+        taxable_amount: gst.taxable,
+        cgst_amount: gst.cgst,
+        sgst_amount: gst.sgst,
+        invoice_amount: invoiceAmount,
+        paid_amount_at_invoice: payment.type === 'Membership' ? nextPaid : amount,
+        balance_at_invoice: payment.type === 'Membership' ? nextDue : 0,
+        description: payment.type === 'Membership' ? `${member.plan || 'Membership'} membership` : `${payment.type || 'Payment'} payment`,
       });
 
       if (payment.type === 'Membership') {
@@ -796,6 +900,16 @@ function App() {
             amount,
             date: payment.date || today,
             createdAt: new Date().toISOString(),
+            invoiceNumber,
+            gstApplicable,
+            gstRate: gst.rate,
+            taxableAmount: gst.taxable,
+            cgstAmount: gst.cgst,
+            sgstAmount: gst.sgst,
+            invoiceAmount,
+            paidAmountAtInvoice: payment.type === 'Membership' ? nextPaid : amount,
+            balanceAtInvoice: payment.type === 'Membership' ? nextDue : 0,
+            description: payment.type === 'Membership' ? `${member.plan || 'Membership'} membership` : `${payment.type || 'Payment'} payment`,
           },
           ...d.payments,
         ],
@@ -818,7 +932,69 @@ function App() {
     }
   };
 
-  const markAttendance = async (name, attendanceDate = today) => {
+  const addFeedback = async (feedback) => {
+    const clean = {
+      memberId: feedback.memberId || '',
+      memberName: feedback.memberName || '',
+      category: feedback.category || 'General',
+      priority: feedback.priority || 'medium',
+      feedback: String(feedback.feedback || '').trim(),
+      status: feedback.status || 'Open',
+      date: feedback.date || today,
+      notes: feedback.notes || '',
+    };
+
+    if (!clean.feedback) {
+      setToast('Please enter the customer feedback first.');
+      return;
+    }
+
+    try {
+      const member = data.members.find((item) => item.id === clean.memberId);
+      const row = await insertRecord('feedbacks', {
+        member_id: member?.cloudId || null,
+        member_name: clean.memberName || member?.name || '',
+        category: clean.category,
+        priority: clean.priority,
+        feedback: clean.feedback,
+        status: clean.status,
+        feedback_date: clean.date,
+        notes: clean.notes,
+      });
+      const saved = {
+        id: row.id,
+        cloudId: row.id,
+        memberId: member?.id || clean.memberId,
+        memberName: clean.memberName || member?.name || '',
+        category: clean.category,
+        priority: clean.priority,
+        feedback: clean.feedback,
+        status: clean.status,
+        date: clean.date,
+        notes: clean.notes,
+      };
+      setData((d) => ({ ...d, feedbacks: [saved, ...(d.feedbacks || [])] }));
+      setModal(null);
+      setToast('Customer feedback recorded successfully');
+    } catch (error) {
+      console.error('Supabase feedback insert failed:', error);
+      setToast(error?.message || 'Unable to save feedback');
+    }
+  };
+
+  const deleteFeedback = async (feedback) => {
+    if (!window.confirm('Delete this feedback record?')) return;
+    try {
+      if (feedback.cloudId) await deleteRecord('feedbacks', feedback.cloudId);
+      setData((d) => ({ ...d, feedbacks: (d.feedbacks || []).filter((item) => item.id !== feedback.id) }));
+      setToast('Feedback deleted');
+    } catch (error) {
+      console.error('Supabase feedback delete failed:', error);
+      setToast(error?.message || 'Unable to delete feedback');
+    }
+  };
+
+  const markAttendance = (name, attendanceDate = today) => {
     const already = data.attendance.some(
       (a) => a.member === name && a.date === attendanceDate
     );
@@ -828,163 +1004,396 @@ function App() {
     }
 
     const member = data.members.find((m) => m.name === name);
-    if (!member?.cloudId) {
-      return setToast('This member is not linked to Supabase yet');
-    }
-
-    const checkInTimestamp = new Date().toISOString();
-    const displayTime = new Date().toLocaleTimeString([], {
+    const time = new Date().toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit',
     });
 
+    setData((d) => ({
+      ...d,
+      attendance: [
+        {
+          id: `A-${Date.now()}`,
+          member: name,
+          memberId: member?.id || '',
+          date: attendanceDate,
+          time,
+        },
+        ...d.attendance,
+      ],
+      members: d.members.map((m) =>
+        m.name === name
+          ? { ...m, visits: Number(m.visits || 0) + 1 }
+          : m
+      ),
+    }));
+
+    setToast(`${name} marked present`);
+  };
+
+  const createWorkoutPlan = (plan) => {
+    const clean = {
+      ...plan,
+      id: `WP-${Date.now()}`,
+      durationWeeks: Number(plan.durationWeeks || 1),
+      assignedMemberIds: Array.isArray(plan.assignedMemberIds) ? plan.assignedMemberIds : [],
+      exercises: (plan.exercises || []).map((exercise, index) => ({
+        ...exercise,
+        id: exercise.id || `EX-${Date.now()}-${index}`,
+        sets: Number(exercise.sets || 1),
+      })),
+      createdAt: new Date().toISOString(),
+    };
+
+    setData((d) => ({ ...d, workoutPlans: [clean, ...(d.workoutPlans || [])] }));
+    setModal(null);
+    setToast('Workout plan created');
+  };
+
+  const updateWorkoutPlan = (plan) => {
+    const clean = {
+      ...plan,
+      durationWeeks: Number(plan.durationWeeks || 1),
+      assignedMemberIds: Array.isArray(plan.assignedMemberIds) ? plan.assignedMemberIds : [],
+      exercises: (plan.exercises || []).map((exercise, index) => ({
+        ...exercise,
+        id: exercise.id || `EX-${Date.now()}-${index}`,
+        sets: Number(exercise.sets || 1),
+      })),
+    };
+
+    setData((d) => ({
+      ...d,
+      workoutPlans: (d.workoutPlans || []).map((item) => item.id === clean.id ? clean : item),
+    }));
+    setModal(null);
+    setToast('Workout plan updated');
+  };
+
+  const deleteWorkoutPlan = (id) => {
+    if (!window.confirm('Delete this workout plan?')) return;
+    setData((d) => ({
+      ...d,
+      workoutPlans: (d.workoutPlans || []).filter((plan) => plan.id !== id),
+    }));
+    setToast('Workout plan deleted');
+  };
+
+  const createDietPlan = (plan) => {
+    const clean = {
+      ...plan,
+      id: `DP-${Date.now()}`,
+      calories: Number(plan.calories || 0),
+      protein: Number(plan.protein || 0),
+      durationWeeks: Number(plan.durationWeeks || 1),
+      assignedMemberIds: Array.isArray(plan.assignedMemberIds) ? plan.assignedMemberIds : [],
+      meals: (plan.meals || []).map((meal, index) => ({
+        ...meal,
+        id: meal.id || `MEAL-${Date.now()}-${index}`,
+        calories: Number(meal.calories || 0),
+        protein: Number(meal.protein || 0),
+      })),
+      createdAt: new Date().toISOString(),
+    };
+    setData((d) => ({ ...d, dietPlans: [clean, ...(d.dietPlans || [])] }));
+    setModal(null);
+    setToast('Diet plan created');
+  };
+
+  const updateDietPlan = (plan) => {
+    const clean = {
+      ...plan,
+      calories: Number(plan.calories || 0),
+      protein: Number(plan.protein || 0),
+      durationWeeks: Number(plan.durationWeeks || 1),
+      assignedMemberIds: Array.isArray(plan.assignedMemberIds) ? plan.assignedMemberIds : [],
+      meals: (plan.meals || []).map((meal, index) => ({
+        ...meal,
+        id: meal.id || `MEAL-${Date.now()}-${index}`,
+        calories: Number(meal.calories || 0),
+        protein: Number(meal.protein || 0),
+      })),
+    };
+    setData((d) => ({ ...d, dietPlans: (d.dietPlans || []).map((item) => item.id === clean.id ? clean : item) }));
+    setModal(null);
+    setToast('Diet plan updated');
+  };
+
+  const deleteDietPlan = (id) => {
+    if (!window.confirm('Delete this diet plan?')) return;
+    setData((d) => ({ ...d, dietPlans: (d.dietPlans || []).filter((plan) => plan.id !== id) }));
+    setToast('Diet plan deleted');
+  };
+
+
+  const addTrainer = async (trainer) => {
+    const clean = {
+      ...trainer,
+      id: `TR-${Date.now()}`,
+      experience: Number(trainer.experience || 0),
+      monthlySalary: Number(trainer.monthlySalary || 0),
+      status: trainer.status || 'Active',
+    };
+
     try {
-      const row = await insertRecord('attendance', {
-        member_id: member.cloudId,
-        legacy_id: `A-${Date.now()}`,
-        attendance_date: attendanceDate,
-        check_in_time: checkInTimestamp,
-        source: 'Manual',
+      const row = await insertRecord('trainers', {
+        legacy_id: clean.id,
+        name: clean.name || '',
+        phone: clean.phone || '',
+        specialization: clean.specialization || '',
+        experience: Number(clean.experience || 0),
+        status: clean.status || 'Active',
+        monthly_salary: Number(clean.monthlySalary || 0),
+        notes: clean.notes || '',
+      });
+
+      const saved = { ...clean, cloudId: row.id };
+      setData((d) => ({
+        ...d,
+        trainers: [saved, ...(d.trainers || [])],
+      }));
+      setModal(null);
+      setToast('Trainer added successfully');
+    } catch (error) {
+      console.error('Supabase trainer insert failed:', error);
+      setToast(error?.message || 'Unable to add trainer');
+    }
+  };
+
+  const updateTrainer = async (trainer) => {
+    const existing = (data.trainers || []).find((item) => item.id === trainer.id);
+    if (!existing?.cloudId) {
+      setToast('This trainer is not linked to Supabase yet');
+      return;
+    }
+
+    const clean = {
+      ...trainer,
+      experience: Number(trainer.experience || 0),
+      monthlySalary: Number(trainer.monthlySalary || 0),
+    };
+
+    try {
+      await updateRecord('trainers', existing.cloudId, {
+        name: clean.name || '',
+        phone: clean.phone || '',
+        specialization: clean.specialization || '',
+        experience: Number(clean.experience || 0),
+        status: clean.status || 'Active',
+        monthly_salary: Number(clean.monthlySalary || 0),
+        notes: clean.notes || '',
       });
 
       setData((d) => ({
         ...d,
-        attendance: [
-          {
-            id: row?.legacy_id || row?.id || `A-${Date.now()}`,
-            cloudId: row?.id,
-            member: name,
-            memberId: member.id,
-            date: attendanceDate,
-            time: formatAttendanceTime(row?.check_in_time) || displayTime,
-            source: 'Manual',
-          },
-          ...d.attendance,
-        ],
-        members: d.members.map((m) =>
-          m.id === member.id
-            ? { ...m, visits: Number(m.visits || 0) + 1 }
-            : m
+        trainers: (d.trainers || []).map((item) =>
+          item.id === clean.id ? { ...clean, cloudId: existing.cloudId } : item
         ),
       }));
-
-      setToast(`${name} marked present`);
+      setModal(null);
+      setToast('Trainer updated successfully');
     } catch (error) {
-      console.error('Supabase attendance insert failed:', error);
-      const message = String(error?.message || '');
-      if (message.includes('ux_attendance_gym_member_date') || message.toLowerCase().includes('duplicate key')) {
-        return setToast(`${name} — attendance already marked for this date`);
-      }
-      setToast(error?.message || 'Unable to save attendance in Supabase');
+      console.error('Supabase trainer update failed:', error);
+      setToast(error?.message || 'Unable to update trainer');
     }
   };
 
-  const createWorkoutPlan = async (plan) => {
-    const clean = { ...plan, id: `WP-${Date.now()}`, durationWeeks: Number(plan.durationWeeks || 1), assignedMemberIds: Array.isArray(plan.assignedMemberIds) ? plan.assignedMemberIds : [], exercises: (plan.exercises || []).map((e, i) => ({ ...e, id: e.id || `EX-${Date.now()}-${i}`, sets: Number(e.sets || 1) })), createdAt: new Date().toISOString() };
-    try {
-      const assigned = clean.assignedMemberIds.map((id) => memberByUiIdLocal(data.members, id)?.cloudId).filter(Boolean);
-      const row = await insertRecord('workoutPlans', { legacy_id: clean.id, name: clean.name || '', goal: clean.goal || '', level: clean.level || '', duration_weeks: clean.durationWeeks, trainer_name: clean.trainer || '', notes: clean.notes || '', assigned_member_ids: assigned, exercises: clean.exercises });
-      setData((d) => ({ ...d, workoutPlans: [{ ...clean, id: row.legacy_id || clean.id, cloudId: row.id }, ...(d.workoutPlans || [])] }));
-      setModal(null); setToast('Workout plan created');
-    } catch (error) { setToast(error?.message || 'Unable to save workout plan'); }
-  };
-
-  const updateWorkoutPlan = async (plan) => {
-    const existing = (data.workoutPlans || []).find((x) => x.id === plan.id);
-    if (!existing?.cloudId) return setToast('This workout plan is not linked to Supabase');
-    const clean = { ...plan, durationWeeks: Number(plan.durationWeeks || 1), assignedMemberIds: Array.isArray(plan.assignedMemberIds) ? plan.assignedMemberIds : [], exercises: (plan.exercises || []).map((e, i) => ({ ...e, id: e.id || `EX-${Date.now()}-${i}`, sets: Number(e.sets || 1) })) };
-    try {
-      const assigned = clean.assignedMemberIds.map((id) => memberByUiIdLocal(data.members, id)?.cloudId).filter(Boolean);
-      await updateRecord('workoutPlans', existing.cloudId, { name: clean.name || '', goal: clean.goal || '', level: clean.level || '', duration_weeks: clean.durationWeeks, trainer_name: clean.trainer || '', notes: clean.notes || '', assigned_member_ids: assigned, exercises: clean.exercises });
-      setData((d) => ({ ...d, workoutPlans: (d.workoutPlans || []).map((x) => x.id === clean.id ? { ...clean, cloudId: existing.cloudId } : x) }));
-      setModal(null); setToast('Workout plan updated');
-    } catch (error) { setToast(error?.message || 'Unable to update workout plan'); }
-  };
-
-  const deleteWorkoutPlan = async (id) => {
-    if (!window.confirm('Delete this workout plan?')) return;
-    const item = (data.workoutPlans || []).find((x) => x.id === id);
-    if (!item?.cloudId) return setToast('This workout plan is not linked to Supabase');
-    try { await deleteRecord('workoutPlans', item.cloudId); setData((d) => ({ ...d, workoutPlans: (d.workoutPlans || []).filter((x) => x.id !== id) })); setToast('Workout plan deleted'); } catch (error) { setToast(error?.message || 'Unable to delete workout plan'); }
-  };
-
-  const createDietPlan = async (plan) => {
-    const clean = { ...plan, id: `DP-${Date.now()}`, calories: Number(plan.calories || 0), protein: Number(plan.protein || 0), durationWeeks: Number(plan.durationWeeks || 1), assignedMemberIds: Array.isArray(plan.assignedMemberIds) ? plan.assignedMemberIds : [], meals: (plan.meals || []).map((m, i) => ({ ...m, id: m.id || `MEAL-${Date.now()}-${i}`, calories: Number(m.calories || 0), protein: Number(m.protein || 0) })), createdAt: new Date().toISOString() };
-    try {
-      const assigned = clean.assignedMemberIds.map((id) => memberByUiIdLocal(data.members, id)?.cloudId).filter(Boolean);
-      const row = await insertRecord('dietPlans', { legacy_id: clean.id, name: clean.name || '', goal: clean.goal || '', calories: clean.calories, protein: clean.protein, duration_weeks: clean.durationWeeks, coach: clean.coach || '', notes: clean.notes || '', assigned_member_ids: assigned, meals: clean.meals });
-      setData((d) => ({ ...d, dietPlans: [{ ...clean, id: row.legacy_id || clean.id, cloudId: row.id }, ...(d.dietPlans || [])] })); setModal(null); setToast('Diet plan created');
-    } catch (error) { setToast(error?.message || 'Unable to save diet plan'); }
-  };
-
-  const updateDietPlan = async (plan) => {
-    const existing = (data.dietPlans || []).find((x) => x.id === plan.id);
-    if (!existing?.cloudId) return setToast('This diet plan is not linked to Supabase');
-    const clean = { ...plan, calories: Number(plan.calories || 0), protein: Number(plan.protein || 0), durationWeeks: Number(plan.durationWeeks || 1), assignedMemberIds: Array.isArray(plan.assignedMemberIds) ? plan.assignedMemberIds : [], meals: (plan.meals || []).map((m, i) => ({ ...m, id: m.id || `MEAL-${Date.now()}-${i}`, calories: Number(m.calories || 0), protein: Number(m.protein || 0) })) };
-    try { const assigned = clean.assignedMemberIds.map((id) => memberByUiIdLocal(data.members, id)?.cloudId).filter(Boolean); await updateRecord('dietPlans', existing.cloudId, { name: clean.name || '', goal: clean.goal || '', calories: clean.calories, protein: clean.protein, duration_weeks: clean.durationWeeks, coach: clean.coach || '', notes: clean.notes || '', assigned_member_ids: assigned, meals: clean.meals }); setData((d) => ({ ...d, dietPlans: (d.dietPlans || []).map((x) => x.id === clean.id ? { ...clean, cloudId: existing.cloudId } : x) })); setModal(null); setToast('Diet plan updated'); } catch (error) { setToast(error?.message || 'Unable to update diet plan'); }
-  };
-
-  const deleteDietPlan = async (id) => {
-    if (!window.confirm('Delete this diet plan?')) return;
-    const item = (data.dietPlans || []).find((x) => x.id === id); if (!item?.cloudId) return setToast('This diet plan is not linked to Supabase');
-    try { await deleteRecord('dietPlans', item.cloudId); setData((d) => ({ ...d, dietPlans: (d.dietPlans || []).filter((x) => x.id !== id) })); setToast('Diet plan deleted'); } catch (error) { setToast(error?.message || 'Unable to delete diet plan'); }
-  };
-
-  const addTrainer = async (trainer) => {
-    const clean = { ...trainer, id: `TR-${Date.now()}`, experience: Number(trainer.experience || 0), monthlySalary: Number(trainer.monthlySalary || 0), status: trainer.status || 'Active' };
-    try { const row = await insertRecord('trainers', { legacy_id: clean.id, name: clean.name || '', phone: clean.phone || '', specialization: clean.specialization || '', experience: clean.experience, status: clean.status, monthly_salary: clean.monthlySalary, notes: clean.notes || '' }); setData((d) => ({ ...d, trainers: [{ ...clean, id: row.legacy_id || clean.id, cloudId: row.id }, ...(d.trainers || [])] })); setModal(null); setToast('Trainer added'); } catch (error) { setToast(error?.message || 'Unable to add trainer'); }
-  };
-
-  const updateTrainer = async (trainer) => {
-    const existing = (data.trainers || []).find((x) => x.id === trainer.id); if (!existing?.cloudId) return setToast('This trainer is not linked to Supabase');
-    const clean = { ...trainer, experience: Number(trainer.experience || 0), monthlySalary: Number(trainer.monthlySalary || 0) };
-    try { await updateRecord('trainers', existing.cloudId, { name: clean.name || '', phone: clean.phone || '', specialization: clean.specialization || '', experience: clean.experience, status: clean.status || 'Active', monthly_salary: clean.monthlySalary, notes: clean.notes || '' }); setData((d) => ({ ...d, trainers: (d.trainers || []).map((x) => x.id === clean.id ? { ...clean, cloudId: existing.cloudId } : x) })); setModal(null); setToast('Trainer updated'); } catch (error) { setToast(error?.message || 'Unable to update trainer'); }
-  };
-
   const deleteTrainer = async (id) => {
-    const trainer = (data.trainers || []).find((x) => x.id === id); if (!trainer || !window.confirm(`Delete ${trainer.name}?`)) return; if (!trainer.cloudId) return setToast('This trainer is not linked to Supabase');
-    try { await deleteRecord('trainers', trainer.cloudId); setData((d) => ({ ...d, trainers: (d.trainers || []).filter((x) => x.id !== id) })); setToast('Trainer deleted'); } catch (error) { setToast(error?.message || 'Unable to delete trainer'); }
+    const trainer = (data.trainers || []).find((item) => item.id === id);
+    if (!trainer || !window.confirm(`Delete ${trainer.name}?`)) return;
+
+    try {
+      if (trainer.cloudId) await deleteRecord('trainers', trainer.cloudId);
+      setData((d) => ({
+        ...d,
+        trainers: (d.trainers || []).filter((item) => item.id !== id),
+        ptSessions: (d.ptSessions || []).filter((session) => session.trainerId !== id),
+      }));
+      setToast('Trainer deleted');
+    } catch (error) {
+      console.error('Supabase trainer delete failed:', error);
+      setToast(error?.message || 'Unable to delete trainer');
+    }
   };
 
   const addPTSession = async (session) => {
-    const member = memberByUiIdLocal(data.members, session.memberId); const trainer = (data.trainers || []).find((x) => x.id === session.trainerId);
-    if (!member?.cloudId || !trainer?.cloudId) return setToast('Select a Supabase-linked member and trainer');
-    const clean = { ...session, id: `PT-${Date.now()}`, duration: Number(session.duration || 60), fee: Number(session.fee || 0), status: session.status || 'Scheduled', date: session.date || today };
-    const startTime = session.startTime || session.time || '';
-    const endTime = session.endTime || addMinutesToTimeLocal(startTime, clean.duration);
-    try { const row = await insertRecord('ptSessions', { legacy_id: clean.id, member_id: member.cloudId, trainer_id: trainer.cloudId, session_date: clean.date, start_time: startTime || null, end_time: endTime || null, duration_minutes: clean.duration, session_type: clean.type || 'Personal Training', status: clean.status, amount: clean.fee, notes: clean.notes || '' }); const saved = { ...clean, id: row.legacy_id || clean.id, cloudId: row.id, startTime: row.start_time || startTime, endTime: row.end_time || endTime, time: row.start_time || startTime }; setData((d) => ({ ...d, ptSessions: [saved, ...(d.ptSessions || [])] })); setModal(null); setToast('PT session scheduled'); } catch (error) { setToast(error?.message || 'Unable to schedule PT session'); }
+    const member = (data.members || []).find((item) => item.id === session.memberId);
+    let trainer = (data.trainers || []).find((item) => item.id === session.trainerId);
+
+    if (!member?.cloudId) {
+      setToast('Please select a Supabase-linked member');
+      return;
+    }
+    if (!trainer) {
+      setToast('Please select a trainer');
+      return;
+    }
+
+    const clean = {
+      ...session,
+      id: `PT-${Date.now()}`,
+      duration: Number(session.duration || 60),
+      fee: Number(session.fee || 0),
+      status: session.status || 'Scheduled',
+      date: session.date || today,
+    };
+
+    const startTime = timeTo24Hour(clean.time) || '19:00';
+    const endTime = addMinutesToTime(clean.time, clean.duration) || startTime;
+
+    try {
+      // Older locally-created trainers may not have a cloudId yet.
+      // Promote that trainer to Supabase automatically before creating the PT session.
+      if (!trainer.cloudId) {
+        const trainerRow = await insertRecord('trainers', {
+          legacy_id: trainer.id || `TR-${Date.now()}`,
+          name: trainer.name || '',
+          phone: trainer.phone || '',
+          specialization: trainer.specialization || '',
+          experience: Number(trainer.experience || 0),
+          status: trainer.status || 'Active',
+          monthly_salary: Number(trainer.monthlySalary || 0),
+          notes: trainer.notes || '',
+        });
+        trainer = { ...trainer, cloudId: trainerRow.id };
+        setData((d) => ({
+          ...d,
+          trainers: (d.trainers || []).map((item) => item.id === trainer.id ? trainer : item),
+        }));
+      }
+
+      const row = await insertRecord('pt_sessions', {
+        legacy_id: clean.id,
+        member_id: member.cloudId,
+        trainer_id: trainer.cloudId,
+        session_date: clean.date,
+        start_time: startTime,
+        end_time: endTime,
+        duration_minutes: clean.duration,
+        session_type: clean.type || 'Personal Training',
+        status: clean.status || 'Scheduled',
+        amount: Number(clean.fee || 0),
+        notes: clean.notes || '',
+      });
+
+      const saved = { ...clean, cloudId: row.id, endTime };
+      setData((d) => ({
+        ...d,
+        ptSessions: [saved, ...(d.ptSessions || [])],
+      }));
+      setModal(null);
+      setToast('PT session scheduled successfully');
+    } catch (error) {
+      console.error('Supabase PT session insert failed:', error);
+      setToast(error?.message || 'Unable to schedule PT session');
+    }
   };
 
   const updatePTSessionStatus = async (id, status) => {
-    const session = (data.ptSessions || []).find((x) => x.id === id); if (!session?.cloudId) return setToast('This PT session is not linked to Supabase');
-    try { await updateRecord('ptSessions', session.cloudId, { status }); setData((d) => ({ ...d, ptSessions: (d.ptSessions || []).map((x) => x.id === id ? { ...x, status } : x) })); setToast(`Session marked ${status.toLowerCase()}`); } catch (error) { setToast(error?.message || 'Unable to update PT session'); }
+    const session = (data.ptSessions || []).find((item) => item.id === id);
+    if (!session?.cloudId) {
+      setToast('This PT session is not linked to Supabase yet');
+      return;
+    }
+
+    try {
+      await updateRecord('pt_sessions', session.cloudId, { status });
+      setData((d) => ({
+        ...d,
+        ptSessions: (d.ptSessions || []).map((item) =>
+          item.id === id ? { ...item, status } : item
+        ),
+      }));
+      setToast(`Session marked ${status.toLowerCase()}`);
+    } catch (error) {
+      console.error('Supabase PT status update failed:', error);
+      setToast(error?.message || 'Unable to update PT session');
+    }
   };
 
   const deletePTSession = async (id) => {
-    if (!window.confirm('Delete this PT session?')) return; const session = (data.ptSessions || []).find((x) => x.id === id); if (!session?.cloudId) return setToast('This PT session is not linked to Supabase');
-    try { await deleteRecord('ptSessions', session.cloudId); setData((d) => ({ ...d, ptSessions: (d.ptSessions || []).filter((x) => x.id !== id) })); setToast('PT session deleted'); } catch (error) { setToast(error?.message || 'Unable to delete PT session'); }
+    const session = (data.ptSessions || []).find((item) => item.id === id);
+    if (!session || !window.confirm('Delete this PT session?')) return;
+
+    try {
+      if (session.cloudId) await deleteRecord('pt_sessions', session.cloudId);
+      setData((d) => ({
+        ...d,
+        ptSessions: (d.ptSessions || []).filter((item) => item.id !== id),
+      }));
+      setToast('PT session deleted');
+    } catch (error) {
+      console.error('Supabase PT delete failed:', error);
+      setToast(error?.message || 'Unable to delete PT session');
+    }
   };
 
-  const addCommunicationLog = async (log) => {
-    const member = memberByUiIdLocal(data.members, log.memberId); if (!member?.cloudId) return setToast('Select a Supabase-linked member');
-    const clean = { ...log, id: `MSG-${Date.now()}`, date: log.date || today, time: log.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), status: log.status || 'Sent' };
-    try { const row = await insertRecord('communicationLogs', { legacy_id: clean.id, member_id: member.cloudId, channel: clean.channel || '', direction: clean.direction || 'Outgoing', template: clean.template || '', subject: clean.subject || '', message: clean.message || '', status: clean.status, communication_date: clean.date, communication_time: clean.time }); setData((d) => ({ ...d, communicationLogs: [{ ...clean, id: row.legacy_id || clean.id, cloudId: row.id }, ...(d.communicationLogs || [])] })); setModal(null); setToast('Communication logged'); } catch (error) { setToast(error?.message || 'Unable to save communication'); }
+  const addCommunicationLog = (log) => {
+    const clean = {
+      ...log,
+      id: `MSG-${Date.now()}`,
+      date: log.date || today,
+      time: new Date().toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      status: log.status || 'Sent',
+    };
+
+    setData((d) => ({
+      ...d,
+      communicationLogs: [clean, ...(d.communicationLogs || [])],
+    }));
+    setModal(null);
+    setToast('Communication logged');
   };
 
-  const deleteCommunicationLog = async (id) => {
-    if (!window.confirm('Delete this communication record?')) return; const item = (data.communicationLogs || []).find((x) => x.id === id); if (!item?.cloudId) return setToast('This communication is not linked to Supabase');
-    try { await deleteRecord('communicationLogs', item.cloudId); setData((d) => ({ ...d, communicationLogs: (d.communicationLogs || []).filter((x) => x.id !== id) })); setToast('Communication record deleted'); } catch (error) { setToast(error?.message || 'Unable to delete communication'); }
+  const deleteCommunicationLog = (id) => {
+    if (!window.confirm('Delete this communication record?')) return;
+    setData((d) => ({
+      ...d,
+      communicationLogs: (d.communicationLogs || []).filter((item) => item.id !== id),
+    }));
+    setToast('Communication record deleted');
   };
 
-  const addProgressRecord = async (record) => {
-    const member = memberByUiIdLocal(data.members, record.memberId); if (!member?.cloudId) return setToast('Select a Supabase-linked member');
-    const clean = { ...record, id: `PR-${Date.now()}`, memberId: record.memberId, date: record.date || today, weight: Number(record.weight || 0), bodyFat: Number(record.bodyFat || 0), chest: Number(record.chest || 0), waist: Number(record.waist || 0), hips: Number(record.hips || 0), arms: Number(record.arms || 0), thighs: Number(record.thighs || 0), neck: Number(record.neck || 0), photos: record.photos || { front: '', side: '', back: '' } };
-    try { const row = await insertRecord('progressRecords', { legacy_id: clean.id, member_id: member.cloudId, record_date: clean.date, weight: clean.weight, body_fat: clean.bodyFat, chest: clean.chest, waist: clean.waist, hips: clean.hips, arms: clean.arms, thighs: clean.thighs, neck: clean.neck, notes: clean.notes || '', photos: clean.photos }); await updateRecord('members', member.cloudId, { weight: clean.weight }); setData((d) => ({ ...d, progressRecords: [{ ...clean, id: row.legacy_id || clean.id, cloudId: row.id }, ...(d.progressRecords || [])], members: d.members.map((m) => m.id === clean.memberId ? { ...m, currentWeight: clean.weight, weight: clean.weight } : m) })); setModal(null); setToast('Progress record added'); } catch (error) { setToast(error?.message || 'Unable to save progress record'); }
+  const addProgressRecord = (record) => {
+    const clean = {
+      ...record,
+      id: `PR-${Date.now()}`,
+      memberId: record.memberId,
+      date: record.date || today,
+      weight: Number(record.weight || 0),
+      bodyFat: Number(record.bodyFat || 0),
+      chest: Number(record.chest || 0),
+      waist: Number(record.waist || 0),
+      hips: Number(record.hips || 0),
+      arms: Number(record.arms || 0),
+      thighs: Number(record.thighs || 0),
+      neck: Number(record.neck || 0),
+      photos: record.photos || { front: '', side: '', back: '' },
+    };
+
+    setData((d) => ({
+      ...d,
+      progressRecords: [clean, ...(d.progressRecords || [])],
+      members: d.members.map((member) =>
+        member.id === clean.memberId
+          ? { ...member, currentWeight: clean.weight }
+          : member
+      ),
+    }));
+    setModal(null);
+    setToast('Progress record added');
   };
 
-  const deleteProgressRecord = async (id) => {
-    if (!window.confirm('Delete this progress record?')) return; const item = (data.progressRecords || []).find((x) => x.id === id); if (!item?.cloudId) return setToast('This progress record is not linked to Supabase');
-    try { await deleteRecord('progressRecords', item.cloudId); setData((d) => ({ ...d, progressRecords: (d.progressRecords || []).filter((x) => x.id !== id) })); setToast('Progress record deleted'); } catch (error) { setToast(error?.message || 'Unable to delete progress record'); }
+  const deleteProgressRecord = (id) => {
+    if (!window.confirm('Delete this progress record?')) return;
+    setData((d) => ({
+      ...d,
+      progressRecords: (d.progressRecords || []).filter((record) => record.id !== id),
+    }));
+    setToast('Progress record deleted');
   };
 
   const exportBackup = () => {
@@ -1046,34 +1455,85 @@ function App() {
     }
   };
 
-  const updateLeadStage = async (id, stage) => {
-    const lead = data.leads.find((x) => x.id === id); if (!lead?.cloudId) return setToast('This lead is not linked to Supabase');
-    try { await updateRecord('leads', lead.cloudId, { stage }); setData((d) => ({ ...d, leads: d.leads.map((x) => x.id === id ? { ...x, stage } : x) })); } catch (error) { setToast(error?.message || 'Unable to update lead stage'); }
+  const updateLeadStage = (id, stage) => {
+    setData((d) => ({ ...d, leads: d.leads.map((l) => l.id === id ? { ...l, stage } : l) }));
   };
 
-  const updateLeadDetails = async (lead) => {
-    const existing = data.leads.find((x) => x.id === lead.id); if (!existing?.cloudId) return setToast('This lead is not linked to Supabase');
-    const clean = { ...lead, phone: lead.phone || '', email: lead.email || '', source: lead.source || 'Walk-in', stage: lead.stage || 'New', followUp: lead.followUp || today, notes: lead.notes || '', interestedPlan: lead.interestedPlan || '', lastContact: lead.lastContact || today };
-    try { await updateRecord('leads', existing.cloudId, { name: clean.name || '', phone: clean.phone, email: clean.email, source: clean.source, stage: clean.stage, follow_up_date: clean.followUp, notes: clean.notes, interested_plan: clean.interestedPlan, last_contact: clean.lastContact }); setData((d) => ({ ...d, leads: d.leads.map((x) => x.id === clean.id ? { ...clean, cloudId: existing.cloudId } : x) })); setModal(null); setToast('Lead updated'); } catch (error) { setToast(error?.message || 'Unable to update lead'); }
+
+  const updateLeadDetails = (lead) => {
+    const clean = {
+      ...lead,
+      phone: lead.phone || '',
+      email: lead.email || '',
+      source: lead.source || 'Walk-in',
+      stage: lead.stage || 'New',
+      followUp: lead.followUp || today,
+      notes: lead.notes || '',
+      interestedPlan: lead.interestedPlan || '',
+      lastContact: lead.lastContact || today,
+    };
+
+    setData((d) => ({
+      ...d,
+      leads: d.leads.map((item) => item.id === clean.id ? clean : item),
+    }));
+    setModal(null);
+    setToast('Lead updated');
   };
 
-  const deleteLead = async (id) => {
-    const lead = data.leads.find((x) => x.id === id); if (!lead || !window.confirm(`Delete ${lead.name}? This cannot be undone.`)) return; if (!lead.cloudId) return setToast('This lead is not linked to Supabase');
-    try { await deleteRecord('leads', lead.cloudId); setData((d) => ({ ...d, leads: d.leads.filter((x) => x.id !== id) })); setToast('Lead deleted'); } catch (error) { setToast(error?.message || 'Unable to delete lead'); }
+  const deleteLead = (id) => {
+    const lead = data.leads.find((item) => item.id === id);
+    if (!lead || !window.confirm(`Delete ${lead.name}? This cannot be undone.`)) return;
+
+    setData((d) => ({
+      ...d,
+      leads: d.leads.filter((item) => item.id !== id),
+    }));
+    setToast('Lead deleted');
   };
 
-  const convertLeadToMember = async (lead) => {
+  const convertLeadToMember = (lead) => {
     if (!lead) return;
-    const alreadyMember = data.members.some((m) => (lead.phone && m.phone === lead.phone) || (lead.email && m.email === lead.email));
-    if (alreadyMember) return setToast('This lead already exists as a member');
-    const plan = lead.interestedPlan || 'Monthly';
-    const months = plan === 'Quarterly' ? 3 : plan === 'Half-yearly' ? 6 : plan === 'Annual' ? 12 : 1;
-    const newMember = { id: nextSystemMemberId(data.members), name: lead.name, phone: lead.phone || '', email: lead.email || '', plan, start: today, expiry: addMonthsToDate(today, months), status: 'Active', visits: 0, due: 0, dietPreference: '', birthday: '', referral: lead.source || 'Walk-in', referredBy: '', referredClients: 0 };
-    try {
-      const row = await insertRecord('members', { member_code: newMember.id, name: newMember.name, phone: newMember.phone, email: newMember.email, plan_name: newMember.plan, start_date: newMember.start, expiry_date: newMember.expiry, status: newMember.status, visits: 0, due_amount: 0, membership_amount: 0, paid_amount: 0, referral_source: newMember.referral, diet_preference: '', attendance_number: '' });
-      await updateRecord('leads', lead.cloudId, { stage: 'Converted', converted_member_code: row.member_code || newMember.id, converted_at: today });
-      setData((d) => ({ ...d, members: [{ ...newMember, cloudId: row.id }, ...d.members], leads: d.leads.map((x) => x.id === lead.id ? { ...x, stage: 'Converted', convertedMemberId: newMember.id, convertedAt: today } : x) })); setToast(`${lead.name} converted to member`);
-    } catch (error) { setToast(error?.message || 'Unable to convert lead'); }
+
+    const alreadyMember = data.members.some(
+      (member) =>
+        (lead.phone && member.phone === lead.phone) ||
+        (lead.email && member.email === lead.email)
+    );
+
+    if (alreadyMember) {
+      return setToast('This lead already exists as a member');
+    }
+
+    const newMember = {
+      id: nextSystemMemberId(data.members),
+      name: lead.name,
+      phone: lead.phone || '',
+      email: lead.email || '',
+      plan: lead.interestedPlan || 'Monthly',
+      start: today,
+      expiry: addMonthsToDate(today, lead.interestedPlan === 'Quarterly' ? 3 : lead.interestedPlan === 'Half-yearly' ? 6 : lead.interestedPlan === 'Annual' ? 12 : 1),
+      status: 'Active',
+      visits: 0,
+      due: 0,
+      dietPreference: '',
+      birthday: '',
+      referral: lead.source || 'Walk-in',
+      referredBy: '',
+      referredClients: 0,
+    };
+
+    setData((d) => ({
+      ...d,
+      members: [newMember, ...d.members],
+      leads: d.leads.map((item) =>
+        item.id === lead.id
+          ? { ...item, stage: 'Converted', convertedMemberId: newMember.id, convertedAt: today }
+          : item
+      ),
+    }));
+
+    setToast(`${lead.name} converted to member`);
   };
 
   const deletePayment = async (id) => {
@@ -1140,6 +1600,7 @@ function App() {
   { label: 'Progress', icon: TrendingUp },
     { label: 'Diet & Nutrition', icon: Target },
     { label: 'Communication', icon: MessageCircle },
+    { label: 'Customer Feedback', icon: MessageCircle },
     { label: 'Reports', icon: ClipboardList },
   ];
 
@@ -1180,10 +1641,16 @@ function App() {
     );
   }
 
-  const isPublicCheckInRoute = window.location.hash === '#check-in';
+  const publicHash = window.location.hash;
+  const isPublicCheckInRoute = publicHash === '#check-in';
+  const isPublicGymRoute = publicHash === '#gym';
 
   if (isPublicCheckInRoute) {
     return <PublicAttendancePage data={data} setData={setData} />;
+  }
+
+  if (isPublicGymRoute) {
+    return <PublicGymIntroPage settings={data.settings || {}} />;
   }
 
   if (!isAuthenticated) {
@@ -1225,10 +1692,11 @@ function App() {
           ))}
         </nav>
         <div className="sidebar-bottom">
+          <button className="nav-item" onClick={openPublicGymPage}><Sparkles size={18} /><span>Public Gym Page</span></button>
           <button className={`nav-item ${active === 'Settings' ? 'active' : ''}`} onClick={() => navigate('Settings')}><Settings size={18} /><span>Settings</span></button>
           <div className="storage-card">
             <div className="storage-icon"><ShieldCheck size={16} /></div>
-            <div><strong>Cloud mode</strong><span>Core gym data is synced with Supabase.</span></div>
+            <div><strong>Local mode</strong><span>Your data is saved in this browser.</span></div>
           </div>
         </div>
       </aside>
@@ -1248,19 +1716,28 @@ function App() {
           </div>
         </header>
 
+        {data.settings?.notice?.enabled && data.settings?.notice?.text && (
+          <div className={`global-notice global-notice-${data.settings.notice.priority || 'medium'}`}>
+            <div className="global-notice-icon"><Bell size={18} /></div>
+            <div className="global-notice-copy"><strong>{data.settings.notice.priority === 'high' ? 'Important notice' : 'Gym announcement'}</strong><span>{data.settings.notice.text}</span></div>
+            <button className="global-notice-close" onClick={() => setData((d) => ({ ...d, settings: { ...(d.settings || {}), notice: { ...(d.settings?.notice || {}), enabled: false } } }))} title="Hide for now"><X size={16} /></button>
+          </div>
+        )}
+
         <div className="content">
           {active === 'Performance' && <PerformancePage data={data} />}
           {active === 'Dashboard' && <Dashboard {...{ activeMembers, expiringMembers, overdue, revenue, data, navigate, setModal, markAttendance }} />}
-          {active === 'Members' && <MembersPage members={data.members} query={query} setQuery={setQuery} setModal={setModal} markAttendance={markAttendance} deleteMember={deleteMember} settings={data.settings || {}} />}
+          {active === 'Members' && <MembersPage members={data.members} query={query} setQuery={setQuery} setModal={setModal} markAttendance={markAttendance} deleteMember={deleteMember} settings={data.settings || {}} payments={data.payments || []} />}
           {active === 'Leads' && <LeadsPage leads={data.leads} members={data.members} setModal={setModal} updateLeadStage={updateLeadStage} updateLeadDetails={updateLeadDetails} deleteLead={deleteLead} convertLeadToMember={convertLeadToMember} />}
           {active === 'Memberships' && <MembershipsPage members={data.members} setModal={setModal} planPrices={planPrices} setData={setData} setToast={setToast} onRenewMembership={renewMembership} />}
           {active === 'Attendance' && <AttendancePage attendance={data.attendance} members={data.members} markAttendance={markAttendance} />}
-          {active === 'Payments' && <PaymentsPage payments={data.payments} overdue={overdue} setModal={setModal} deletePayment={deletePayment} />}
+          {active === 'Payments' && <PaymentsPage payments={data.payments} overdue={overdue} setModal={setModal} deletePayment={deletePayment} members={data.members} settings={data.settings || {}} />}
           {active === 'Progress' && <ProgressPage progressRecords={data.progressRecords || []} members={data.members} setModal={setModal} deleteProgressRecord={deleteProgressRecord} />}
           {active === 'Trainers & PT' && <TrainersPTPage trainers={data.trainers || []} sessions={data.ptSessions || []} members={data.members} setModal={setModal} updatePTSessionStatus={updatePTSessionStatus} deletePTSession={deletePTSession} deleteTrainer={deleteTrainer} />}
           {active === 'Training' && <TrainingPage plans={data.workoutPlans || []} members={data.members} setModal={setModal} deleteWorkoutPlan={deleteWorkoutPlan} />}
           {active === 'Diet & Nutrition' && <DietPage plans={data.dietPlans || []} members={data.members} setModal={setModal} deleteDietPlan={deleteDietPlan} />}
           {active === 'Communication' && <CommunicationPage members={data.members} logs={data.communicationLogs || []} setModal={setModal} deleteCommunicationLog={deleteCommunicationLog} />}
+          {active === 'Customer Feedback' && <FeedbackPage feedbacks={data.feedbacks || []} members={data.members || []} setModal={setModal} deleteFeedback={deleteFeedback} />}
           {active === 'Reports' && <ReportsPage data={data} revenue={revenue} />}
           {active === 'Settings' && <SettingsPage exportBackup={exportBackup} importBackup={importBackup} data={data} setData={setData} dbReady={dbReady} resetData={() => {
             if (window.confirm('Reset the local Preface Fitness database to demo data?')) {
@@ -1277,8 +1754,8 @@ function App() {
         </div>
       </main>
 
-      {modal === 'member' && <MemberModal onClose={() => setModal(null)} onSave={addMember} planPrices={planPrices} members={data.members} existingMemberIds={data.members.map((m) => m.id)} />}
-      {modal?.type === 'editMember' && <MemberModal member={modal.member} onClose={() => setModal(null)} onSave={updateMember} planPrices={planPrices} members={data.members} existingMemberIds={data.members.map((m) => m.id)} />}
+      {modal === 'member' && <MemberModal onClose={() => setModal(null)} onSave={addMember} planPrices={planPrices} members={data.members} trainers={data.trainers || []} existingMemberIds={data.members.map((m) => m.id)} />}
+      {modal?.type === 'editMember' && <MemberModal member={modal.member} onClose={() => setModal(null)} onSave={updateMember} planPrices={planPrices} members={data.members} trainers={data.trainers || []} existingMemberIds={data.members.map((m) => m.id)} />}
       {modal === 'lead' && <LeadModal onClose={() => setModal(null)} onSave={addLead} />}
       {modal?.type === 'editLead' && <LeadModal lead={modal.lead} onClose={() => setModal(null)} onSave={updateLeadDetails} />}
       {modal === 'trainer' && <TrainerModal onClose={() => setModal(null)} onSave={addTrainer} />}
@@ -1286,14 +1763,106 @@ function App() {
       {modal === 'ptSession' && <PTSessionModal trainers={data.trainers || []} members={data.members} onClose={() => setModal(null)} onSave={addPTSession} />}
       {modal === 'communication' && <CommunicationModal members={data.members} onClose={() => setModal(null)} onSave={addCommunicationLog} />}
       {modal === 'progress' && <ProgressModal members={data.members} onClose={() => setModal(null)} onSave={addProgressRecord} />}
-      {modal === 'payment' && <PaymentModal members={data.members} onClose={() => setModal(null)} onSave={addPayment} />}
+      {modal === 'payment' && <PaymentModal members={data.members} settings={data.settings || {}} onClose={() => setModal(null)} onSave={addPayment} />}
       {(modal === 'workoutPlan' || modal?.type === 'editWorkoutPlan') && <WorkoutPlanModal members={data.members} plan={modal?.type === 'editWorkoutPlan' ? modal.plan : null} onClose={() => setModal(null)} onSave={modal?.type === 'editWorkoutPlan' ? updateWorkoutPlan : createWorkoutPlan} />}
       {(modal === 'dietPlan' || modal?.type === 'editDietPlan') && <DietPlanModal members={data.members} plan={modal?.type === 'editDietPlan' ? modal.plan : null} onClose={() => setModal(null)} onSave={modal?.type === 'editDietPlan' ? updateDietPlan : createDietPlan} />}
+      {modal === 'feedback' && <FeedbackModal members={data.members || []} onClose={() => setModal(null)} onSave={addFeedback} />}
+      {modal?.type === 'invoiceOptions' && <InvoiceOptionsModal member={modal.member} payment={modal.payment} settings={data.settings || {}} onClose={() => setModal(null)} onPrint={(mode, rate) => { const selectedPayment = { ...(modal.payment || {}), gstApplicable: mode === 'gst', gstRate: Number(rate || 0) }; printPaymentInvoice(modal.member, selectedPayment, data.settings || {}, mode); setModal(null); }} />}
       {toast && <div className="toast"><CheckCircle2 size={18} />{toast}</div>}
     </div>
   );
 }
 
+
+
+function PublicGymIntroPage({ settings = {} }) {
+  const gymName = settings.gymName || 'Preface Fitness';
+  const description = settings.gymIntro?.description || 'A modern fitness destination focused on strength, conditioning, personal training and sustainable results.';
+  const facilities = Array.isArray(settings.gymIntro?.facilities) && settings.gymIntro.facilities.length
+    ? settings.gymIntro.facilities
+    : ['Strength & cardio zone', 'Personal training', 'Functional training', 'Locker & changing facilities', 'Member progress tracking', 'Diet & nutrition guidance'];
+  const gallery = [
+    'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=1200&q=85',
+    'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?auto=format&fit=crop&w=1200&q=85',
+    'https://images.unsplash.com/photo-1571902943202-507ec2618e8f?auto=format&fit=crop&w=1200&q=85',
+    'https://images.unsplash.com/photo-1540497077202-7c8a3999166f?auto=format&fit=crop&w=1200&q=85',
+  ];
+
+  return (
+    <div className="gym-public-page">
+      {settings.notice?.enabled && String(settings.notice?.text || '').trim() && (
+        <div className={`gym-public-notice gym-public-notice-${settings.notice?.priority || 'medium'}`} role="status">
+          <div className="gym-public-notice-icon"><Bell size={18} /></div>
+          <div className="gym-public-notice-content">
+            <span>GYM NOTICE</span>
+            <strong>{settings.notice.text}</strong>
+          </div>
+          <div className="gym-public-notice-pulse" aria-hidden="true" />
+        </div>
+      )}
+      <header className="gym-public-nav">
+        <div className="gym-public-brand"><img src={LOGO_URL} alt={gymName} /><div><strong>{gymName}</strong><span>FITNESS • STRENGTH • WELLNESS</span></div></div>
+        
+      </header>
+
+      <section className="gym-hero">
+        <div className="gym-hero-copy">
+          <div className="gym-kicker">YOUR FITNESS. YOUR PROGRESS. YOUR SPACE.</div>
+          <h1>Train stronger.<br /><span>Live better.</span></h1>
+          <p>{description}</p>
+          
+          <div className="gym-trust-row"><span><CheckCircle2 size={16} /> Professional training</span><span><CheckCircle2 size={16} /> Progress focused</span><span><CheckCircle2 size={16} /> Member first</span></div>
+        </div>
+        <div className="gym-hero-visual"><img src={gallery[0]} alt="Fitness training area" /><div className="gym-hero-float"><strong>Built for consistency</strong><span>Strength • Conditioning • Results</span></div></div>
+      </section>
+
+      <section className="gym-public-section gym-about-grid">
+        <div><div className="gym-section-kicker">ABOUT THE GYM</div><h2>A focused environment for people who want to make progress.</h2></div>
+        <div><p>{description}</p><p>Whether your goal is fat loss, strength, muscle development or simply becoming more active, the space is designed to keep your training structured, measurable and sustainable.</p></div>
+      </section>
+
+      <section className="gym-public-section">
+        <div className="gym-section-heading"><div><div className="gym-section-kicker">FACILITIES</div><h2>Everything you need to train with purpose.</h2></div></div>
+        <div className="gym-facility-grid">{facilities.map((item, index) => <div className="gym-facility-card" key={`${item}-${index}`}><div className="gym-facility-number">0{index + 1}</div><div><h3>{item}</h3><p>Designed to make every training session simple, focused and effective.</p></div></div>)}</div>
+      </section>
+
+      <section className="gym-public-section">
+        <div className="gym-section-heading"><div><div className="gym-section-kicker">THE SPACE</div><h2>Train in a space built around movement.</h2></div><span>Swipe / scroll through the gallery</span></div>
+        <div className="gym-gallery">{gallery.map((src, index) => <div className={`gym-gallery-item gallery-${index + 1}`} key={src}><img src={src} alt={`Gym training ${index + 1}`} /></div>)}</div>
+      </section>
+
+      <section className="gym-cta"><div><div className="gym-section-kicker">READY TO START?</div><h2>Show up. Put in the work. Track the progress.</h2></div></section>
+      <footer className="gym-public-footer"><div><strong>{gymName}</strong><span>{settings.gymAddress || 'Fitness • Strength • Wellness'}</span></div><div>{settings.gymPhone || ''}{settings.gymEmail ? ` • ${settings.gymEmail}` : ''}</div></footer>
+    </div>
+  );
+}
+
+function FeedbackPage({ feedbacks, members, setModal, deleteFeedback }) {
+  const counts = { high: feedbacks.filter((f) => f.priority === 'high').length, medium: feedbacks.filter((f) => f.priority === 'medium').length, low: feedbacks.filter((f) => f.priority === 'low').length };
+  return (
+    <div className="page feedback-page">
+      <PageTitle title="Customer Feedback" subtitle="Capture member feedback, identify urgency and keep follow-up visible." action={<button className="btn btn-primary" onClick={() => setModal('feedback')}><Plus size={17} /> Record feedback</button>} />
+      <div className="feedback-summary"><div className="feedback-stat"><span>Total feedback</span><strong>{feedbacks.length}</strong></div><div className="feedback-stat high"><span>High priority</span><strong>{counts.high}</strong></div><div className="feedback-stat medium"><span>Medium priority</span><strong>{counts.medium}</strong></div><div className="feedback-stat low"><span>Low priority</span><strong>{counts.low}</strong></div></div>
+      <section className="card feedback-board"><div className="card-header"><div><h3>Member feedback log</h3><p>Use priority to decide what needs attention first.</p></div></div>{feedbacks.length === 0 ? <div className="feedback-empty"><MessageCircle size={30} /><strong>No feedback recorded yet</strong><span>Start by recording a member's suggestion, complaint or appreciation.</span></div> : <div className="feedback-list">{feedbacks.map((item) => <article className={`feedback-item priority-${item.priority}`} key={item.id}><div className="feedback-priority"><span>{item.priority}</span></div><div className="feedback-body"><div className="feedback-meta"><strong>{item.memberName || 'Anonymous member'}</strong><span>{item.category}</span><span>{formatDate(item.date)}</span><span className={`feedback-status status-${String(item.status || 'Open').toLowerCase().replace(/\s+/g, '-')}`}>{item.status || 'Open'}</span></div><p>{item.feedback}</p>{item.notes && <small>{item.notes}</small>}</div><button className="icon-btn danger" onClick={() => deleteFeedback(item)} title="Delete feedback"><Trash2 size={16} /></button></article>)}</div>}</section>
+    </div>
+  );
+}
+
+function FeedbackModal({ members, onClose, onSave }) {
+  const [form, setForm] = useState({ memberId: '', memberName: '', category: 'General', priority: 'medium', feedback: '', status: 'Open', date: today, notes: '' });
+  const update = (key, value) => setForm((f) => ({ ...f, [key]: value }));
+  return <Modal title="Record customer feedback" onClose={onClose} wide>
+    <div className="feedback-modal-intro"><div><MessageCircle size={22} /><strong>Capture the customer's voice</strong></div><span>Record the feedback clearly and assign an urgency level so the team knows what needs attention first.</span></div>
+    <div className="form-grid two">
+      <FormField label="Member"><select value={form.memberId} onChange={(e) => { const id = e.target.value; const member = members.find((m) => m.id === id); setForm((f) => ({ ...f, memberId: id, memberName: member?.name || '' })); }}><option value="">Anonymous / walk-in</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name} · {m.id}</option>)}</select></FormField>
+      <FormField label="Date"><input type="date" value={form.date} onChange={(e) => update('date', e.target.value)} /></FormField>
+    </div>
+    <div className="form-grid three"><FormField label="Category"><select value={form.category} onChange={(e) => update('category', e.target.value)}><option>General</option><option>Service</option><option>Trainer</option><option>Facility</option><option>Cleanliness</option><option>Billing</option><option>Membership</option><option>Suggestion</option><option>Appreciation</option></select></FormField><FormField label="Urgency level"><select value={form.priority} onChange={(e) => update('priority', e.target.value)}><option value="low">Low priority</option><option value="medium">Medium priority</option><option value="high">High priority</option></select></FormField><FormField label="Status"><select value={form.status} onChange={(e) => update('status', e.target.value)}><option>Open</option><option>In progress</option><option>Resolved</option></select></FormField></div>
+    <FormField label="Customer feedback"><textarea rows="6" autoFocus value={form.feedback} onChange={(e) => update('feedback', e.target.value)} placeholder="Write the customer's feedback in their own words..." /></FormField>
+    <FormField label="Internal follow-up notes"><textarea rows="3" value={form.notes} onChange={(e) => update('notes', e.target.value)} placeholder="Action required, staff member responsible, follow-up date, etc." /></FormField>
+    <ModalActions onClose={onClose} disabled={!form.feedback.trim()} onSave={() => onSave(form)} saveLabel="Save feedback" />
+  </Modal>;
+}
 
 function LoginScreen({ onLogin }) {
   const [email, setEmail] = useState('');
@@ -1491,6 +2060,7 @@ function LoginScreen({ onLogin }) {
         >
           Sign in using your Preface Fitness owner account.
         </div>
+        <button className="public-link-button" type="button" onClick={openPublicGymPage}>View Preface Fitness <ArrowUpRight size={15} /></button>
       </div>
     </div>
   );
@@ -2106,18 +2676,18 @@ function TrainerModal({ onClose, onSave, trainer }) {
         </div>
 
         <div className="modal-body">
-          <div className="form-grid">
-            <label>
+          <div className="form-grid professional-form-grid">
+            <label className="professional-field">
               Name *
               <input value={form.name} onChange={(e) => update('name', e.target.value)} />
             </label>
 
-            <label>
+            <label className="professional-field">
               Phone
               <input value={form.phone} onChange={(e) => update('phone', e.target.value)} />
             </label>
 
-            <label>
+            <label className="professional-field">
               Specialization *
               <input
                 value={form.specialization}
@@ -2126,17 +2696,19 @@ function TrainerModal({ onClose, onSave, trainer }) {
               />
             </label>
 
-            <label>
+            <label className="professional-field">
               Experience (years)
               <input
                 type="number"
                 min="0"
+                step="0.1"
+                inputMode="decimal"
                 value={form.experience}
                 onChange={(e) => update('experience', e.target.value)}
               />
             </label>
 
-            <label>
+            <label className="professional-field">
               Monthly salary
               <input
                 type="number"
@@ -2146,7 +2718,7 @@ function TrainerModal({ onClose, onSave, trainer }) {
               />
             </label>
 
-            <label>
+            <label className="professional-field">
               Status
               <select value={form.status} onChange={(e) => update('status', e.target.value)}>
                 <option>Active</option>
@@ -2215,8 +2787,8 @@ function PTSessionModal({ trainers, members, onClose, onSave }) {
         </div>
 
         <div className="modal-body">
-          <div className="form-grid">
-            <label>
+          <div className="form-grid professional-form-grid">
+            <label className="professional-field">
               Trainer
               <select value={form.trainerId} onChange={(e) => update('trainerId', e.target.value)}>
                 {trainers.map((trainer) => (
@@ -2225,7 +2797,7 @@ function PTSessionModal({ trainers, members, onClose, onSave }) {
               </select>
             </label>
 
-            <label>
+            <label className="professional-field">
               Member
               <select value={form.memberId} onChange={(e) => update('memberId', e.target.value)}>
                 {members.map((member) => (
@@ -2234,27 +2806,27 @@ function PTSessionModal({ trainers, members, onClose, onSave }) {
               </select>
             </label>
 
-            <label>
+            <label className="professional-field">
               Date
               <input type="date" value={form.date} onChange={(e) => update('date', e.target.value)} />
             </label>
 
-            <label>
+            <label className="professional-field">
               Time
               <input value={form.time} onChange={(e) => update('time', e.target.value)} placeholder="07:00 PM" />
             </label>
 
-            <label>
+            <label className="professional-field">
               Duration (minutes)
               <input type="number" min="15" step="15" value={form.duration} onChange={(e) => update('duration', e.target.value)} />
             </label>
 
-            <label>
+            <label className="professional-field">
               Session fee
               <input type="number" min="0" value={form.fee} onChange={(e) => update('fee', e.target.value)} />
             </label>
 
-            <label>
+            <label className="professional-field">
               Session type
               <select value={form.type} onChange={(e) => update('type', e.target.value)}>
                 <option>Personal Training</option>
@@ -2264,7 +2836,7 @@ function PTSessionModal({ trainers, members, onClose, onSave }) {
               </select>
             </label>
 
-            <label>
+            <label className="professional-field">
               Status
               <select value={form.status} onChange={(e) => update('status', e.target.value)}>
                 <option>Scheduled</option>
@@ -2349,7 +2921,7 @@ function Dashboard({ activeMembers, expiringMembers, overdue, revenue, data, nav
   );
 }
 
-function MembersPage({ members, query, setQuery, setModal, markAttendance, deleteMember, settings }) {
+function MembersPage({ members, query, setQuery, setModal, markAttendance, deleteMember, settings, payments = [] }) {
   const [statusFilter, setStatusFilter] = useState('All');
   const [selectedMember, setSelectedMember] = useState(null);
 
@@ -2502,8 +3074,8 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
             <div className="documents-grid">
               <button className="quick-action" onClick={() => printMemberIdCard(member, settings)}><span><FileDown size={18} /></span><strong>ID card / PDF</strong><ArrowUpRight size={15} /></button>
               <button className="quick-action" onClick={() => shareMemberWhatsApp(member)}><span><MessageCircle size={18} /></span><strong>Share ID on WhatsApp</strong><ArrowUpRight size={15} /></button>
-              <button className="quick-action" onClick={() => printMemberBill(member, settings)}><span><CreditCard size={18} /></span><strong>Bill / PDF</strong><ArrowUpRight size={15} /></button>
-              <button className="quick-action" onClick={() => shareBillWhatsApp(member, settings)}><span><MessageCircle size={18} /></span><strong>Share bill on WhatsApp</strong><ArrowUpRight size={15} /></button>
+              <button className="quick-action" onClick={() => { const payment = getInvoicePaymentForMember(member, payments); setModal({ type:'invoiceOptions', member, payment }); }}><span><CreditCard size={18} /></span><strong>Bill / PDF</strong><ArrowUpRight size={15} /></button>
+              <button className="quick-action" onClick={() => { const payment = getInvoicePaymentForMember(member, payments); shareBillWhatsApp(member, settings, payment); }}><span><MessageCircle size={18} /></span><strong>Share bill on WhatsApp</strong><ArrowUpRight size={15} /></button>
             </div>
           </div>
 
@@ -2571,22 +3143,15 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
 
 function PublicAttendancePage({ data, setData }) {
   const settings = data.settings || {};
-  const params = new URLSearchParams(window.location.search);
-  const gymId = params.get('gym') || data.gym?.id || '';
-  const qrGymLat = params.get('lat');
-  const qrGymLng = params.get('lng');
-
-  const gymLat = Number(qrGymLat ?? settings.gymLatitude);
-  const gymLng = Number(qrGymLng ?? settings.gymLongitude);
-  const hasGymLocation = Number.isFinite(gymLat) && Number.isFinite(gymLng)
-    && String(qrGymLat ?? settings.gymLatitude) !== ''
-    && String(qrGymLng ?? settings.gymLongitude) !== '';
-
   const [memberNumber, setMemberNumber] = useState('');
   const [location, setLocation] = useState(null);
   const [locationStatus, setLocationStatus] = useState('Requesting your location…');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
+
+  const gymLat = Number(settings.gymLatitude);
+  const gymLng = Number(settings.gymLongitude);
+  const hasGymLocation = Number.isFinite(gymLat) && Number.isFinite(gymLng) && settings.gymLatitude !== '' && settings.gymLongitude !== '';
 
   const requestLocation = () => {
     setResult(null);
@@ -2597,17 +3162,11 @@ function PublicAttendancePage({ data, setData }) {
     setLocationStatus('Requesting your location…');
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        setLocation({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracy: position.coords.accuracy,
-        });
+        setLocation({ latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy });
         setLocationStatus(`Location detected (accuracy ±${Math.round(position.coords.accuracy || 0)} m)`);
       },
       (error) => {
-        const message = error.code === 1
-          ? 'Location permission was denied. Please allow location access and try again.'
-          : 'Could not detect your location. Please try again.';
+        const message = error.code === 1 ? 'Location permission was denied. Please allow location access and try again.' : 'Could not detect your location. Please try again.';
         setLocationStatus(message);
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
@@ -2616,16 +3175,11 @@ function PublicAttendancePage({ data, setData }) {
 
   useEffect(() => { requestLocation(); }, []);
 
-  const markPresent = async () => {
+  const markPresent = () => {
     setResult(null);
     const number = String(memberNumber || '').trim();
-
     if (!number) {
       setResult({ type: 'error', message: 'Enter your member number.' });
-      return;
-    }
-    if (!gymId) {
-      setResult({ type: 'error', message: 'This attendance QR is not linked to a gym.' });
       return;
     }
     if (!hasGymLocation) {
@@ -2644,104 +3198,75 @@ function PublicAttendancePage({ data, setData }) {
       return;
     }
 
-    setSubmitting(true);
-    try {
-      const response = await publicCheckIn({
-        gymId,
-        memberNumber: number,
-        latitude: location.latitude,
-        longitude: location.longitude,
-        gymLatitude: gymLat,
-        gymLongitude: gymLng,
-      });
-
-      if (!response?.success) {
-        setResult({ type: 'error', message: response?.message || 'Attendance could not be marked.' });
-        return;
-      }
-
-      if (response?.already_present) {
-        setResult({
-          type: 'warning',
-          message: response?.message || 'Attendance already marked today.',
-        });
-        return;
-      }
-
-      const member = response.member;
-      const now = new Date();
-      const record = {
-        id: response.attendance?.legacy_id || response.attendance?.id || `A-${Date.now()}`,
-        cloudId: response.attendance?.id,
-        member: member?.name || '',
-        memberId: member?.member_code || member?.id || '',
-        memberNumber: member?.attendance_number || number,
-        date: today,
-        time: formatAttendanceTime(response.attendance?.check_in_time) || now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        source: 'QR check-in',
-        latitude: location.latitude,
-        longitude: location.longitude,
-        distance: Math.round(distance),
-      };
-
-      setData((current) => ({
-        ...current,
-        attendance: [record, ...(current.attendance || [])],
-        members: (current.members || []).map((item) =>
-          item.id === record.memberId
-            ? { ...item, visits: Number(item.visits || 0) + 1 }
-            : item
-        ),
-      }));
-
-      setResult({ type: 'success', message: `${member?.name || 'Member'} — attendance marked successfully.` });
-      setMemberNumber('');
-    } catch (error) {
-      console.error('Public attendance failed:', error);
-      setResult({ type: 'error', message: error?.message || 'Unable to mark attendance.' });
-    } finally {
-      setSubmitting(false);
+    const member = (data.members || []).find((item) => String(item.attendanceNumber || item.id || '').trim().toLowerCase() === number.toLowerCase());
+    if (!member) {
+      setResult({ type: 'error', message: 'Member number not found.' });
+      return;
     }
+    if (getMembershipStatus(member.expiry) === 'Expired') {
+      setResult({ type: 'error', message: 'Attendance denied. Your membership has expired.' });
+      return;
+    }
+
+    const already = (data.attendance || []).some((record) => record.memberId === member.id && record.date === today);
+    if (already) {
+      setResult({ type: 'success', message: `${member.name} is already marked present today.` });
+      return;
+    }
+
+    setSubmitting(true);
+    const now = new Date();
+    const record = {
+      id: `A-${Date.now()}`,
+      member: member.name,
+      memberId: member.id,
+      memberNumber: member.attendanceNumber || number,
+      date: today,
+      time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      source: 'QR check-in',
+      latitude: location.latitude,
+      longitude: location.longitude,
+      distanceMeters: Math.round(distance),
+    };
+
+    setData((current) => ({
+      ...current,
+      attendance: [record, ...(current.attendance || [])],
+      members: (current.members || []).map((item) => item.id === member.id ? { ...item, visits: Number(item.visits || 0) + 1 } : item),
+    }));
+    setSubmitting(false);
+    setResult({ type: 'success', message: `Attendance marked successfully for ${member.name}.` });
+    setMemberNumber('');
   };
 
   return (
-    <div className="public-checkin-screen">
-      <div className="public-checkin-card">
-        <img src={LOGO_URL} alt="Preface Fitness" className="public-checkin-logo" />
-        <div className="public-checkin-heading">
+    <div className="auth-screen" style={{ padding: '24px', minHeight: '100vh', background: '#f5f8fa' }}>
+      <div className="auth-card" style={{ width: 'min(460px, 100%)' }}>
+        <img src={LOGO_URL} alt="Preface Fitness" className="auth-logo" />
+        <div style={{ marginTop: '8px', textAlign: 'center' }}>
           <div className="eyebrow">PREFACE FITNESS</div>
           <h2 style={{ margin: '6px 0 8px' }}>Mark Attendance</h2>
-          <p style={{ color: '#718096', fontSize: '14px', lineHeight: 1.5, margin: 0 }}>
-            Scan the QR at the gym entrance, enter your member number and allow location access.
-          </p>
+          <p style={{ color: '#718096', fontSize: '14px', lineHeight: 1.5, margin: 0 }}>Scan at the gym entrance and mark your attendance without logging into the owner dashboard.</p>
         </div>
 
-        <div className={`public-location-status ${location ? 'is-ready' : 'is-pending'}`}>
+        <div style={{ marginTop: '22px', padding: '12px 14px', borderRadius: '12px', background: location ? '#f0faf7' : '#fff8ed', border: `1px solid ${location ? '#cfece3' : '#f0dfbf'}`, color: '#53656f', fontSize: '13px' }}>
           <strong>{location ? '✓ Location detected' : 'Location required'}</strong>
           <div style={{ marginTop: '3px' }}>{locationStatus}</div>
         </div>
 
-        <div className="public-member-field">
-          <label className="public-member-label">Member number</label>
-          <input
-            value={memberNumber}
-            onChange={(e) => setMemberNumber(e.target.value.replace(/\D/g, '').slice(0, 8))}
-            onKeyDown={(e) => { if (e.key === 'Enter') markPresent(); }}
-            inputMode="numeric"
-            autoFocus
-            placeholder="e.g. 23"
-            className="public-member-input" 
-          />
+        <div style={{ marginTop: '18px' }}>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#334155', marginBottom: '7px' }}>Member number</label>
+          <input value={memberNumber} onChange={(e) => setMemberNumber(e.target.value.replace(/\D/g, '').slice(0, 8))} onKeyDown={(e) => { if (e.key === 'Enter') markPresent(); }} inputMode="numeric" autoFocus placeholder="e.g. 23" style={{ width: '100%', fontSize: '22px', textAlign: 'center', letterSpacing: '3px', padding: '13px 14px' }} />
         </div>
 
-        <button className="btn btn-primary public-submit-button" onClick={markPresent} disabled={submitting}>
-          <CheckCircle2 size={18} /> {submitting ? 'Checking…' : 'Mark Present'}
+        <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '14px', minHeight: '48px' }} onClick={markPresent} disabled={submitting}>
+          <CheckCircle2 size={18} /> {submitting ? 'Marking…' : 'Mark Present'}
         </button>
 
-        <button className="link-btn public-refresh-button" onClick={requestLocation}>Refresh location</button>
+        <button className="link-btn" style={{ width: '100%', justifyContent: 'center', marginTop: '10px' }} onClick={requestLocation}>Refresh location</button>
 
         {result && (
-          <div className={`public-result ${result.type === 'success' ? 'is-success' : result.type === 'warning' ? 'is-warning' : 'is-error'}`}>
+          <div style={{ marginTop: '14px', padding: '13px 14px', borderRadius: '12px', background: result.type === 'success' ? '#f0faf7' : '#fff4f3', border: `1px solid ${result.type === 'success' ? '#cfece3' : '#f2d1ce'}`, color: result.type === 'success' ? '#26735f' : '#a33a32', fontSize: '13px', lineHeight: 1.5 }}>
             {result.message}
           </div>
         )}
@@ -4377,7 +4902,7 @@ function LeadModal({ onClose, onSave, lead }) {
 }
 
 
-function PaymentsPage({ payments, overdue, setModal, deletePayment }) {
+function PaymentsPage({ payments, overdue, setModal, deletePayment, members = [], settings = {} }) {
   const [typeFilter, setTypeFilter] = useState('All');
   const [modeFilter, setModeFilter] = useState('All');
   const [search, setSearch] = useState('');
@@ -4448,7 +4973,7 @@ function PaymentsPage({ payments, overdue, setModal, deletePayment }) {
               <td><span className="soft-tag">{payment.type}</span></td>
               <td>{payment.mode}</td>
               <td><strong>₹{Number(payment.amount || 0).toLocaleString('en-IN')}</strong></td>
-              <td><button className="btn btn-danger btn-sm" onClick={() => deletePayment(payment.id)}>Delete</button></td>
+              <td><div className="row-actions"><button className="btn btn-secondary btn-sm" onClick={() => { const member = members.find((m) => m.id === payment.memberId || m.name === payment.member); if (member) setModal({ type:'invoiceOptions', member, payment }); }}>Invoice</button><button className="btn btn-danger btn-sm" onClick={() => deletePayment(payment.id)}>Delete</button></div></td>
             </tr>)}
             {!filteredPayments.length && <tr><td colSpan="7"><EmptyState title="No payments found" text="Try changing the filters or record a new payment." /></td></tr>}
           </tbody>
@@ -4482,10 +5007,17 @@ function MembershipsPage({ members, setModal, planPrices, setData, setToast, onR
       (statusFilter === 'All' || status === statusFilter);
   });
 
-  const savePrices = async () => {
+  const savePrices = () => {
     const cleaned = {};
-    MEMBERSHIP_PLANS.forEach((plan) => { cleaned[plan.name] = Math.max(0, Number(draftPrices[plan.name] || 0)); });
-    try { await saveCloudSettings({ membershipPrices: cleaned }); setData((current) => ({ ...current, settings: { ...(current.settings || {}), membershipPrices: cleaned } })); setEditingPrices(false); setToast('Membership plan prices updated'); } catch (error) { setToast(error?.message || 'Unable to save membership prices'); }
+    MEMBERSHIP_PLANS.forEach((plan) => {
+      cleaned[plan.name] = Math.max(0, Number(draftPrices[plan.name] || 0));
+    });
+    setData((current) => ({
+      ...current,
+      settings: { ...(current.settings || {}), membershipPrices: cleaned },
+    }));
+    setEditingPrices(false);
+    setToast('Membership plan prices updated');
   };
 
   return <>
@@ -4599,14 +5131,14 @@ function MembershipsPage({ members, setModal, planPrices, setData, setToast, onR
 }
 
 function RenewalModal({ member, onClose, onRenew, planPrices }) {
+  if (!member) return null;
+
   const defaultPlan = MEMBERSHIP_PLANS.some((p) => p.name === member.plan) ? member.plan : 'Monthly';
   const [form, setForm] = useState({
     plan: defaultPlan,
-    amount: Number(member?.amount || planPrices[defaultPlan] || 0),
+    amount: Number(member.amount || planPrices[defaultPlan] || 0),
     paid: 0,
   });
-
-  if (!member) return null;
 
   const selectedPlan = MEMBERSHIP_PLANS.find((plan) => plan.name === form.plan);
   const currentDays = getDaysRemaining(member.expiry);
@@ -4679,11 +5211,40 @@ function nextSystemMemberId(members) {
   return `PF-${maxNumber + 1}`;
 }
 
+function calculateGstBreakdown(totalAmount, rate = 5) {
+  const total = Math.max(0, Number(totalAmount || 0));
+  const gstRate = Math.max(0, Number(rate || 0));
+  if (!gstRate) return { taxable: total, gst: 0, cgst: 0, sgst: 0, rate: 0 };
+  const taxable = total / (1 + gstRate / 100);
+  const gst = total - taxable;
+  return {
+    taxable: Number(taxable.toFixed(2)),
+    gst: Number(gst.toFixed(2)),
+    cgst: Number((gst / 2).toFixed(2)),
+    sgst: Number((gst / 2).toFixed(2)),
+    rate: gstRate,
+  };
+}
+
+function makeInvoiceNumber(payment, settings) {
+  const prefix = String(settings?.invoicePrefix || 'PF-INV').trim() || 'PF-INV';
+  if (payment?.invoiceNumber) return payment.invoiceNumber;
+  const raw = String(payment?.id || `PAY-${Date.now()}`).replace(/[^a-zA-Z0-9-]/g, '');
+  return `${prefix}-${raw}`;
+}
+
+function getInvoicePaymentForMember(member, payments = []) {
+  const matching = payments
+    .filter((payment) => payment.memberId === member.id || payment.member === member.name)
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.id || '').localeCompare(String(a.id || '')));
+  return matching[0] || null;
+}
+
 function openPrintWindow(title, html) {
   const printWindow = window.open('', '_blank', 'width=900,height=800');
   if (!printWindow) return false;
   printWindow.document.open();
-  printWindow.document.write(`<!doctype html><html><head><title>${escapeHtml(title)}</title><meta charset="utf-8"><style>body{margin:0;background:#fff;font-family:Arial,Helvetica,sans-serif;color:#152238}*{box-sizing:border-box}@media print{.no-print{display:none!important}}</style></head><body>${html}<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),350));</script></body></html>`);
+  printWindow.document.write(`<!doctype html><html><head><title>${escapeHtml(title)}</title><meta charset="utf-8"><style>body{margin:0;background:#eef1f4;font-family:Arial,Helvetica,sans-serif;color:#152238}*{box-sizing:border-box}.invoice-page{width:900px;max-width:calc(100vw - 30px);margin:24px auto;background:#fff;box-shadow:0 10px 35px rgba(15,35,60,.10);padding:34px 38px}.invoice-top-rule{height:5px;background:#10233f;margin:-34px -38px 28px}.invoice-header{display:flex;justify-content:space-between;gap:28px;padding-bottom:22px;border-bottom:2px solid #10233f}.brand-row{display:flex;align-items:center;gap:14px}.brand-row img{width:58px;height:58px;object-fit:contain;border:1px solid #e0e5ea;border-radius:9px;padding:4px}.seller-name{font-size:25px;font-weight:800;color:#10233f}.seller-tag{font-size:10px;letter-spacing:.16em;color:#718096;margin-top:3px}.seller-address,.seller-contact,.seller-gstin{font-size:11px;color:#5e6c7b;line-height:1.6}.seller-address{margin-top:12px}.seller-gstin{margin-top:5px}.invoice-meta{text-align:right;min-width:245px}.invoice-title{font-size:24px;font-weight:900;color:#10233f;letter-spacing:.03em}.invoice-status{display:inline-block;margin:7px 0 14px;padding:5px 9px;border-radius:999px;background:#eef7f6;color:#087f76;font-size:9px;font-weight:800;letter-spacing:.08em}.invoice-meta>div:not(.invoice-title):not(.invoice-status){display:flex;justify-content:space-between;gap:18px;font-size:11px;margin-top:6px;color:#6d7a89}.invoice-meta strong{color:#152238}.invoice-parties{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:22px 0}.party-box{border:1px solid #e1e7ed;border-radius:10px;padding:15px;background:#fafbfd;font-size:11px;line-height:1.7;color:#5f6c7a}.party-box strong{display:block;color:#172335;font-size:15px;margin-bottom:4px}.party-label{font-size:9px;font-weight:900;letter-spacing:.12em;color:#758395;margin-bottom:7px}.invoice-table{width:100%;border-collapse:collapse;font-size:10px}.invoice-table th{background:#10233f;color:#fff;text-align:left;padding:10px 9px;font-size:9px;letter-spacing:.04em}.invoice-table td{padding:13px 9px;border-bottom:1px solid #e2e7ec;color:#4f5d6c;vertical-align:top}.invoice-table td strong{display:block;color:#182537;font-size:11px}.invoice-table td small{display:block;color:#8995a3;margin-top:3px}.invoice-table .right{text-align:right}.invoice-lower{display:grid;grid-template-columns:1fr 330px;gap:28px;margin-top:22px}.payment-summary,.amount-summary{border:1px solid #e1e7ed;border-radius:10px;padding:16px}.summary-title{font-size:10px;font-weight:900;letter-spacing:.1em;color:#526274;margin-bottom:10px}.summary-row{display:flex;justify-content:space-between;gap:15px;padding:8px 0;border-bottom:1px solid #edf0f3;font-size:11px;color:#667486}.summary-row strong{color:#172335}.summary-row.grand{border-top:2px solid #10233f;border-bottom:0;margin-top:6px;padding-top:13px;font-size:14px;color:#172335}.summary-row.grand strong{font-size:16px}.payment-chip{display:inline-block;margin-top:13px;background:#f0f7f6;color:#167d75;border-radius:999px;padding:6px 10px;font-size:9px;font-weight:800}.invoice-note{margin-top:18px;padding:11px 13px;background:#f6f8fa;border-left:3px solid #10233f;font-size:10px;color:#596879}.invoice-terms{display:flex;justify-content:space-between;gap:30px;margin-top:22px;padding-top:17px;border-top:1px solid #e1e7ed;font-size:9px;color:#687687;line-height:1.55}.invoice-terms ul{margin:7px 0 0;padding-left:17px}.signature{min-width:190px;text-align:center;padding-top:28px;color:#526274}.signature-line{border-top:1px solid #8995a3;margin:35px 0 7px}.invoice-footer{display:flex;justify-content:space-between;margin-top:22px;padding-top:10px;border-top:1px solid #e1e7ed;font-size:8px;color:#8a95a2}@media(max-width:700px){.invoice-page{padding:20px}.invoice-top-rule{margin:-20px -20px 20px}.invoice-header,.invoice-parties,.invoice-lower,.invoice-terms{grid-template-columns:1fr;display:grid}.invoice-meta{text-align:left}.invoice-meta>div:not(.invoice-title):not(.invoice-status){justify-content:flex-start}.invoice-table{font-size:8px}.invoice-table th,.invoice-table td{padding:7px 5px}}@media print{body{background:#fff}.invoice-page{width:100%;max-width:none;margin:0;box-shadow:none}.no-print{display:none!important}}</style></head><body>${html}<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),350));</script></body></html>`);
   printWindow.document.close();
   return true;
 }
@@ -4730,48 +5291,121 @@ function shareMemberWhatsApp(member) {
   window.open(`https://wa.me/${target}?text=${text}`, '_blank');
 }
 
-function printMemberBill(member, settings) {
+function printPaymentInvoice(member, payment, settings, overrideGstMode = null) {
   const gymName = settings?.gymName || 'Preface Fitness';
-  const prefix = settings?.invoicePrefix || 'PF-INV';
-  const invoice = `${prefix}-${String(member.id || '').replace(/[^a-zA-Z0-9-]/g,'')}-${today.replaceAll('-','')}`;
+  const gstMode = overrideGstMode || (payment?.gstApplicable ? 'gst' : 'without');
+  const invoiceAmount = Number(payment?.invoiceAmount || (payment?.type === 'Membership' ? member.amount : payment?.amount) || member.amount || 0);
+  const rate = gstMode === 'gst' ? Number(payment?.gstRate || settings?.defaultGstRate || 5) : 0;
+  const gst = calculateGstBreakdown(invoiceAmount, rate);
+  const invoiceNumber = makeInvoiceNumber(payment, settings);
+  const invoiceDate = payment?.date || today;
+  const received = Number(payment?.paidAmountAtInvoice ?? payment?.amount ?? member.paid ?? 0);
+  const balance = Number(payment?.balanceAtInvoice ?? member.due ?? 0);
+  const serviceDescription = payment?.description || `${member.plan || 'Membership'} membership`;
+  const paymentAmount = Number(payment?.amount || 0);
+  const isGst = gstMode === 'gst';
   const html = `
-    <div style="width:820px;max-width:100%;margin:24px auto;border:1px solid #dbe3ea;border-radius:14px;overflow:hidden">
-      <div style="padding:24px;background:#10233f;color:#fff;display:flex;justify-content:space-between;gap:20px"><div><div style="font-size:25px;font-weight:800">${escapeHtml(gymName)}</div><div style="margin-top:7px;opacity:.85">${escapeHtml(settings?.gymAddress || '')}</div><div style="margin-top:4px;opacity:.85">${escapeHtml(settings?.gymPhone || '')} ${settings?.gymEmail ? ' · '+escapeHtml(settings.gymEmail) : ''}</div></div><div style="text-align:right"><div style="font-size:24px;font-weight:800">INVOICE</div><div style="margin-top:8px">${escapeHtml(invoice)}</div><div>${escapeHtml(formatDate(today))}</div></div></div>
-      <div style="padding:22px"><div style="font-size:13px;color:#7b899a;text-transform:uppercase;letter-spacing:.08em;font-weight:700">Bill to</div><div style="font-size:20px;font-weight:800;margin-top:5px">${escapeHtml(member.name)}</div><div style="color:#536477;margin-top:4px">Member ID: ${escapeHtml(member.id)} · ${escapeHtml(member.phone)}</div>
-      <table style="width:100%;border-collapse:collapse;margin-top:24px"><thead><tr><th style="text-align:left;padding:11px;border-bottom:2px solid #dfe6ec">Description</th><th style="text-align:left;padding:11px;border-bottom:2px solid #dfe6ec">Period</th><th style="text-align:right;padding:11px;border-bottom:2px solid #dfe6ec">Amount</th></tr></thead><tbody><tr><td style="padding:14px 11px;border-bottom:1px solid #e7edf2">${escapeHtml(member.plan)} Membership</td><td style="padding:14px 11px;border-bottom:1px solid #e7edf2">${escapeHtml(formatDate(member.start))} – ${escapeHtml(formatDate(member.expiry))}</td><td style="padding:14px 11px;border-bottom:1px solid #e7edf2;text-align:right">₹${Number(member.amount||0).toLocaleString('en-IN')}</td></tr></tbody></table>
-      <div style="width:330px;margin:20px 0 0 auto"><div style="display:flex;justify-content:space-between;padding:7px 0"><span>Total</span><strong>₹${Number(member.amount||0).toLocaleString('en-IN')}</strong></div><div style="display:flex;justify-content:space-between;padding:7px 0"><span>Paid</span><strong>₹${Number(member.paid||0).toLocaleString('en-IN')}</strong></div><div style="display:flex;justify-content:space-between;padding:10px 0;border-top:2px solid #10233f;font-size:18px"><span>Balance due</span><strong>₹${Number(member.due||0).toLocaleString('en-IN')}</strong></div></div>
-      ${settings?.gstin ? `<div style="margin-top:24px;color:#66768a;font-size:12px">GSTIN: ${escapeHtml(settings.gstin)}</div>` : ''}</div>
-      <div style="padding:14px 22px;background:#f7fafc;color:#657589;font-size:12px">Thank you for choosing ${escapeHtml(gymName)}.</div>
-    </div>`;
-  return openPrintWindow(`${gymName} - Bill ${invoice}`, html);
+  <div class="invoice-page">
+    <div class="invoice-top-rule"></div>
+    <header class="invoice-header">
+      <div class="seller">
+        <div class="brand-row"><img src="${LOGO_URL}" alt="Logo"/><div><div class="seller-name">${escapeHtml(gymName)}</div><div class="seller-tag">GYM & FITNESS SERVICES</div></div></div>
+        <div class="seller-address">${escapeHtml(settings?.gymAddress || '')}</div>
+        <div class="seller-contact">${escapeHtml(settings?.gymPhone || '')}${settings?.gymEmail ? ` · ${escapeHtml(settings.gymEmail)}` : ''}</div>
+        ${isGst && settings?.gstin ? `<div class="seller-gstin">GSTIN: <strong>${escapeHtml(settings.gstin)}</strong></div>` : ''}
+      </div>
+      <div class="invoice-meta">
+        <div class="invoice-title">${isGst ? 'TAX INVOICE' : 'INVOICE / BILL'}</div>
+        <div class="invoice-status">${isGst ? 'GST APPLICABLE' : 'NON-GST BILL'}</div>
+        <div><span>Invoice No.</span><strong>${escapeHtml(invoiceNumber)}</strong></div>
+        <div><span>Invoice Date</span><strong>${escapeHtml(formatDate(invoiceDate))}</strong></div>
+      </div>
+    </header>
+
+    <section class="invoice-parties">
+      <div class="party-box"><div class="party-label">BILL TO</div><strong>${escapeHtml(member.name)}</strong><div>Member ID: ${escapeHtml(member.id)}</div><div>Phone: ${escapeHtml(member.phone || '—')}</div>${member.email ? `<div>Email: ${escapeHtml(member.email)}</div>` : ''}${member.address ? `<div>Address: ${escapeHtml(member.address)}</div>` : ''}</div>
+      <div class="party-box"><div class="party-label">MEMBERSHIP DETAILS</div><strong>${escapeHtml(member.plan || 'Membership')}</strong><div>Service period: ${escapeHtml(formatDate(member.start))} to ${escapeHtml(formatDate(member.expiry))}</div><div>Trainer: ${escapeHtml(member.trainer || 'Not assigned')}</div><div>Payment mode: ${escapeHtml(payment?.mode || '—')}</div></div>
+    </section>
+
+    <table class="invoice-table"><thead><tr><th>#</th><th>Description</th><th>Service Period</th><th class="right">Qty</th><th class="right">Rate</th><th class="right">Amount</th></tr></thead><tbody>
+      <tr><td>01</td><td><strong>${escapeHtml(serviceDescription)}</strong><small>Membership / fitness service</small></td><td>${escapeHtml(formatDate(member.start))} – ${escapeHtml(formatDate(member.expiry))}</td><td class="right">1</td><td class="right">₹${invoiceAmount.toLocaleString('en-IN',{minimumFractionDigits:2})}</td><td class="right">₹${invoiceAmount.toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>
+    </tbody></table>
+
+    <section class="invoice-lower">
+      <div class="payment-summary">
+        <div class="summary-title">PAYMENT DETAILS</div>
+        <div class="summary-row"><span>Payment received</span><strong>₹${paymentAmount.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div>
+        <div class="summary-row"><span>Total paid to date</span><strong>₹${received.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div>
+        <div class="summary-row"><span>Outstanding balance</span><strong>₹${balance.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div>
+        <div class="payment-chip">${escapeHtml(payment?.mode || 'Payment')} · ${escapeHtml(formatDate(invoiceDate))}</div>
+      </div>
+      <div class="amount-summary">
+        <div class="summary-row"><span>Subtotal / Taxable value</span><strong>₹${gst.taxable.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div>
+        ${isGst ? `<div class="summary-row"><span>CGST (${(rate/2).toFixed(2)}%)</span><strong>₹${gst.cgst.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div><div class="summary-row"><span>SGST (${(rate/2).toFixed(2)}%)</span><strong>₹${gst.sgst.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div>` : '<div class="summary-row"><span>GST</span><strong>₹0.00</strong></div>'}
+        <div class="summary-row grand"><span>Total invoice value</span><strong>₹${invoiceAmount.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div>
+      </div>
+    </section>
+
+    <section class="schedule-section"><div class="schedule-title">PAYMENT SCHEDULE</div><table class="schedule-table"><thead><tr><th>Due / Payment Date</th><th>Amount</th><th>Payment Mode</th><th>Status</th></tr></thead><tbody><tr><td>${escapeHtml(formatDate(invoiceDate))}</td><td>₹${paymentAmount.toLocaleString('en-IN',{minimumFractionDigits:2})}</td><td>${escapeHtml(payment?.mode || '—')}</td><td><strong class="paid-status">PAID / RECEIVED</strong></td></tr>${balance > 0 ? `<tr><td>${escapeHtml(formatDate(member.expiry))}</td><td>₹${balance.toLocaleString('en-IN',{minimumFractionDigits:2})}</td><td>—</td><td><strong class="due-status">PENDING</strong></td></tr>` : ''}</tbody></table></section>
+
+    <section class="invoice-note"><strong>Amount in words:</strong> ${escapeHtml(amountInWordsIndian(invoiceAmount))}</section>
+    <section class="invoice-terms"><div><strong>Notes & terms</strong><ul><li>This document records the membership / fitness service billed by ${escapeHtml(gymName)}.</li><li>Please retain this invoice for your records.</li><li>For GST invoices, the GSTIN and tax breakup shown above should match the billing details configured by the gym.</li></ul></div><div class="signature"><div>For ${escapeHtml(gymName)}</div><div class="signature-line"></div><strong>Authorised Signatory</strong></div></section>
+    <footer class="invoice-footer"><span>Thank you for choosing ${escapeHtml(gymName)}.</span><span>${escapeHtml(invoiceNumber)}</span></footer>
+  </div>`;
+  return openPrintWindow(`${gymName} - ${invoiceNumber}`, html);
 }
 
-function shareBillWhatsApp(member, settings) {
+function amountInWordsIndian(value) {
+  const n = Math.round(Number(value || 0));
+  if (n === 0) return 'Rupees Zero Only';
+  const ones = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+  const tens = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+  const two = (num) => num < 20 ? ones[num] : `${tens[Math.floor(num/10)]}${num%10 ? ` ${ones[num%10]}` : ''}`;
+  const underThousand = (num) => `${num >= 100 ? `${ones[Math.floor(num/100)]} Hundred${num%100 ? ' ' : ''}` : ''}${num%100 ? two(num%100) : ''}`.trim();
+  let x=n, parts=[];
+  const crore=Math.floor(x/10000000); x%=10000000;
+  const lakh=Math.floor(x/100000); x%=100000;
+  const thousand=Math.floor(x/1000); x%=1000;
+  if(crore) parts.push(`${underThousand(crore)} Crore`);
+  if(lakh) parts.push(`${underThousand(lakh)} Lakh`);
+  if(thousand) parts.push(`${underThousand(thousand)} Thousand`);
+  if(x) parts.push(underThousand(x));
+  return `Rupees ${parts.join(' ')} Only`;
+}
+
+function shareBillWhatsApp(member, settings, payment = null) {
   const gymName = settings?.gymName || 'Preface Fitness';
-  const text = `Bill from ${gymName}%0A%0AMember: ${encodeURIComponent(member.name)}%0AMember ID: ${encodeURIComponent(member.id)}%0APlan: ${encodeURIComponent(member.plan || '')}%0ATotal: ₹${Number(member.amount||0).toLocaleString('en-IN')}%0APaid: ₹${Number(member.paid||0).toLocaleString('en-IN')}%0ABalance due: ₹${Number(member.due||0).toLocaleString('en-IN')}`;
+  const invoiceNumber = makeInvoiceNumber(payment, settings);
+  const text = `${gymName}\nInvoice: ${invoiceNumber}\nMember: ${member.name}\nMember ID: ${member.id}\nPlan: ${member.plan || 'Membership'}\nInvoice amount: ₹${Number(payment?.invoiceAmount || member.amount || 0).toLocaleString('en-IN')}\nPaid: ₹${Number(payment?.paidAmountAtInvoice ?? payment?.amount ?? member.paid ?? 0).toLocaleString('en-IN')}\nBalance: ₹${Number(payment?.balanceAtInvoice ?? member.due ?? 0).toLocaleString('en-IN')}`;
   const phone = String(member.phone || '').replace(/\D/g, '');
   const target = phone.length === 10 ? `91${phone}` : phone;
-  window.open(`https://wa.me/${target}?text=${text}`, '_blank');
+  window.open(`https://wa.me/${target}?text=${encodeURIComponent(text)}`, '_blank');
 }
 
-
-function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = [], members = [] }) {
+function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = [], members = [], trainers = [] }) {
   const [form, setForm] = useState(() => member ? {
     ...member,
     id: member.id || '',
     due: member.due ?? 0,
     amount: member.amount ?? 0,
     paid: member.paid ?? 0,
+    paymentMode: member.paymentMode || 'Cash',
+    gstMode: member.gstMode || 'without',
+    gstRate: Number(member.gstRate || 5),
   } : {
     id: '', attendanceNumber: '', name: '', phone: '', email: '', dob: '', gender: 'Prefer not to say', address: '',
-    emergencyContact: '', dietPreference: 'Veg', referredBy: '', plan: 'Monthly', start: today, expiry: '', amount: Number(planPrices?.Monthly || 0), paid: 0,
-    due: 0, height: '', weight: '', bodyFat: '', trainer: '', referral: 'Walk-in', notes: '',
+    emergencyContact: '', dietPreference: 'Veg', referredBy: '', plan: 'Monthly', start: today, expiry: addMonthsToDate(today, MEMBERSHIP_PLANS.find((item) => item.name === 'Monthly')?.months || 1), amount: Number(planPrices?.Monthly || 0), paid: 0,
+    due: 0, paymentMode: 'Cash', gstMode: 'without', gstRate: 5, height: '', weight: '', bodyFat: '', trainer: '', referral: 'Walk-in', notes: '',
   });
 
   const update = (key, value) => {
     setForm((current) => {
       const next = { ...current, [key]: value };
       if (key === 'amount' || key === 'paid') next.due = Math.max(0, Number(next.amount || 0) - Number(next.paid || 0));
+      if ((key === 'plan' || key === 'start') && next.plan !== 'Custom' && next.start) {
+        const selectedPlan = MEMBERSHIP_PLANS.find((item) => item.name === next.plan);
+        if (selectedPlan) next.expiry = addMonthsToDate(next.start, selectedPlan.months);
+      }
       return next;
     });
   };
@@ -4893,10 +5527,15 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
       <FormField label="Start date"><input type="date" value={form.start} onChange={(e) => update('start', e.target.value)} /></FormField>
       <FormField label="Expiry date"><input type="date" value={form.expiry} onChange={(e) => update('expiry', e.target.value)} /></FormField>
     </div>
-    <div className="form-grid three">
+    <div className="form-grid four">
       <FormField label="Membership amount"><input type="number" min="0" value={form.amount} onChange={(e) => update('amount', e.target.value)} /></FormField>
       <FormField label="Amount paid"><input type="number" min="0" value={form.paid} onChange={(e) => update('paid', e.target.value)} /></FormField>
       <FormField label="Outstanding"><input type="number" value={form.due} readOnly /></FormField>
+      <FormField label="Payment mode"><select value={form.paymentMode || 'Cash'} onChange={(e) => update('paymentMode', e.target.value)}><option>Cash</option><option>UPI</option><option>Card</option><option>Bank transfer</option></select></FormField>
+    </div>
+    <div className="form-grid two">
+      <FormField label="Invoice / tax mode"><select value={form.gstMode || 'without'} onChange={(e) => update('gstMode', e.target.value)}><option value="without">Bill without GST</option><option value="gst">Tax Invoice with GST</option></select></FormField>
+      <FormField label="GST rate (%)"><input type="number" min="0" step="0.01" value={form.gstRate ?? 5} onChange={(e) => update('gstRate', e.target.value)} disabled={form.gstMode !== 'gst'} /></FormField>
     </div>
 
     <div className="form-section-title">Fitness profile</div>
@@ -4904,7 +5543,7 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
       <FormField label="Height (cm)"><input type="number" min="0" value={form.height} onChange={(e) => update('height', e.target.value)} placeholder="170" /></FormField>
       <FormField label="Weight (kg)"><input type="number" min="0" step="0.1" value={form.weight} onChange={(e) => update('weight', e.target.value)} placeholder="75" /></FormField>
       <FormField label="Body fat %"><input type="number" min="0" max="100" step="0.1" value={form.bodyFat} onChange={(e) => update('bodyFat', e.target.value)} placeholder="20" /></FormField>
-      <FormField label="Trainer"><input value={form.trainer} onChange={(e) => update('trainer', e.target.value)} placeholder="Not assigned" /></FormField>
+      <FormField label="Trainer"><select value={form.trainer || ''} onChange={(e) => update('trainer', e.target.value)}><option value="">Not assigned</option>{trainers.filter((item) => item.status !== 'Inactive').map((trainer) => <option key={trainer.id} value={trainer.name}>{trainer.name}</option>)}</select></FormField>
     </div>
     <div className="form-grid two">
       <FormField label="Referral source"><select value={form.referral} onChange={(e) => update('referral', e.target.value)}><option>Walk-in</option><option>Instagram</option><option>Facebook</option><option>Google</option><option>Referral</option><option>Website</option><option>Other</option></select></FormField>
@@ -4918,14 +5557,86 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
 
 // NOTE: Duplicate LeadModal removed from here
 
-function PaymentModal({ members, onClose, onSave }) { 
-  const [form, setForm] = useState({ member: members[0]?.name || '', amount: '', type: 'Membership', mode: 'UPI', date: today }); 
-  return <Modal title="Record payment" onClose={onClose}>
-    <FormField label="Member"><select value={form.member} onChange={(e) => setForm({ ...form, member: e.target.value })}>{members.map((m) => <option key={m.id}>{m.name}</option>)}</select></FormField>
-    <div className="form-grid"><FormField label="Amount"><input autoFocus type="number" min="1" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} placeholder="5000" /></FormField><FormField label="Payment mode"><select value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value })}><option>UPI</option><option>Cash</option><option>Card</option><option>Bank transfer</option></select></FormField></div>
-    <div className="form-grid"><FormField label="Type"><select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}><option>Membership</option><option>PT</option><option>Class</option><option>Other</option></select></FormField><FormField label="Date"><input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></FormField></div>
-    <ModalActions onClose={onClose} disabled={!form.amount} onSave={() => onSave(form)} saveLabel="Record payment" />
-  </Modal>; 
+function InvoiceOptionsModal({ member, payment, settings, onClose, onPrint }) {
+  const [gstMode, setGstMode] = useState(payment?.gstApplicable ? 'gst' : (settings?.gstin ? 'gst' : 'without'));
+  const [gstRate, setGstRate] = useState(Number(payment?.gstRate || settings?.defaultGstRate || 5));
+  const invoiceAmount = Number(payment?.invoiceAmount || (payment?.type === 'Membership' ? member?.amount : payment?.amount) || member?.amount || 0);
+  const gst = calculateGstBreakdown(invoiceAmount, gstMode === 'gst' ? gstRate : 0);
+  return <Modal title="Generate invoice / bill" onClose={onClose}>
+    <div className="invoice-choice-card">
+      <div><div className="eyebrow">DOCUMENT TYPE</div><strong>Select how this bill should be generated</strong><span>The selected format will be used by both Payments and the member profile.</span></div>
+      <div className="invoice-choice-options">
+        <label className={`invoice-choice ${gstMode === 'gst' ? 'selected' : ''}`}><input type="radio" name="invoice-gst-mode" checked={gstMode === 'gst'} onChange={() => setGstMode('gst')} /><div><strong>Tax Invoice with GST</strong><span>Shows GSTIN, taxable value, CGST and SGST.</span></div></label>
+        <label className={`invoice-choice ${gstMode === 'without' ? 'selected' : ''}`}><input type="radio" name="invoice-gst-mode" checked={gstMode === 'without'} onChange={() => setGstMode('without')} /><div><strong>Bill without GST</strong><span>Shows the same professional bill without tax breakup.</span></div></label>
+      </div>
+      <div className="form-grid two">
+        <FormField label="GST rate (%)"><input type="number" min="0" step="0.01" disabled={gstMode !== 'gst'} value={gstRate} onChange={(e) => setGstRate(e.target.value)} /></FormField>
+        <FormField label="Invoice value"><input readOnly value={`₹${invoiceAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`} /></FormField>
+      </div>
+      <div className="invoice-tax-preview"><div><span>Taxable</span><strong>₹{gst.taxable.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div><div><span>CGST</span><strong>₹{gst.cgst.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div><div><span>SGST</span><strong>₹{gst.sgst.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div><div className="grand"><span>Total</span><strong>₹{invoiceAmount.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div></div>
+    </div>
+    <ModalActions onClose={onClose} disabled={!member} onSave={() => onPrint(gstMode, Number(gstRate || 0))} saveLabel={gstMode === 'gst' ? 'Generate GST invoice' : 'Generate bill'} />
+  </Modal>;
+}
+
+function PaymentModal({ members, onClose, onSave, settings = {} }) {
+  const [form, setForm] = useState({
+    memberId: members[0]?.id || '',
+    member: members[0]?.name || '',
+    amount: '',
+    type: 'Membership',
+    mode: 'Cash',
+    date: today,
+    gstMode: settings.gstin ? 'gst' : 'without',
+    gstRate: Number(settings.defaultGstRate || 5),
+    notes: '',
+  });
+
+  const selectedMember = members.find((m) => m.id === form.memberId);
+  const invoiceBase = form.type === 'Membership' ? Number(selectedMember?.amount || form.amount || 0) : Number(form.amount || 0);
+  const gst = calculateGstBreakdown(invoiceBase, form.gstMode === 'gst' ? form.gstRate : 0);
+
+  const update = (key, value) => {
+    setForm((current) => {
+      const next = { ...current, [key]: value };
+      if (key === 'memberId') {
+        const member = members.find((m) => m.id === value);
+        next.member = member?.name || '';
+      }
+      return next;
+    });
+  };
+
+  return <Modal title="Record payment & invoice" onClose={onClose} wide>
+    <div className="invoice-entry-banner">
+      <div><strong>Payment will be saved to the ledger automatically.</strong><span>An invoice record will also be created and can be printed from Payments.</span></div>
+      <CreditCard size={22} />
+    </div>
+    <div className="form-section-title">Transaction details</div>
+    <div className="form-grid two">
+      <FormField label="Member"><select value={form.memberId} onChange={(e) => update('memberId', e.target.value)}>{members.map((m) => <option key={m.id} value={m.id}>{m.name} · {m.id}</option>)}</select></FormField>
+      <FormField label="Payment date"><input type="date" value={form.date} onChange={(e) => update('date', e.target.value)} /></FormField>
+    </div>
+    <div className="form-grid three">
+      <FormField label="Amount received"><input autoFocus type="number" min="1" value={form.amount} onChange={(e) => update('amount', e.target.value)} placeholder="5000" /></FormField>
+      <FormField label="Payment mode"><select value={form.mode} onChange={(e) => update('mode', e.target.value)}><option>Cash</option><option>UPI</option><option>Card</option><option>Bank transfer</option></select></FormField>
+      <FormField label="Payment type"><select value={form.type} onChange={(e) => update('type', e.target.value)}><option>Membership</option><option>PT</option><option>Class</option><option>Other</option></select></FormField>
+    </div>
+    <div className="form-section-title">Invoice / tax details</div>
+    <div className="form-grid three">
+      <FormField label="Bill type"><select value={form.gstMode} onChange={(e) => update('gstMode', e.target.value)}><option value="without">Bill without GST</option><option value="gst">Tax Invoice with GST</option></select></FormField>
+      <FormField label="GST rate (%)"><input type="number" min="0" step="0.01" value={form.gstRate} disabled={form.gstMode !== 'gst'} onChange={(e) => update('gstRate', e.target.value)} /></FormField>
+      <FormField label="Invoice total"><input value={`₹${invoiceBase.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`} readOnly /></FormField>
+    </div>
+    <div className="invoice-tax-preview">
+      <div><span>Taxable value</span><strong>₹{gst.taxable.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
+      <div><span>CGST</span><strong>₹{gst.cgst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
+      <div><span>SGST</span><strong>₹{gst.sgst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
+      <div className="grand"><span>Total invoice</span><strong>₹{invoiceBase.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></div>
+    </div>
+    <FormField label="Notes"><textarea rows="2" value={form.notes} onChange={(e) => update('notes', e.target.value)} placeholder="Optional payment / invoice note" /></FormField>
+    <ModalActions onClose={onClose} disabled={!form.amount || !form.memberId} onSave={() => onSave(form)} saveLabel="Record payment" />
+  </Modal>;
 }
 
 function Modal({ title, onClose, children, wide }) {
@@ -5517,6 +6228,90 @@ function ReportsPage({ data, revenue }) {
   );
 }
 
+function PublicFeedbackPage() {
+  const params = new URLSearchParams(window.location.search);
+  const gymId = params.get('gym') || '';
+  const gymName = params.get('name') || 'Preface Fitness';
+  const [form, setForm] = useState({ name: '', category: 'Complaint', priority: 'medium', feedback: '' });
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setResult(null);
+    const message = String(form.feedback || '').trim();
+    if (!gymId) {
+      setResult({ type: 'error', message: 'This feedback QR code is not configured correctly.' });
+      return;
+    }
+    if (!message) {
+      setResult({ type: 'error', message: 'Please enter your feedback or complaint.' });
+      return;
+    }
+    if (message.length < 5) {
+      setResult({ type: 'error', message: 'Please provide a little more detail.' });
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await publicSubmitFeedback({
+        gymId,
+        memberName: String(form.name || '').trim(),
+        category: form.category,
+        priority: form.priority,
+        feedback: message,
+      });
+      setForm({ name: '', category: 'Complaint', priority: 'medium', feedback: '' });
+      setResult({ type: 'success', message: 'Thank you. Your feedback has been submitted successfully.' });
+    } catch (error) {
+      console.error('Public feedback submission failed:', error);
+      setResult({ type: 'error', message: error?.message || 'Unable to submit feedback right now. Please try again.' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="public-feedback-page">
+      <div className="public-feedback-shell">
+        <div className="public-feedback-brand">
+          <img src={LOGO_URL} alt={gymName} />
+          <div><strong>{gymName}</strong><span>Customer Feedback</span></div>
+        </div>
+
+        <div className="public-feedback-card">
+          <div className="public-feedback-icon"><MessageCircle size={28} /></div>
+          <div className="eyebrow">WE VALUE YOUR FEEDBACK</div>
+          <h1>Tell us how we can improve.</h1>
+          <p className="public-feedback-subtitle">Share a suggestion, complaint or experience. Your feedback goes directly to the gym management team.</p>
+
+          <form onSubmit={submit} className="public-feedback-form">
+            <div className="form-grid two">
+              <FormField label="Your name (optional)"><input value={form.name} onChange={(e) => update('name', e.target.value)} placeholder="Enter your name" maxLength={100} /></FormField>
+              <FormField label="Feedback type"><select value={form.category} onChange={(e) => update('category', e.target.value)}><option>Complaint</option><option>Suggestion</option><option>Appreciation</option><option>Service</option><option>Trainer</option><option>Cleanliness</option><option>Equipment</option><option>Other</option></select></FormField>
+            </div>
+
+            <FormField label="Priority"><div className="public-feedback-priority-group">
+              {['low', 'medium', 'high'].map((priority) => <button key={priority} type="button" className={`public-feedback-priority ${form.priority === priority ? `selected ${priority}` : ''}`} onClick={() => update('priority', priority)}>{priority.charAt(0).toUpperCase() + priority.slice(1)}</button>)}
+            </div></FormField>
+
+            <FormField label="Feedback / complaint"><textarea rows="6" value={form.feedback} onChange={(e) => update('feedback', e.target.value)} placeholder="Please tell us what happened or what you would like us to improve..." maxLength={2000} required /></FormField>
+
+            {result && <div className={`public-feedback-result ${result.type}`}>{result.message}</div>}
+
+            <button className="btn btn-primary public-feedback-submit" type="submit" disabled={submitting}>{submitting ? 'Submitting…' : 'Submit Feedback'} <ArrowUpRight size={17} /></button>
+          </form>
+        </div>
+
+        <div className="public-feedback-footer">{gymName} · Your feedback is submitted securely to the gym management system.</div>
+      </div>
+    </div>
+  );
+}
+
 function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, resetData }) {
   const current = data.settings || {};
   const [form, setForm] = useState({
@@ -5525,6 +6320,7 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     gymPhone: current.gymPhone || '',
     gymEmail: current.gymEmail || '',
     gstin: current.gstin || '',
+    defaultGstRate: Number(current.defaultGstRate ?? 5),
     invoicePrefix: current.invoicePrefix || 'PF-INV',
     referralPointsPerReferral: Number(current.referralPointsPerReferral ?? 10),
     gymLatitude: current.gymLatitude || '',
@@ -5537,6 +6333,7 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     confirmPassword: '',
   });
   const [authMessage, setAuthMessage] = useState('');
+  const [noticeForm, setNoticeForm] = useState({ enabled: Boolean(current.notice?.enabled), text: current.notice?.text || '', priority: current.notice?.priority || 'medium' });
 
   useEffect(() => {
     setForm({
@@ -5545,6 +6342,7 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
       gymPhone: current.gymPhone || '',
       gymEmail: current.gymEmail || '',
       gstin: current.gstin || '',
+      defaultGstRate: Number(current.defaultGstRate ?? 5),
       invoicePrefix: current.invoicePrefix || 'PF-INV',
       referralPointsPerReferral: Number(current.referralPointsPerReferral ?? 10),
       gymLatitude: current.gymLatitude || '',
@@ -5558,7 +6356,8 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
       confirmPassword: '',
     }));
     setAuthMessage('');
-  }, [current.gymName, current.gymAddress, current.gymPhone, current.gymEmail, current.gstin, current.invoicePrefix, current.referralPointsPerReferral, current.gymLatitude, current.gymLongitude, current.auth?.username, current.auth?.passwordHash]);
+    setNoticeForm({ enabled: Boolean(current.notice?.enabled), text: current.notice?.text || '', priority: current.notice?.priority || 'medium' });
+  }, [current.gymName, current.gymAddress, current.gymPhone, current.gymEmail, current.gstin, current.defaultGstRate, current.invoicePrefix, current.referralPointsPerReferral, current.gymLatitude, current.gymLongitude, current.auth?.username, current.auth?.passwordHash]);
 
   const useCurrentLocation = () => {
     if (!navigator.geolocation) return setAuthMessage('This browser does not support location detection.');
@@ -5569,31 +6368,58 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     );
   };
 
-  const saveGymLocation = async () => {
+  const saveGymLocation = () => {
     const lat = Number(form.gymLatitude);
     const lng = Number(form.gymLongitude);
     if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
       setAuthMessage('Enter valid gym latitude and longitude first.');
       return;
     }
-    try { const patch = { gymLatitude: String(form.gymLatitude).trim(), gymLongitude: String(form.gymLongitude).trim() }; await saveCloudSettings(patch); setData((d) => ({ ...d, settings: { ...(d.settings || {}), ...patch } })); setAuthMessage('Gym location saved.'); } catch (error) { setAuthMessage(error?.message || 'Unable to save gym location.'); }
+    setData((d) => ({ ...d, settings: { ...(d.settings || {}), gymLatitude: String(form.gymLatitude).trim(), gymLongitude: String(form.gymLongitude).trim() } }));
+    setAuthMessage('Gym location saved.');
   };
 
-  const qrUrl = getCheckInUrl(data.gym?.id || '', form.gymLatitude, form.gymLongitude);
+  const qrUrl = getCheckInUrl();
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&data=${encodeURIComponent(qrUrl)}`;
+  const feedbackQrUrl = getFeedbackUrl(data.gym?.id || '', form.gymName || 'Preface Fitness');
+  const feedbackQrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&data=${encodeURIComponent(feedbackQrUrl)}`;
 
   const openQr = () => window.open(qrImageUrl, '_blank', 'noopener,noreferrer');
+  const openFeedbackQr = () => window.open(feedbackQrImageUrl, '_blank', 'noopener,noreferrer');
+  const printFeedbackQr = () => {
+    const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=700,height=900');
+    if (!printWindow) return;
+    printWindow.document.write(`<!doctype html><html><head><title>${String(form.gymName || 'Preface Fitness')} - Feedback QR</title><style>body{font-family:Arial,sans-serif;text-align:center;padding:50px;color:#17263b}img{width:420px;max-width:90vw}h1{margin:0 0 8px;font-size:28px}p{color:#667788;font-size:16px}</style></head><body><h1>${String(form.gymName || 'Preface Fitness')}</h1><p>Scan to submit feedback or a complaint</p><img src="${feedbackQrImageUrl}" alt="Feedback QR"/><p>Customer Feedback • Low / Medium / High priority</p></body></html>`);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => printWindow.print(), 250);
+  };
 
-  const saveSettings = async () => {
-    const cleaned = { ...form, referralPointsPerReferral: Math.max(0, Number(form.referralPointsPerReferral || 0)) };
-    try {
-      await saveCloudSettings(cleaned);
-      setData((d) => ({
+  const saveSettings = () => {
+    setData((d) => ({
       ...d,
-        settings: { ...(d.settings || {}), ...cleaned },
-      }));
-      setAuthMessage('Settings saved to Supabase.');
-    } catch (error) { setAuthMessage(error?.message || 'Unable to save settings.'); }
+      settings: {
+        ...(d.settings || {}),
+        ...form,
+        referralPointsPerReferral: Math.max(0, Number(form.referralPointsPerReferral || 0)),
+      },
+    }));
+  };
+
+  const saveNotice = async () => {
+    const notice = {
+      enabled: Boolean(noticeForm.enabled),
+      text: String(noticeForm.text || '').trim(),
+      priority: noticeForm.priority || 'medium',
+    };
+    setData((d) => ({ ...d, settings: { ...(d.settings || {}), notice } }));
+    try {
+      await saveCloudSettings({ notice });
+      setAuthMessage('Notice saved successfully.');
+    } catch (error) {
+      console.error('Supabase notice save failed:', error);
+      setAuthMessage(error?.message || 'Notice saved locally, but cloud save failed.');
+    }
   };
 
   const saveAuthSettings = async () => {
@@ -5667,7 +6493,7 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
             <FormField label="Gym phone"><input value={form.gymPhone} onChange={(e) => setForm((f) => ({...f,gymPhone:e.target.value}))} /></FormField>
             <FormField label="Gym email"><input type="email" value={form.gymEmail} onChange={(e) => setForm((f) => ({...f,gymEmail:e.target.value}))} /></FormField>
           </div>
-          <FormField label="GSTIN (optional)"><input value={form.gstin} onChange={(e) => setForm((f) => ({...f,gstin:e.target.value}))} placeholder="GSTIN" /></FormField>
+          <div className="form-grid two"><FormField label="GSTIN (optional)"><input value={form.gstin} onChange={(e) => setForm((f) => ({...f,gstin:e.target.value}))} placeholder="GSTIN" /></FormField><FormField label="Default GST rate (%)"><input type="number" min="0" step="0.01" value={form.defaultGstRate ?? 5} onChange={(e) => setForm((f) => ({...f,defaultGstRate:e.target.value}))} /></FormField></div>
           <div className="form-section-title" style={{ marginTop: '18px' }}>QR attendance location</div>
           <p style={{ color: '#718096', fontSize: '13px', lineHeight: 1.5, marginTop: 0 }}>The public check-in page will only accept attendance when the member's phone is within 50 metres of these coordinates.</p>
           <div className="form-grid two">
@@ -5679,6 +6505,18 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
             <button className="btn btn-secondary" type="button" onClick={saveGymLocation}><Save size={17}/> Save gym location</button>
           </div>
           <button className="btn btn-primary" onClick={saveSettings}><Save size={17}/> Save gym details</button>
+        </section>
+
+        <section className="card notice-settings-card">
+          <div className="card-header">
+            <div><h3>Gym notice / announcement</h3><p>Publish an important notice that will appear prominently across the owner dashboard.</p></div>
+            <Bell size={20} />
+          </div>
+          <label className="notice-toggle"><input type="checkbox" checked={noticeForm.enabled} onChange={(e) => setNoticeForm((f) => ({ ...f, enabled: e.target.checked }))} /><span>Show notice on dashboard</span></label>
+          <FormField label="Priority"><select value={noticeForm.priority} onChange={(e) => setNoticeForm((f) => ({ ...f, priority: e.target.value }))}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High / urgent</option></select></FormField>
+          <FormField label="Notice text"><textarea rows="4" value={noticeForm.text} onChange={(e) => setNoticeForm((f) => ({ ...f, text: e.target.value }))} placeholder="Example: Gym will remain closed on Sunday from 8 AM to 12 PM." /></FormField>
+          <div className={`notice-preview priority-${noticeForm.priority}`}><Bell size={17} /><div><strong>{noticeForm.priority === 'high' ? 'Important notice' : noticeForm.priority === 'low' ? 'Gym update' : 'Gym announcement'}</strong><span>{noticeForm.text || 'Your notice preview will appear here.'}</span></div></div>
+          <button className="btn btn-primary" style={{ marginTop: '12px' }} onClick={saveNotice}><Save size={17} /> Save notice</button>
         </section>
 
         <section className="card">
@@ -5769,10 +6607,24 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
             <button className="btn btn-secondary" onClick={() => window.print()}><FileDown size={17}/> Print QR</button>
           </div>
           <p style={{margin:'12px 0 0',fontSize:'12px',color:'#7b8794',lineHeight:1.5}}>Print the QR and place it at the gym entrance. Members scan it with their phone camera; no owner password is required.</p>
-          <div style={{marginTop:'12px',padding:'12px 14px',borderRadius:'12px',background:'#fff8ed',border:'1px solid #f0dfbf',fontSize:'12px',color:'#7a5b22',lineHeight:1.5}}><strong>Phase 1 limitation:</strong> your current app stores data in each browser's local IndexedDB. A member scanning this QR from their own phone will not write into the owner's browser database. Shared cross-device attendance needs the Phase 2 backend/database.</div>
+          <div style={{marginTop:'12px',padding:'12px 14px',borderRadius:'12px',background:'#eef9f7',border:'1px solid #d3ece7',fontSize:'12px',color:'#3d6b66',lineHeight:1.5}}><strong>Cloud attendance:</strong> member check-ins are written to the shared Supabase database, so the permanent QR can be used from members' phones without requiring the owner's browser to be open.</div>
         </section>
         <section className="card">
-          <div className="card-header"><div><h3>Local database</h3><p>Data is stored in this browser.</p></div></div>
+          <div className="card-header"><div><h3>Customer Feedback QR</h3><p>Place this QR at the gate, reception or workout floor so any customer can submit feedback or a complaint without logging in.</p></div><QrCode size={21} /></div>
+          <div style={{display:'grid',gridTemplateColumns:'180px 1fr',gap:'22px',alignItems:'center'}}>
+            <div style={{border:'1px solid #dce5eb',borderRadius:'16px',padding:'12px',background:'#fff',textAlign:'center'}}><img src={feedbackQrImageUrl} alt="Customer feedback QR" style={{width:'100%',maxWidth:'180px',display:'block',margin:'0 auto'}} /></div>
+            <div>
+              <div style={{fontSize:'15px',fontWeight:800,color:'#25364b'}}>Scan → Feedback / Complaint → Priority → Submit</div>
+              <p style={{fontSize:'13px',lineHeight:1.6,color:'#687789',margin:'8px 0'}}>The customer can enter their name optionally, choose the feedback type, select Low / Medium / High priority and submit the message. It is stored directly in the Customer Feedback section.</p>
+              <div style={{display:'flex',gap:'10px',flexWrap:'wrap',marginTop:'12px'}}>
+                <button className="btn btn-primary" onClick={openFeedbackQr}><QrCode size={17}/> Open Feedback QR</button>
+                <button className="btn btn-secondary" onClick={printFeedbackQr}><FileDown size={17}/> Print QR</button>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section className="card">
+          <div className="card-header"><div><h3>Cloud database</h3><p>Business data is connected to the shared Supabase database.</p></div></div>
           <div className="report-list">
             <div><span>Database status</span><strong>{dbReady ? 'Ready' : 'Loading'}</strong></div>
             <div><span>Members</span><strong>{(data.members || []).length}</strong></div>
@@ -5793,4 +6645,5 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
   );
 }
 
-createRoot(document.getElementById('root')).render(<App />);
+const initialRoute = window.location.hash;
+createRoot(document.getElementById('root')).render(initialRoute === '#feedback' ? <PublicFeedbackPage /> : <App />);
