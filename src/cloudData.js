@@ -12,6 +12,7 @@ const TABLES = {
   workoutPlans: 'workout_plans',
   dietPlans: 'diet_plans',
   communicationLogs: 'communication_logs',
+  feedbacks: 'feedbacks',
   appSettings: 'app_settings',
 };
 
@@ -73,7 +74,10 @@ export async function getCurrentGym() {
     .eq('id', membership.gym_id)
     .single();
 
-  throwIfError(gymError, 'Unable to read gym');
+  throwIfError(
+    gymError,
+    'Unable to read gym'
+  );
 
   return gym;
 }
@@ -83,7 +87,10 @@ async function getGymId() {
   return gym.id;
 }
 
-async function selectTable(tableName, gymId) {
+async function selectTable(
+  tableName,
+  gymId
+) {
   const {
     data,
     error,
@@ -91,126 +98,216 @@ async function selectTable(tableName, gymId) {
     .from(tableName)
     .select('*')
     .eq('gym_id', gymId)
-    .order('created_at', { ascending: false });
+    .order('created_at', {
+      ascending: false,
+    });
 
-  throwIfError(error, `Unable to load ${tableName}`);
+  throwIfError(
+    error,
+    `Unable to load ${tableName}`
+  );
 
   return data || [];
 }
 
-const memberByCloudId = (members, id) =>
-  members.find((m) => m.cloudId === id);
+const memberByCloudId = (
+  members,
+  id
+) =>
+  members.find(
+    (m) => m.cloudId === id
+  );
 
-const memberByUiId = (members, id) =>
-  members.find((m) => m.id === id);
+const memberByUiId = (
+  members,
+  id
+) =>
+  members.find(
+    (m) => m.id === id
+  );
 
-const trainerByCloudId = (trainers, id) =>
-  trainers.find((t) => t.cloudId === id);
+const trainerByCloudId = (
+  trainers,
+  id
+) =>
+  trainers.find(
+    (t) => t.cloudId === id
+  );
 
 function mapMembershipPlan(row) {
   return {
     id: row.id,
     cloudId: row.id,
-    name: row.name || '',
-    months: Number(row.months || 0),
-    price: Number(row.price || 0),
-    description: row.description || '',
+
+    name:
+      row.name || '',
+
+    months:
+      Number(row.months || 0),
+
+    price:
+      Number(row.price || 0),
+
+    description:
+      row.description || '',
   };
 }
 
 function mapMember(row) {
   return {
-    id: row.member_code || row.id,
-    cloudId: row.id,
+    id:
+      row.member_code ||
+      row.id,
 
-    name: row.name || '',
-    phone: row.phone || '',
-    email: row.email || '',
+    cloudId:
+      row.id,
 
-    dob: row.date_of_birth || row.dob || '',
-    birthday: row.date_of_birth || row.dob || '',
-    gender: row.gender || '',
-    address: row.address || '',
-    emergencyContact: row.emergency_contact || '',
+    name:
+      row.name || '',
 
-    plan: row.plan_name || '',
-    start: row.start_date || '',
-    expiry: row.expiry_date || '',
-    status: row.status || 'Active',
+    phone:
+      row.phone || '',
 
-    visits: Number(row.visits || 0),
+    email:
+      row.email || '',
 
-    due: Number(
-      row.due_amount ??
-      row.due ??
-      0
-    ),
+    dob:
+      row.dob ||
+      row.date_of_birth ||
+      '',
 
-    amount: Number(
-      row.membership_amount ??
-      row.amount ??
-      0
-    ),
+    birthday:
+      row.dob ||
+      row.date_of_birth ||
+      '',
 
-    paid: Number(
-      row.paid_amount ??
-      row.paid ??
-      0
-    ),
+    gender:
+      row.gender || '',
 
-    height: row.height || '',
-    weight: row.weight || '',
-    currentWeight: row.weight || '',
-    bodyFat: row.body_fat || '',
+    address:
+      row.address || '',
 
-    trainer: row.trainer_name || '',
+    emergencyContact:
+      row.emergency_contact || '',
 
-    referral: row.referral_source || '',
+    plan:
+      row.plan_name || '',
 
-    notes: row.notes || '',
+    start:
+      row.start_date || '',
 
-    photo: row.photo || '',
+    expiry:
+      row.expiry_date || '',
 
-    dietPreference: row.diet_preference || '',
+    status:
+      row.status || 'Active',
 
-    attendanceNumber: row.attendance_number || '',
+    visits:
+      Number(row.visits || 0),
 
-    referralPoints: Number(
-      row.referral_points || 0
-    ),
+    due:
+      Number(
+        row.due_amount ??
+        row.due ??
+        0
+      ),
+
+    amount:
+      Number(
+        row.membership_amount ??
+        row.amount ??
+        0
+      ),
+
+    paid:
+      Number(
+        row.paid_amount ??
+        row.paid ??
+        0
+      ),
+
+    height:
+      row.height || '',
+
+    weight:
+      row.weight || '',
+
+    currentWeight:
+      row.weight || '',
+
+    bodyFat:
+      row.body_fat || '',
+
+    trainer:
+      row.trainer_name || '',
+
+    referral:
+      row.referral_source || '',
+
+    notes:
+      row.notes || '',
+
+    photo:
+      row.photo || '',
+
+    dietPreference:
+      row.diet_preference || '',
+
+    attendanceNumber:
+      row.attendance_number || '',
+
+    referralPoints:
+      Number(
+        row.referral_points || 0
+      ),
 
     referredBy:
       row.referred_by_member_code ||
       row.referred_by_member_id ||
       '',
 
-    referredClients: Number(
-      row.referred_clients || 0
-    ),
+    referredClients:
+      Number(
+        row.referred_clients || 0
+      ),
 
-    createdAt: row.created_at || '',
+    createdAt:
+      row.created_at || '',
   };
 }
 
 function mapLead(row) {
   return {
-    id: row.legacy_id || row.id,
-    cloudId: row.id,
+    id:
+      row.legacy_id ||
+      row.id,
 
-    name: row.name || '',
-    phone: row.phone || '',
-    email: row.email || '',
+    cloudId:
+      row.id,
 
-    source: row.source || '',
+    name:
+      row.name || '',
 
-    stage: row.stage || 'New',
+    phone:
+      row.phone || '',
 
-    followUp: row.follow_up_date || '',
+    email:
+      row.email || '',
+
+    source:
+      row.source || '',
+
+    stage:
+      row.stage || 'New',
+
+    followUp:
+      row.follow_up_date || '',
 
     interestedPlan:
       row.interested_plan || '',
 
-    notes: row.notes || '',
+    notes:
+      row.notes || '',
 
     lastContact:
       row.last_contact || '',
@@ -223,20 +320,32 @@ function mapLead(row) {
   };
 }
 
-function mapPayment(row, members) {
-  const member = memberByCloudId(
-    members,
-    row.member_id
-  );
+function mapPayment(
+  row,
+  members
+) {
+  const member =
+    memberByCloudId(
+      members,
+      row.member_id
+    );
 
   return {
-    id: row.legacy_id || row.id,
-    cloudId: row.id,
+    id:
+      row.legacy_id ||
+      row.id,
 
-    memberId: member?.id || '',
-    member: member?.name || '',
+    cloudId:
+      row.id,
 
-    amount: Number(row.amount || 0),
+    memberId:
+      member?.id || '',
+
+    member:
+      member?.name || '',
+
+    amount:
+      Number(row.amount || 0),
 
     type:
       row.payment_type ||
@@ -250,21 +359,80 @@ function mapPayment(row, members) {
 
     notes:
       row.notes || '',
+
+    invoiceNumber:
+      row.invoice_number || '',
+
+    gstApplicable:
+      Boolean(
+        row.gst_applicable
+      ),
+
+    gstRate:
+      Number(
+        row.gst_rate || 0
+      ),
+
+    taxableAmount:
+      Number(
+        row.taxable_amount || 0
+      ),
+
+    cgstAmount:
+      Number(
+        row.cgst_amount || 0
+      ),
+
+    sgstAmount:
+      Number(
+        row.sgst_amount || 0
+      ),
+
+    invoiceAmount:
+      Number(
+        row.invoice_amount || 0
+      ),
+
+    paidAmountAtInvoice:
+      Number(
+        row.paid_amount_at_invoice ||
+        0
+      ),
+
+    balanceAtInvoice:
+      Number(
+        row.balance_at_invoice ||
+        0
+      ),
+
+    description:
+      row.description || '',
   };
 }
 
-function mapAttendance(row, members) {
-  const member = memberByCloudId(
-    members,
-    row.member_id
-  );
+function mapAttendance(
+  row,
+  members
+) {
+  const member =
+    memberByCloudId(
+      members,
+      row.member_id
+    );
 
   return {
-    id: row.legacy_id || row.id,
-    cloudId: row.id,
+    id:
+      row.legacy_id ||
+      row.id,
 
-    memberId: member?.id || '',
-    member: member?.name || '',
+    cloudId:
+      row.id,
+
+    memberId:
+      member?.id || '',
+
+    member:
+      member?.name || '',
 
     date:
       row.attendance_date || '',
@@ -279,7 +447,8 @@ function mapAttendance(row, members) {
       row.longitude ?? null,
 
     distance:
-      row.distance_meters ?? null,
+      row.distance_meters ??
+      null,
 
     source:
       row.source || 'Manual',
@@ -288,23 +457,34 @@ function mapAttendance(row, members) {
 
 function mapTrainer(row) {
   return {
-    id: row.legacy_id || row.id,
-    cloudId: row.id,
+    id:
+      row.legacy_id ||
+      row.id,
 
-    name: row.name || '',
-    phone: row.phone || '',
+    cloudId:
+      row.id,
+
+    name:
+      row.name || '',
+
+    phone:
+      row.phone || '',
 
     specialization:
       row.specialization || '',
 
     experience:
-      Number(row.experience || 0),
+      Number(
+        row.experience || 0
+      ),
 
     status:
       row.status || 'Active',
 
     monthlySalary:
-      Number(row.monthly_salary || 0),
+      Number(
+        row.monthly_salary || 0
+      ),
 
     notes:
       row.notes || '',
@@ -316,19 +496,25 @@ function mapPTSession(
   members,
   trainers
 ) {
-  const member = memberByCloudId(
-    members,
-    row.member_id
-  );
+  const member =
+    memberByCloudId(
+      members,
+      row.member_id
+    );
 
-  const trainer = trainerByCloudId(
-    trainers,
-    row.trainer_id
-  );
+  const trainer =
+    trainerByCloudId(
+      trainers,
+      row.trainer_id
+    );
 
   return {
-    id: row.legacy_id || row.id,
-    cloudId: row.id,
+    id:
+      row.legacy_id ||
+      row.id,
+
+    cloudId:
+      row.id,
 
     memberId:
       member?.id || '',
@@ -355,7 +541,9 @@ function mapPTSession(
       row.start_time || '',
 
     duration:
-      Number(row.duration_minutes || 0),
+      Number(
+        row.duration_minutes || 0
+      ),
 
     type:
       row.session_type ||
@@ -366,10 +554,14 @@ function mapPTSession(
       'Scheduled',
 
     fee:
-      Number(row.amount || 0),
+      Number(
+        row.amount || 0
+      ),
 
     amount:
-      Number(row.amount || 0),
+      Number(
+        row.amount || 0
+      ),
 
     notes:
       row.notes || '',
@@ -380,14 +572,19 @@ function mapProgressRecord(
   row,
   members
 ) {
-  const member = memberByCloudId(
-    members,
-    row.member_id
-  );
+  const member =
+    memberByCloudId(
+      members,
+      row.member_id
+    );
 
   return {
-    id: row.legacy_id || row.id,
-    cloudId: row.id,
+    id:
+      row.legacy_id ||
+      row.id,
+
+    cloudId:
+      row.id,
 
     memberId:
       member?.id || '',
@@ -435,15 +632,20 @@ function mapWorkoutPlan(
   row,
   members
 ) {
-  const ids = Array.isArray(
-    row.assigned_member_ids
-  )
-    ? row.assigned_member_ids
-    : [];
+  const ids =
+    Array.isArray(
+      row.assigned_member_ids
+    )
+      ? row.assigned_member_ids
+      : [];
 
   return {
-    id: row.legacy_id || row.id,
-    cloudId: row.id,
+    id:
+      row.legacy_id ||
+      row.id,
+
+    cloudId:
+      row.id,
 
     name:
       row.name || '',
@@ -455,7 +657,9 @@ function mapWorkoutPlan(
       row.level || '',
 
     durationWeeks:
-      Number(row.duration_weeks || 0),
+      Number(
+        row.duration_weeks || 0
+      ),
 
     trainer:
       row.trainer_name || '',
@@ -486,15 +690,20 @@ function mapDietPlan(
   row,
   members
 ) {
-  const ids = Array.isArray(
-    row.assigned_member_ids
-  )
-    ? row.assigned_member_ids
-    : [];
+  const ids =
+    Array.isArray(
+      row.assigned_member_ids
+    )
+      ? row.assigned_member_ids
+      : [];
 
   return {
-    id: row.legacy_id || row.id,
-    cloudId: row.id,
+    id:
+      row.legacy_id ||
+      row.id,
+
+    cloudId:
+      row.id,
 
     name:
       row.name || '',
@@ -503,13 +712,19 @@ function mapDietPlan(
       row.goal || '',
 
     calories:
-      Number(row.calories || 0),
+      Number(
+        row.calories || 0
+      ),
 
     protein:
-      Number(row.protein || 0),
+      Number(
+        row.protein || 0
+      ),
 
     durationWeeks:
-      Number(row.duration_weeks || 0),
+      Number(
+        row.duration_weeks || 0
+      ),
 
     coach:
       row.coach || '',
@@ -540,14 +755,19 @@ function mapCommunicationLog(
   row,
   members
 ) {
-  const member = memberByCloudId(
-    members,
-    row.member_id
-  );
+  const member =
+    memberByCloudId(
+      members,
+      row.member_id
+    );
 
   return {
-    id: row.legacy_id || row.id,
-    cloudId: row.id,
+    id:
+      row.legacy_id ||
+      row.id,
+
+    cloudId:
+      row.id,
 
     memberId:
       member?.id || '',
@@ -587,6 +807,66 @@ function mapCommunicationLog(
   };
 }
 
+/* ============================================================
+   CUSTOMER FEEDBACK
+   ============================================================ */
+
+function mapFeedback(
+  row,
+  members
+) {
+  const member =
+    memberByCloudId(
+      members,
+      row.member_id
+    );
+
+  return {
+    id:
+      row.legacy_id ||
+      row.id,
+
+    cloudId:
+      row.id,
+
+    memberId:
+      member?.id || '',
+
+    memberName:
+      row.member_name ||
+      member?.name ||
+      '',
+
+    category:
+      row.category ||
+      'General',
+
+    priority:
+      row.priority ||
+      'medium',
+
+    feedback:
+      row.feedback ||
+      '',
+
+    status:
+      row.status ||
+      'Open',
+
+    date:
+      row.feedback_date ||
+      '',
+
+    notes:
+      row.notes ||
+      '',
+
+    createdAt:
+      row.created_at ||
+      '',
+  };
+}
+
 function parseSetting(value) {
   if (
     value === null ||
@@ -595,7 +875,9 @@ function parseSetting(value) {
     return value;
   }
 
-  if (typeof value !== 'string') {
+  if (
+    typeof value !== 'string'
+  ) {
     return value;
   }
 
@@ -609,21 +891,32 @@ function parseSetting(value) {
 function buildSettings(rows) {
   const out = {};
 
-  for (const row of rows) {
-    if (row.setting_key) {
+  for (
+    const row of rows
+  ) {
+    if (
+      row.setting_key
+    ) {
       out[row.setting_key] =
-        parseSetting(row.setting_value);
+        parseSetting(
+          row.setting_value
+        );
     }
   }
 
   return out;
 }
 
+/* ============================================================
+   LOAD COMPLETE CLOUD STATE
+   ============================================================ */
+
 export async function loadCloudState() {
   const gym =
     await getCurrentGym();
 
-  const gymId = gym.id;
+  const gymId =
+    gym.id;
 
   const [
     membershipPlans,
@@ -637,6 +930,7 @@ export async function loadCloudState() {
     workoutRows,
     dietRows,
     communicationRows,
+    feedbackRows,
     settingsRows,
   ] = await Promise.all([
     selectTable(
@@ -695,16 +989,25 @@ export async function loadCloudState() {
     ),
 
     selectTable(
+      TABLES.feedbacks,
+      gymId
+    ),
+
+    selectTable(
       TABLES.appSettings,
       gymId
     ),
   ]);
 
   const members =
-    membersRows.map(mapMember);
+    membersRows.map(
+      mapMember
+    );
 
   const trainers =
-    trainersRows.map(mapTrainer);
+    trainersRows.map(
+      mapTrainer
+    );
 
   return {
     gym,
@@ -717,22 +1020,24 @@ export async function loadCloudState() {
     members,
 
     leads:
-      leads.map(mapLead),
+      leads.map(
+        mapLead
+      ),
 
     payments:
       paymentsRows.map(
-        (r) =>
+        (row) =>
           mapPayment(
-            r,
+            row,
             members
           )
       ),
 
     attendance:
       attendanceRows.map(
-        (r) =>
+        (row) =>
           mapAttendance(
-            r,
+            row,
             members
           )
       ),
@@ -741,9 +1046,9 @@ export async function loadCloudState() {
 
     ptSessions:
       ptRows.map(
-        (r) =>
+        (row) =>
           mapPTSession(
-            r,
+            row,
             members,
             trainers
           )
@@ -751,36 +1056,45 @@ export async function loadCloudState() {
 
     progressRecords:
       progressRows.map(
-        (r) =>
+        (row) =>
           mapProgressRecord(
-            r,
+            row,
             members
           )
       ),
 
     workoutPlans:
       workoutRows.map(
-        (r) =>
+        (row) =>
           mapWorkoutPlan(
-            r,
+            row,
             members
           )
       ),
 
     dietPlans:
       dietRows.map(
-        (r) =>
+        (row) =>
           mapDietPlan(
-            r,
+            row,
             members
           )
       ),
 
     communicationLogs:
       communicationRows.map(
-        (r) =>
+        (row) =>
           mapCommunicationLog(
-            r,
+            row,
+            members
+          )
+      ),
+
+    feedbacks:
+      feedbackRows.map(
+        (row) =>
+          mapFeedback(
+            row,
             members
           )
       ),
@@ -791,6 +1105,10 @@ export async function loadCloudState() {
       ),
   };
 }
+
+/* ============================================================
+   GENERIC INSERT
+   ============================================================ */
 
 export async function insertRecord(
   tableName,
@@ -819,6 +1137,10 @@ export async function insertRecord(
   return data;
 }
 
+/* ============================================================
+   GENERIC UPDATE
+   ============================================================ */
+
 export async function updateRecord(
   tableName,
   id,
@@ -846,6 +1168,10 @@ export async function updateRecord(
   return data;
 }
 
+/* ============================================================
+   GENERIC DELETE
+   ============================================================ */
+
 export async function deleteRecord(
   tableName,
   id
@@ -869,13 +1195,10 @@ export async function deleteRecord(
   return true;
 }
 
-/*
-  Save one or more application settings.
+/* ============================================================
+   SETTINGS
+   ============================================================ */
 
-  app_settings.setting_value is JSONB,
-  therefore values are explicitly JSON-stringified
-  before being written.
-*/
 export async function saveSettings(
   settings
 ) {
@@ -895,10 +1218,18 @@ export async function saveSettings(
       data: existing,
       error: findError,
     } = await supabase
-      .from(TABLES.appSettings)
+      .from(
+        TABLES.appSettings
+      )
       .select('id')
-      .eq('gym_id', gymId)
-      .eq('setting_key', key)
+      .eq(
+        'gym_id',
+        gymId
+      )
+      .eq(
+        'setting_key',
+        key
+      )
       .maybeSingle();
 
     throwIfError(
@@ -907,23 +1238,37 @@ export async function saveSettings(
     );
 
     const row = {
-      gym_id: gymId,
-      setting_key: key,
+      gym_id:
+        gymId,
+
+      setting_key:
+        key,
+
       setting_value:
         JSON.stringify(value),
     };
 
-    if (existing?.id) {
+    if (
+      existing?.id
+    ) {
       const {
         error,
       } = await supabase
-        .from(TABLES.appSettings)
+        .from(
+          TABLES.appSettings
+        )
         .update({
           setting_value:
             row.setting_value,
         })
-        .eq('id', existing.id)
-        .eq('gym_id', gymId);
+        .eq(
+          'id',
+          existing.id
+        )
+        .eq(
+          'gym_id',
+          gymId
+        );
 
       throwIfError(
         error,
@@ -933,7 +1278,9 @@ export async function saveSettings(
       const {
         error,
       } = await supabase
-        .from(TABLES.appSettings)
+        .from(
+          TABLES.appSettings
+        )
         .insert(row);
 
       throwIfError(
@@ -945,6 +1292,10 @@ export async function saveSettings(
 
   return settings;
 }
+
+/* ============================================================
+   PUBLIC QR ATTENDANCE
+   ============================================================ */
 
 export async function publicCheckIn({
   gymId,
@@ -960,7 +1311,8 @@ export async function publicCheckIn({
   } = await supabase.rpc(
     'public_check_in',
     {
-      p_gym_id: gymId,
+      p_gym_id:
+        gymId,
 
       p_member_number:
         String(
@@ -989,8 +1341,62 @@ export async function publicCheckIn({
   return (
     data || {
       success: false,
+
       message:
         'Attendance service returned no response.',
+    }
+  );
+}
+/* ============================================================
+   PUBLIC CUSTOMER FEEDBACK
+   ============================================================ */
+
+export async function publicSubmitFeedback({
+  gymId,
+  memberName,
+  category,
+  priority,
+  feedback,
+}) {
+  const {
+    data,
+    error,
+  } = await supabase.rpc(
+    'public_submit_feedback',
+    {
+      p_gym_id:
+        gymId,
+
+      p_member_name:
+        String(
+          memberName || ''
+        ).trim(),
+
+      p_category:
+        String(
+          category || 'General'
+        ).trim(),
+
+      p_priority:
+        String(
+          priority || 'medium'
+        ).trim().toLowerCase(),
+
+      p_feedback:
+        String(
+          feedback || ''
+        ).trim(),
+    }
+  );
+
+  throwIfError(
+    error,
+    'Unable to submit feedback'
+  );
+
+  return (
+    data || {
+      success: true,
     }
   );
 }
