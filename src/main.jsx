@@ -39,6 +39,13 @@ import {
 } from 'lucide-react';
 import './styles.css';
 import { readState, writeState, clearState } from './db';
+import {
+  signInOwner,
+  signOutOwner,
+  getSupabaseSession,
+  subscribeToAuthChanges,
+} from './supabaseAuth';
+import { loadCloudState, insertRecord, updateRecord, deleteRecord, publicCheckIn } from './cloudData';
 
 const LOGO_URL = `${import.meta.env.BASE_URL}preface-logo.jpg`;
 
@@ -86,8 +93,15 @@ function getCheckInPath() {
   return `${base.replace(/\/$/, '')}/#check-in`;
 }
 
-function getCheckInUrl() {
-  return `${window.location.origin}${getCheckInPath()}`;
+function getCheckInUrl(gymId = '', gymLat = '', gymLng = '') {
+  const params = new URLSearchParams();
+  if (gymId) params.set('gym', gymId);
+  if (gymLat !== '' && gymLng !== '') {
+    params.set('lat', gymLat);
+    params.set('lng', gymLng);
+  }
+  const query = params.toString();
+  return `${window.location.origin}${getCheckInPath()}${query ? `?${query}` : ''}`;
 }
 
 function distanceInMeters(lat1, lon1, lat2, lon2) {
@@ -353,41 +367,147 @@ function App() {
 
   useEffect(() => {
     let cancelled = false;
+    let unsubscribeAuth = () => {};
+
     (async () => {
       const stored = await readState(null);
       if (cancelled) return;
+
       if (stored) {
-        const normalized = { ...stored, workoutPlans: Array.isArray(stored.workoutPlans) ? stored.workoutPlans : [], dietPlans: Array.isArray(stored.dietPlans) ? stored.dietPlans : seed.dietPlans, settings: { ...seed.settings, ...(stored.settings || {}), auth: { ...seed.settings.auth, ...((stored.settings || {}).auth || {}) } } };
+        const normalized = {
+          ...stored,
+          workoutPlans: Array.isArray(stored.workoutPlans) ? stored.workoutPlans : [],
+          dietPlans: Array.isArray(stored.dietPlans) ? stored.dietPlans : seed.dietPlans,
+          settings: {
+            ...seed.settings,
+            ...(stored.settings || {}),
+            auth: {
+              ...seed.settings.auth,
+              ...((stored.settings || {}).auth || {}),
+            },
+          },
+        };
         setData(normalized);
         await writeState(normalized);
-      }
-      else {
+      } else {
         const legacy = loadLegacyData();
+
         if (legacy) {
-          const normalized = { ...legacy, workoutPlans: Array.isArray(legacy.workoutPlans) ? legacy.workoutPlans : [], dietPlans: Array.isArray(legacy.dietPlans) ? legacy.dietPlans : seed.dietPlans, settings: { ...seed.settings, ...(legacy.settings || {}), auth: { ...seed.settings.auth, ...((legacy.settings || {}).auth || {}) } } };
+          const normalized = {
+            ...legacy,
+            workoutPlans: Array.isArray(legacy.workoutPlans) ? legacy.workoutPlans : [],
+            dietPlans: Array.isArray(legacy.dietPlans) ? legacy.dietPlans : seed.dietPlans,
+            settings: {
+              ...seed.settings,
+              ...(legacy.settings || {}),
+              auth: {
+                ...seed.settings.auth,
+                ...((legacy.settings || {}).auth || {}),
+              },
+            },
+          };
           setData(normalized);
           await writeState(normalized);
+        } else {
+          await writeState(seed);
         }
-        else await writeState(seed);
       }
+
+      if (cancelled) return;
+
       setDbReady(true);
 
       try {
-        const rawSession = localStorage.getItem(AUTH_SESSION_KEY);
-        if (rawSession) {
-          const session = JSON.parse(rawSession);
-          if (session?.expiresAt && Number(session.expiresAt) > Date.now()) {
-            setIsAuthenticated(true);
-          } else {
-            localStorage.removeItem(AUTH_SESSION_KEY);
-          }
+        const session = await getSupabaseSession();
+
+        if (!cancelled) {
+          setIsAuthenticated(Boolean(session?.user));
         }
-      } catch {
-        localStorage.removeItem(AUTH_SESSION_KEY);
+      } catch (error) {
+        console.error('Supabase session check failed:', error);
+
+        if (!cancelled) {
+          setIsAuthenticated(false);
+        }
+      }
+
+      if (cancelled) return;
+
+      unsubscribeAuth = subscribeToAuthChanges(({ session }) => {
+        if (cancelled) return;
+        setIsAuthenticated(Boolean(session?.user));
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+      unsubscribeAuth();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!dbReady || !isAuthenticated) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const cloud = await loadCloudState();
+        if (cancelled || !cloud) return;
+
+        setData((current) => ({
+          ...current,
+          gym: cloud.gym || current.gym,
+          // Only replace a local collection when the cloud actually has
+          // records. This prevents a newly-created/empty cloud database
+          // from wiping the existing local browser data.
+          membershipPlans: cloud.membershipPlans?.length
+            ? cloud.membershipPlans
+            : current.membershipPlans,
+          members: cloud.members?.length
+            ? cloud.members
+            : current.members,
+          leads: cloud.leads?.length
+            ? cloud.leads
+            : current.leads,
+          payments: cloud.payments?.length
+            ? cloud.payments
+            : current.payments,
+          attendance: cloud.attendance?.length
+            ? cloud.attendance
+            : current.attendance,
+          trainers: cloud.trainers?.length
+            ? cloud.trainers
+            : current.trainers,
+          ptSessions: cloud.ptSessions?.length
+            ? cloud.ptSessions
+            : current.ptSessions,
+          progressRecords: cloud.progressRecords?.length
+            ? cloud.progressRecords
+            : current.progressRecords,
+          workoutPlans: cloud.workoutPlans?.length
+            ? cloud.workoutPlans
+            : current.workoutPlans,
+          dietPlans: cloud.dietPlans?.length
+            ? cloud.dietPlans
+            : current.dietPlans,
+          communicationLogs: cloud.communicationLogs?.length
+            ? cloud.communicationLogs
+            : current.communicationLogs,
+          settings: {
+            ...(current.settings || {}),
+            ...(cloud.settings || {}),
+          },
+        }));
+      } catch (error) {
+        console.error('Supabase cloud state load failed; keeping local data:', error);
       }
     })();
-    return () => { cancelled = true; };
-  }, []);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dbReady, isAuthenticated]);
 
   useEffect(() => {
     if (dbReady) writeState(data).catch(() => setToast('Could not save local database'));
@@ -407,13 +527,15 @@ function App() {
 
   const getMemberStatus = getMembershipStatus;
 
-  const addMember = (member) => {
+  const addMember = async (member) => {
     const requestedId = String(member.id || '').trim();
     const id = requestedId || nextSystemMemberId(data.members);
+
     if (data.members.some((item) => String(item.id).toLowerCase() === id.toLowerCase())) {
       setToast(`Member ID ${id} is already in use`);
       return;
     }
+
     const clean = {
       ...member,
       id,
@@ -424,52 +546,191 @@ function App() {
       status: getMemberStatus(member.expiry),
       createdAt: new Date().toISOString(),
     };
-    setData((d) => ({ ...d, members: [clean, ...d.members] }));
-    setModal(null);
-    setToast('Member added successfully');
+
+    try {
+      const referredMember = data.members.find((item) => String(item.id) === String(clean.referredBy || ''));
+      const row = await insertRecord('members', {
+        member_code: clean.id,
+        name: clean.name || '',
+        phone: clean.phone || '',
+        email: clean.email || '',
+        dob: clean.dob || clean.birthday || null,
+        gender: clean.gender || '',
+        address: clean.address || '',
+        emergency_contact: clean.emergencyContact || '',
+        plan_name: clean.plan || '',
+        start_date: clean.start || null,
+        expiry_date: clean.expiry || null,
+        status: clean.status || 'Active',
+        visits: Number(clean.visits || 0),
+        due_amount: Number(clean.due || 0),
+        membership_amount: Number(clean.amount || 0),
+        paid_amount: Number(clean.paid || 0),
+        height: clean.height || '',
+        weight: clean.weight || '',
+        body_fat: clean.bodyFat || '',
+        trainer_name: clean.trainer || '',
+        referral_source: clean.referral || '',
+        notes: clean.notes || '',
+        photo: clean.photo || '',
+        diet_preference: clean.dietPreference || '',
+        attendance_number: clean.attendanceNumber || '',
+        referral_points: Number(clean.referralPoints || 0),
+        referred_by_member_id: referredMember?.cloudId || null,
+      });
+
+      const saved = { ...clean, cloudId: row.id, id: row.member_code || clean.id };
+      setData((d) => ({ ...d, members: [saved, ...d.members] }));
+      setModal(null);
+      setToast('Member added successfully');
+    } catch (error) {
+      console.error('Supabase member insert failed:', error);
+      setToast(error?.message || 'Could not save member to Supabase');
+    }
   };
 
-  const updateMember = (updated) => {
-    setData((d) => ({
-      ...d,
-      members: d.members.map((m) => m.id === updated.id
-        ? { ...m, ...updated, due: Number(updated.due || 0), amount: Number(updated.amount || 0), paid: Number(updated.paid || 0), status: getMemberStatus(updated.expiry) }
-        : m),
-    }));
-    setModal(null);
-    setToast('Member updated successfully');
+  const updateMember = async (updated) => {
+    const existing = data.members.find((m) => m.id === updated.id);
+    if (!existing?.cloudId) {
+      setToast('This member is not linked to Supabase yet');
+      return;
+    }
+
+    const clean = {
+      ...existing,
+      ...updated,
+      due: Number(updated.due || 0),
+      amount: Number(updated.amount || 0),
+      paid: Number(updated.paid || 0),
+      status: getMemberStatus(updated.expiry),
+    };
+
+    try {
+      const referredMember = data.members.find((item) => String(item.id) === String(clean.referredBy || ''));
+      await updateRecord('members', existing.cloudId, {
+        member_code: String(clean.id || '').trim(),
+        name: clean.name || '',
+        phone: clean.phone || '',
+        email: clean.email || '',
+        dob: clean.dob || clean.birthday || null,
+        gender: clean.gender || '',
+        address: clean.address || '',
+        emergency_contact: clean.emergencyContact || '',
+        plan_name: clean.plan || '',
+        start_date: clean.start || null,
+        expiry_date: clean.expiry || null,
+        status: clean.status || 'Active',
+        visits: Number(clean.visits || 0),
+        due_amount: Number(clean.due || 0),
+        membership_amount: Number(clean.amount || 0),
+        paid_amount: Number(clean.paid || 0),
+        height: clean.height || '',
+        weight: clean.weight || '',
+        body_fat: clean.bodyFat || '',
+        trainer_name: clean.trainer || '',
+        referral_source: clean.referral || '',
+        notes: clean.notes || '',
+        photo: clean.photo || '',
+        diet_preference: clean.dietPreference || '',
+        attendance_number: clean.attendanceNumber || '',
+        referral_points: Number(clean.referralPoints || 0),
+        referred_by_member_id: referredMember?.cloudId || null,
+      });
+
+      setData((d) => ({
+        ...d,
+        members: d.members.map((m) => m.id === updated.id ? { ...clean, cloudId: existing.cloudId } : m),
+      }));
+      setModal(null);
+      setToast('Member updated successfully');
+    } catch (error) {
+      console.error('Supabase member update failed:', error);
+      setToast(error?.message || 'Could not update member in Supabase');
+    }
   };
 
-  const renewMembership = (member, renewal) => {
+  const renewMembership = async (member, renewal) => {
     const plan = MEMBERSHIP_PLANS.find((item) => item.name === renewal.plan);
     if (!plan) return;
+
+    if (!member.cloudId) {
+      setToast('This member is not linked to Supabase yet');
+      return;
+    }
 
     const currentDays = getDaysRemaining(member.expiry);
     const renewalStart = currentDays >= 0 && member.expiry ? member.expiry : today;
     const newExpiry = addMonthsToDate(renewalStart, plan.months);
-    const renewalAmount = Number(renewal.amount || planPrices[plan.name] || plan.price);
+    const renewalAmount = Number(
+      renewal.amount || planPrices[plan.name] || plan.price
+    );
     const renewalPaid = Number(renewal.paid || 0);
     const oldDue = Number(member.due || 0);
     const renewalDue = Math.max(0, renewalAmount - renewalPaid);
 
-    setData((d) => ({
-      ...d,
-      members: d.members.map((m) => m.id === member.id
-        ? {
-            ...m,
-            plan: plan.name,
-            start: renewalStart,
-            expiry: newExpiry,
-            amount: renewalAmount,
-            paid: renewalPaid,
-            due: oldDue + renewalDue,
-            status: getMembershipStatus(newExpiry),
-          }
-        : m),
-    }));
+    const updatedMember = {
+      ...member,
+      plan: plan.name,
+      start: renewalStart,
+      expiry: newExpiry,
+      amount: renewalAmount,
+      paid: renewalPaid,
+      due: oldDue + renewalDue,
+      status: getMembershipStatus(newExpiry),
+    };
 
-    setModal(null);
-    setToast(`${member.name}'s membership renewed successfully`);
+    try {
+      await updateRecord('members', member.cloudId, {
+        plan_name: updatedMember.plan,
+        start_date: updatedMember.start || null,
+        expiry_date: updatedMember.expiry || null,
+        status: updatedMember.status || 'Active',
+        membership_amount: Number(updatedMember.amount || 0),
+        paid_amount: Number(updatedMember.paid || 0),
+        due_amount: Number(updatedMember.due || 0),
+      });
+
+      if (renewalPaid > 0) {
+        await insertRecord('payments', {
+          member_id: member.cloudId,
+          legacy_id: `PAY-${Date.now()}`,
+          amount: renewalPaid,
+          payment_type: 'Membership',
+          payment_mode: renewal.mode || 'Cash',
+          payment_date: today,
+          notes: `Membership renewal - ${plan.name}`,
+        });
+      }
+
+      setData((d) => ({
+        ...d,
+        members: d.members.map((m) =>
+          m.id === member.id ? { ...updatedMember } : m
+        ),
+        payments:
+          renewalPaid > 0
+            ? [
+                {
+                  id: `PAY-${Date.now()}`,
+                  memberId: member.id,
+                  member: member.name,
+                  amount: renewalPaid,
+                  type: 'Membership',
+                  mode: renewal.mode || 'Cash',
+                  date: today,
+                  notes: `Membership renewal - ${plan.name}`,
+                },
+                ...d.payments,
+              ]
+            : d.payments,
+      }));
+
+      setModal(null);
+      setToast(`${member.name}'s membership renewed successfully`);
+    } catch (error) {
+      console.error('Supabase membership renewal failed:', error);
+      setToast(error?.message || 'Unable to renew membership in Supabase');
+    }
   };
 
   const addLead = (lead) => {
@@ -479,38 +740,82 @@ function App() {
     setToast('Lead added successfully');
   };
 
-  const addPayment = (payment) => {
-    const id = `PAY-${1001 + data.payments.length}`;
+  const addPayment = async (payment) => {
+    const member = data.members.find(
+      (item) => item.id === payment.memberId || item.name === payment.member
+    );
+
+    if (!member?.cloudId) {
+      setToast('Please select a Supabase-linked member');
+      return;
+    }
+
     const amount = Number(payment.amount || 0);
+    if (amount <= 0) {
+      setToast('Enter a valid payment amount');
+      return;
+    }
 
-    setData((d) => {
-      const nextPayments = [
-        { ...payment, id, amount, createdAt: new Date().toISOString() },
-        ...d.payments,
-      ];
+    const paymentId = `PAY-${Date.now()}`;
+    const currentPaid = Number(member.paid || 0);
+    const currentDue = Number(member.due || 0);
+    const paidAgainstDue = Math.min(currentDue, amount);
 
-      const nextMembers = d.members.map((member) => {
-        if (member.name !== payment.member || payment.type !== 'Membership') return member;
+    const nextPaid = currentPaid + amount;
+    const nextDue = Math.max(0, currentDue - paidAgainstDue);
 
-        const currentPaid = Number(member.paid || 0);
-        const currentDue = Number(member.due || 0);
-        const paidAgainstDue = Math.min(currentDue, amount);
-
-        return {
-          ...member,
-          paid: currentPaid + amount,
-          due: Math.max(0, currentDue - paidAgainstDue),
-        };
+    try {
+      await insertRecord('payments', {
+        member_id: member.cloudId,
+        legacy_id: paymentId,
+        amount,
+        payment_type: payment.type || 'Membership',
+        payment_mode: payment.mode || 'Cash',
+        payment_date: payment.date || today,
+        notes: payment.notes || '',
       });
 
-      return { ...d, payments: nextPayments, members: nextMembers };
-    });
+      if (payment.type === 'Membership') {
+        await updateRecord('members', member.cloudId, {
+          paid_amount: nextPaid,
+          due_amount: nextDue,
+        });
+      }
 
-    setModal(null);
-    setToast('Payment recorded');
+      setData((d) => ({
+        ...d,
+        payments: [
+          {
+            ...payment,
+            id: paymentId,
+            memberId: member.id,
+            member: member.name,
+            amount,
+            date: payment.date || today,
+            createdAt: new Date().toISOString(),
+          },
+          ...d.payments,
+        ],
+        members: d.members.map((item) =>
+          item.id === member.id && payment.type === 'Membership'
+            ? {
+                ...item,
+                paid: nextPaid,
+                due: nextDue,
+              }
+            : item
+        ),
+      }));
+
+      setModal(null);
+      setToast('Payment recorded in Supabase');
+    } catch (error) {
+      console.error('Supabase payment insert failed:', error);
+      setToast(error?.message || 'Unable to save payment in Supabase');
+    }
   };
 
-  const markAttendance = (name, attendanceDate = today) => {
+  const markAttendance = async (name, attendanceDate = today) => {
     const already = data.attendance.some(
       (a) => a.member === name && a.date === attendanceDate
     );
@@ -520,31 +825,50 @@ function App() {
     }
 
     const member = data.members.find((m) => m.name === name);
+    if (!member?.cloudId) {
+      return setToast('This member is not linked to Supabase yet');
+    }
+
     const time = new Date().toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit',
     });
 
-    setData((d) => ({
-      ...d,
-      attendance: [
-        {
-          id: `A-${Date.now()}`,
-          member: name,
-          memberId: member?.id || '',
-          date: attendanceDate,
-          time,
-        },
-        ...d.attendance,
-      ],
-      members: d.members.map((m) =>
-        m.name === name
-          ? { ...m, visits: Number(m.visits || 0) + 1 }
-          : m
-      ),
-    }));
+    try {
+      const row = await insertRecord('attendance', {
+        member_id: member.cloudId,
+        legacy_id: `A-${Date.now()}`,
+        attendance_date: attendanceDate,
+        check_in_time: time,
+        source: 'Manual',
+      });
 
-    setToast(`${name} marked present`);
+      setData((d) => ({
+        ...d,
+        attendance: [
+          {
+            id: row?.legacy_id || row?.id || `A-${Date.now()}`,
+            cloudId: row?.id,
+            member: name,
+            memberId: member.id,
+            date: attendanceDate,
+            time,
+            source: 'Manual',
+          },
+          ...d.attendance,
+        ],
+        members: d.members.map((m) =>
+          m.id === member.id
+            ? { ...m, visits: Number(m.visits || 0) + 1 }
+            : m
+        ),
+      }));
+
+      setToast(`${name} marked present`);
+    } catch (error) {
+      console.error('Supabase attendance insert failed:', error);
+      setToast(error?.message || 'Unable to save attendance in Supabase');
+    }
   };
 
   const createWorkoutPlan = (plan) => {
@@ -834,11 +1158,23 @@ function App() {
     event.target.value = '';
   };
 
-  const deleteMember = (id) => {
+  const deleteMember = async (id) => {
     const member = data.members.find((m) => m.id === id);
     if (!member || !window.confirm(`Delete ${member.name}? This cannot be undone.`)) return;
-    setData((d) => ({ ...d, members: d.members.filter((m) => m.id !== id) }));
-    setToast('Member deleted');
+
+    if (!member.cloudId) {
+      setToast('This member is not linked to Supabase yet');
+      return;
+    }
+
+    try {
+      await deleteRecord('members', member.cloudId);
+      setData((d) => ({ ...d, members: d.members.filter((m) => m.id !== id) }));
+      setToast('Member deleted');
+    } catch (error) {
+      console.error('Supabase member delete failed:', error);
+      setToast(error?.message || 'Could not delete member from Supabase');
+    }
   };
 
   const updateLeadStage = (id, stage) => {
@@ -922,10 +1258,55 @@ function App() {
     setToast(`${lead.name} converted to member`);
   };
 
-  const deletePayment = (id) => {
+  const deletePayment = async (id) => {
     if (!window.confirm('Delete this payment record?')) return;
-    setData((d) => ({ ...d, payments: d.payments.filter((p) => p.id !== id) }));
-    setToast('Payment deleted');
+
+    const payment = data.payments.find((item) => item.id === id);
+    if (!payment) return;
+
+    if (!payment.cloudId) {
+      setToast('This payment is not linked to Supabase');
+      return;
+    }
+
+    const member = data.members.find(
+      (item) => item.id === payment.memberId || item.name === payment.member
+    );
+
+    try {
+      await deleteRecord('payments', payment.cloudId);
+
+      if (member?.cloudId && payment.type === 'Membership') {
+        const paymentAmount = Number(payment.amount || 0);
+        const nextPaid = Math.max(0, Number(member.paid || 0) - paymentAmount);
+        const nextDue = Number(member.due || 0) + paymentAmount;
+
+        await updateRecord('members', member.cloudId, {
+          paid_amount: nextPaid,
+          due_amount: nextDue,
+        });
+
+        setData((d) => ({
+          ...d,
+          payments: d.payments.filter((item) => item.id !== id),
+          members: d.members.map((item) =>
+            item.id === member.id
+              ? { ...item, paid: nextPaid, due: nextDue }
+              : item
+          ),
+        }));
+      } else {
+        setData((d) => ({
+          ...d,
+          payments: d.payments.filter((item) => item.id !== id),
+        }));
+      }
+
+      setToast('Payment deleted from Supabase');
+    } catch (error) {
+      console.error('Supabase payment delete failed:', error);
+      setToast(error?.message || 'Unable to delete payment from Supabase');
+    }
   };
 
   const nav = [
@@ -956,8 +1337,14 @@ function App() {
     setSidebarOpen(false);
   };
 
-  const logout = () => {
-    localStorage.removeItem(AUTH_SESSION_KEY);
+  const logout = async () => {
+    try {
+      await signOutOwner();
+    } catch (error) {
+      console.error('Supabase logout failed:', error);
+      setToast(error?.message || 'Unable to sign out');
+    }
+
     setIsAuthenticated(false);
     setActive('Dashboard');
     setSidebarOpen(false);
@@ -984,7 +1371,6 @@ function App() {
   if (!isAuthenticated) {
     return (
       <LoginScreen
-        settings={data.settings || {}}
         onLogin={() => setIsAuthenticated(true)}
       />
     );
@@ -1024,7 +1410,7 @@ function App() {
           <button className={`nav-item ${active === 'Settings' ? 'active' : ''}`} onClick={() => navigate('Settings')}><Settings size={18} /><span>Settings</span></button>
           <div className="storage-card">
             <div className="storage-icon"><ShieldCheck size={16} /></div>
-            <div><strong>Local mode</strong><span>Your data is saved in this browser.</span></div>
+            <div><strong>Cloud mode</strong><span>Core gym data is synced with Supabase.</span></div>
           </div>
         </div>
       </aside>
@@ -1049,7 +1435,7 @@ function App() {
           {active === 'Dashboard' && <Dashboard {...{ activeMembers, expiringMembers, overdue, revenue, data, navigate, setModal, markAttendance }} />}
           {active === 'Members' && <MembersPage members={data.members} query={query} setQuery={setQuery} setModal={setModal} markAttendance={markAttendance} deleteMember={deleteMember} settings={data.settings || {}} />}
           {active === 'Leads' && <LeadsPage leads={data.leads} members={data.members} setModal={setModal} updateLeadStage={updateLeadStage} updateLeadDetails={updateLeadDetails} deleteLead={deleteLead} convertLeadToMember={convertLeadToMember} />}
-          {active === 'Memberships' && <MembershipsPage members={data.members} setModal={setModal} planPrices={planPrices} setData={setData} setToast={setToast} />}
+          {active === 'Memberships' && <MembershipsPage members={data.members} setModal={setModal} planPrices={planPrices} setData={setData} setToast={setToast} onRenewMembership={renewMembership} />}
           {active === 'Attendance' && <AttendancePage attendance={data.attendance} members={data.members} markAttendance={markAttendance} />}
           {active === 'Payments' && <PaymentsPage payments={data.payments} overdue={overdue} setModal={setModal} deletePayment={deletePayment} />}
           {active === 'Progress' && <ProgressPage progressRecords={data.progressRecords || []} members={data.members} setModal={setModal} deleteProgressRecord={deleteProgressRecord} />}
@@ -1075,7 +1461,6 @@ function App() {
 
       {modal === 'member' && <MemberModal onClose={() => setModal(null)} onSave={addMember} planPrices={planPrices} members={data.members} existingMemberIds={data.members.map((m) => m.id)} />}
       {modal?.type === 'editMember' && <MemberModal member={modal.member} onClose={() => setModal(null)} onSave={updateMember} planPrices={planPrices} members={data.members} existingMemberIds={data.members.map((m) => m.id)} />}
-      {modal?.type === 'renewMembership' && <RenewalModal member={modal.member} onClose={() => setModal(null)} onRenew={renewMembership} planPrices={planPrices} />}
       {modal === 'lead' && <LeadModal onClose={() => setModal(null)} onSave={addLead} />}
       {modal?.type === 'editLead' && <LeadModal lead={modal.lead} onClose={() => setModal(null)} onSave={updateLeadDetails} />}
       {modal === 'trainer' && <TrainerModal onClose={() => setModal(null)} onSave={addTrainer} />}
@@ -1092,51 +1477,31 @@ function App() {
 }
 
 
-function LoginScreen({ settings, onLogin }) {
-  const [username, setUsername] = useState('');
+function LoginScreen({ onLogin }) {
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const auth = settings.auth || {};
-  const configuredUsername = auth.username || 'admin';
-
   const submit = async (event) => {
     event.preventDefault();
 
-    if (!username.trim() || !password) {
-      setError('Enter your username and password.');
+    if (!email.trim() || !password) {
+      setError('Enter your email and password.');
       return;
     }
 
     setBusy(true);
-    const hash = await hashPassword(password);
-    const valid =
-      username.trim().toLowerCase() === configuredUsername.toLowerCase() &&
-      (auth.passwordHash ? hash === auth.passwordHash : password === 'admin123');
-
-    setBusy(false);
-
-    if (!valid) {
-      setError('Invalid username or password.');
-      return;
-    }
-
     setError('');
 
     try {
-      localStorage.setItem(
-        AUTH_SESSION_KEY,
-        JSON.stringify({
-          authenticatedAt: Date.now(),
-          expiresAt: Date.now() + AUTH_SESSION_MS,
-        })
-      );
-    } catch {
-      // If browser storage is unavailable, the login still works for the current page.
+      await signInOwner(email, password);
+      onLogin();
+    } catch (loginError) {
+      setError(loginError?.message || 'Invalid email or password.');
+    } finally {
+      setBusy(false);
     }
-
-    onLogin();
   };
 
   const inputStyle = {
@@ -1234,14 +1599,15 @@ function LoginScreen({ settings, onLogin }) {
         <form onSubmit={submit}>
           <div style={{ marginBottom: '16px' }}>
             <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#34475a', marginBottom: '7px' }}>
-              Username
+              Email
             </label>
             <input
               autoFocus
-              autoComplete="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder={configuredUsername}
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="owner@example.com"
               style={inputStyle}
             />
           </div>
@@ -1305,7 +1671,7 @@ function LoginScreen({ settings, onLogin }) {
             lineHeight: 1.5,
           }}
         >
-          Login credentials can be changed from Settings after signing in.
+          Sign in using your Preface Fitness owner account.
         </div>
       </div>
     </div>
@@ -2387,15 +2753,22 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
 
 function PublicAttendancePage({ data, setData }) {
   const settings = data.settings || {};
+  const params = new URLSearchParams(window.location.search);
+  const gymId = params.get('gym') || data.gym?.id || '';
+  const qrGymLat = params.get('lat');
+  const qrGymLng = params.get('lng');
+
+  const gymLat = Number(qrGymLat ?? settings.gymLatitude);
+  const gymLng = Number(qrGymLng ?? settings.gymLongitude);
+  const hasGymLocation = Number.isFinite(gymLat) && Number.isFinite(gymLng)
+    && String(qrGymLat ?? settings.gymLatitude) !== ''
+    && String(qrGymLng ?? settings.gymLongitude) !== '';
+
   const [memberNumber, setMemberNumber] = useState('');
   const [location, setLocation] = useState(null);
   const [locationStatus, setLocationStatus] = useState('Requesting your location…');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
-
-  const gymLat = Number(settings.gymLatitude);
-  const gymLng = Number(settings.gymLongitude);
-  const hasGymLocation = Number.isFinite(gymLat) && Number.isFinite(gymLng) && settings.gymLatitude !== '' && settings.gymLongitude !== '';
 
   const requestLocation = () => {
     setResult(null);
@@ -2406,11 +2779,17 @@ function PublicAttendancePage({ data, setData }) {
     setLocationStatus('Requesting your location…');
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        setLocation({ latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy });
+        setLocation({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+        });
         setLocationStatus(`Location detected (accuracy ±${Math.round(position.coords.accuracy || 0)} m)`);
       },
       (error) => {
-        const message = error.code === 1 ? 'Location permission was denied. Please allow location access and try again.' : 'Could not detect your location. Please try again.';
+        const message = error.code === 1
+          ? 'Location permission was denied. Please allow location access and try again.'
+          : 'Could not detect your location. Please try again.';
         setLocationStatus(message);
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
@@ -2419,11 +2798,16 @@ function PublicAttendancePage({ data, setData }) {
 
   useEffect(() => { requestLocation(); }, []);
 
-  const markPresent = () => {
+  const markPresent = async () => {
     setResult(null);
     const number = String(memberNumber || '').trim();
+
     if (!number) {
       setResult({ type: 'error', message: 'Enter your member number.' });
+      return;
+    }
+    if (!gymId) {
+      setResult({ type: 'error', message: 'This attendance QR is not linked to a gym.' });
       return;
     }
     if (!hasGymLocation) {
@@ -2442,45 +2826,56 @@ function PublicAttendancePage({ data, setData }) {
       return;
     }
 
-    const member = (data.members || []).find((item) => String(item.attendanceNumber || item.id || '').trim().toLowerCase() === number.toLowerCase());
-    if (!member) {
-      setResult({ type: 'error', message: 'Member number not found.' });
-      return;
-    }
-    if (getMembershipStatus(member.expiry) === 'Expired') {
-      setResult({ type: 'error', message: 'Attendance denied. Your membership has expired.' });
-      return;
-    }
-
-    const already = (data.attendance || []).some((record) => record.memberId === member.id && record.date === today);
-    if (already) {
-      setResult({ type: 'success', message: `${member.name} is already marked present today.` });
-      return;
-    }
-
     setSubmitting(true);
-    const now = new Date();
-    const record = {
-      id: `A-${Date.now()}`,
-      member: member.name,
-      memberId: member.id,
-      memberNumber: member.attendanceNumber || number,
-      date: today,
-      time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      source: 'QR check-in',
-      latitude: location.latitude,
-      longitude: location.longitude,
-      distanceMeters: Math.round(distance),
-    };
+    try {
+      const response = await publicCheckIn({
+        gymId,
+        memberNumber: number,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        gymLatitude: gymLat,
+        gymLongitude: gymLng,
+      });
 
-    setData((current) => ({
-      ...current,
-      attendance: [record, ...(current.attendance || [])],
-      members: (current.members || []).map((item) => item.id === member.id ? { ...item, visits: Number(item.visits || 0) + 1 } : item),
-    }));
-    setSubmitting(false);
-    setResult({ type: 'success', message: `Attendance marked successfully for ${member.name}.` });
-    setMemberNumber('');
+      if (!response?.success) {
+        setResult({ type: 'error', message: response?.message || 'Attendance could not be marked.' });
+        return;
+      }
+
+      const member = response.member;
+      const now = new Date();
+      const record = {
+        id: response.attendance?.legacy_id || response.attendance?.id || `A-${Date.now()}`,
+        cloudId: response.attendance?.id,
+        member: member?.name || '',
+        memberId: member?.member_code || member?.id || '',
+        memberNumber: member?.attendance_number || number,
+        date: today,
+        time: response.attendance?.check_in_time || now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        source: 'QR check-in',
+        latitude: location.latitude,
+        longitude: location.longitude,
+        distance: Math.round(distance),
+      };
+
+      setData((current) => ({
+        ...current,
+        attendance: [record, ...(current.attendance || [])],
+        members: (current.members || []).map((item) =>
+          item.id === record.memberId
+            ? { ...item, visits: Number(item.visits || 0) + 1 }
+            : item
+        ),
+      }));
+
+      setResult({ type: 'success', message: `${member?.name || 'Member'} — attendance marked successfully.` });
+      setMemberNumber('');
+    } catch (error) {
+      console.error('Public attendance failed:', error);
+      setResult({ type: 'error', message: error?.message || 'Unable to mark attendance.' });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -2490,7 +2885,9 @@ function PublicAttendancePage({ data, setData }) {
         <div style={{ marginTop: '8px', textAlign: 'center' }}>
           <div className="eyebrow">PREFACE FITNESS</div>
           <h2 style={{ margin: '6px 0 8px' }}>Mark Attendance</h2>
-          <p style={{ color: '#718096', fontSize: '14px', lineHeight: 1.5, margin: 0 }}>Scan at the gym entrance and mark your attendance without logging into the owner dashboard.</p>
+          <p style={{ color: '#718096', fontSize: '14px', lineHeight: 1.5, margin: 0 }}>
+            Scan the QR at the gym entrance, enter your member number and allow location access.
+          </p>
         </div>
 
         <div style={{ marginTop: '22px', padding: '12px 14px', borderRadius: '12px', background: location ? '#f0faf7' : '#fff8ed', border: `1px solid ${location ? '#cfece3' : '#f0dfbf'}`, color: '#53656f', fontSize: '13px' }}>
@@ -2500,11 +2897,19 @@ function PublicAttendancePage({ data, setData }) {
 
         <div style={{ marginTop: '18px' }}>
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#334155', marginBottom: '7px' }}>Member number</label>
-          <input value={memberNumber} onChange={(e) => setMemberNumber(e.target.value.replace(/\D/g, '').slice(0, 8))} onKeyDown={(e) => { if (e.key === 'Enter') markPresent(); }} inputMode="numeric" autoFocus placeholder="e.g. 23" style={{ width: '100%', fontSize: '22px', textAlign: 'center', letterSpacing: '3px', padding: '13px 14px' }} />
+          <input
+            value={memberNumber}
+            onChange={(e) => setMemberNumber(e.target.value.replace(/\D/g, '').slice(0, 8))}
+            onKeyDown={(e) => { if (e.key === 'Enter') markPresent(); }}
+            inputMode="numeric"
+            autoFocus
+            placeholder="e.g. 23"
+            style={{ width: '100%', fontSize: '22px', textAlign: 'center', letterSpacing: '3px', padding: '13px 14px' }}
+          />
         </div>
 
         <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '14px', minHeight: '48px' }} onClick={markPresent} disabled={submitting}>
-          <CheckCircle2 size={18} /> {submitting ? 'Marking…' : 'Mark Present'}
+          <CheckCircle2 size={18} /> {submitting ? 'Checking…' : 'Mark Present'}
         </button>
 
         <button className="link-btn" style={{ width: '100%', justifyContent: 'center', marginTop: '10px' }} onClick={requestLocation}>Refresh location</button>
@@ -4227,7 +4632,8 @@ function PaymentsPage({ payments, overdue, setModal, deletePayment }) {
   </div>;
 }
 
-function MembershipsPage({ members, setModal, planPrices, setData, setToast }) {
+function MembershipsPage({ members, setModal, planPrices, setData, setToast, onRenewMembership }) {
+  const [renewingMember, setRenewingMember] = useState(null);
   const [planFilter, setPlanFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [editingPrices, setEditingPrices] = useState(false);
@@ -4350,7 +4756,7 @@ function MembershipsPage({ members, setModal, planPrices, setData, setToast }) {
                 <td>{days < 0 ? `${Math.abs(days)} days overdue` : `${days} days`}</td>
                 <td>{Number(member.due || 0) > 0 ? <strong className="danger-text">₹{Number(member.due).toLocaleString('en-IN')}</strong> : <span className="paid-text">Paid</span>}</td>
                 <td><StatusBadge status={status} /></td>
-                <td><button className="btn btn-secondary btn-sm" onClick={() => setModal({ type:'renewMembership', member })}>Renew</button></td>
+                <td><button type="button" className="btn btn-secondary btn-sm" onClick={() => setRenewingMember(member)}>Renew</button></td>
               </tr>;
             })}
             {!filteredMembers.length && <tr><td colSpan="8"><EmptyState title="No memberships found" text="Try changing the filters." /></td></tr>}
@@ -4358,6 +4764,18 @@ function MembershipsPage({ members, setModal, planPrices, setData, setToast }) {
         </table>
       </div>
     </section>
+
+    {renewingMember && (
+      <RenewalModal
+        member={renewingMember}
+        onClose={() => setRenewingMember(null)}
+        onRenew={(renewal) => {
+          if (onRenewMembership) onRenewMembership(renewingMember, renewal);
+          setRenewingMember(null);
+        }}
+        planPrices={planPrices}
+      />
+    )}
   </>;
 }
 
@@ -4365,9 +4783,11 @@ function RenewalModal({ member, onClose, onRenew, planPrices }) {
   const defaultPlan = MEMBERSHIP_PLANS.some((p) => p.name === member.plan) ? member.plan : 'Monthly';
   const [form, setForm] = useState({
     plan: defaultPlan,
-    amount: Number(member.amount || planPrices[defaultPlan] || 0),
+    amount: Number(member?.amount || planPrices[defaultPlan] || 0),
     paid: 0,
   });
+
+  if (!member) return null;
 
   const selectedPlan = MEMBERSHIP_PLANS.find((plan) => plan.name === form.plan);
   const currentDays = getDaysRemaining(member.expiry);
@@ -4400,7 +4820,7 @@ function RenewalModal({ member, onClose, onRenew, planPrices }) {
       <div><span>New amount due</span><strong>₹{newDue.toLocaleString('en-IN')}</strong></div>
     </div>
 
-    <ModalActions onClose={onClose} disabled={!form.plan} onSave={() => onRenew({ ...form, amount:Number(form.amount || 0), paid:Number(form.paid || 0) })} saveLabel="Renew membership" />
+    <ModalActions onClose={onClose} disabled={!form.plan} onSave={() => onRenew({ ...form, amount: Number(form.amount || 0), paid: Number(form.paid || 0) })} saveLabel="Renew membership" />
   </Modal>;
 }
 
@@ -5341,7 +5761,7 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     setAuthMessage('Gym location saved.');
   };
 
-  const qrUrl = getCheckInUrl();
+  const qrUrl = getCheckInUrl(data.gym?.id || '', form.gymLatitude, form.gymLongitude);
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&data=${encodeURIComponent(qrUrl)}`;
 
   const openQr = () => window.open(qrImageUrl, '_blank', 'noopener,noreferrer');

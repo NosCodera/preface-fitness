@@ -1,0 +1,342 @@
+{
+  "members": [
+    {
+      "name": "Ajay Kumar",
+      "phone": "9784568410",
+      "email": "ajay@example.com",
+      "dob": "1989-08-14",
+      "gender": "Male",
+      "address": "NA",
+      "emergencyContact": "NA",
+      "plan": "Annual",
+      "start": "2026-09-23",
+      "expiry": "2027-09-22",
+      "amount": 10000,
+      "paid": 1000,
+      "due": 9000,
+      "height": "166",
+      "weight": "85",
+      "bodyFat": "25",
+      "trainer": "",
+      "referral": "Walk-in",
+      "notes": "",
+      "id": "PF-1006",
+      "visits": 1,
+      "status": "Active",
+      "createdAt": "2026-09-23T16:28:14.738Z"
+    },
+    {
+      "id": "PF-1001",
+      "name": "Rahul Sharma",
+      "phone": "9876543210",
+      "email": "rahul@example.com",
+      "plan": "Annual",
+      "start": "2025-10-12",
+      "expiry": "2026-10-12",
+      "status": "Active",
+      "visits": 18,
+      "due": 0
+    },
+    {
+      "id": "PF-1002",
+      "name": "Priya Verma",
+      "phone": "9811112233",
+      "email": "priya@example.com",
+      "plan": "Quarterly",
+      "start": "2026-07-03",
+      "expiry": "2026-10-03",
+      "status": "Expiring",
+      "visits": 14,
+      "due": 1200
+    },
+    {
+      "id": "PF-1003",
+      "name": "Amit Singh",
+      "phone": "9898989898",
+      "email": "amit@example.com",
+      "plan": "Monthly",
+      "start": "2026-09-01",
+      "expiry": "2026-10-01",
+      "status": "Expiring",
+      "visits": 10,
+      "due": 0
+    },
+    {
+      "id": "PF-1004",
+      "name": "Neha Gupta",
+      "phone": "9911223344",
+      "email": "neha@example.com",
+      "plan": "Annual",
+      "start": "2025-09-20",
+      "expiry": "2026-09-20",
+      "status": "Expired",
+      "visits": 7,
+      "due": 2500
+    },
+    {
+      "id": "PF-1005",
+      "name": "Arjun Mehta",
+      "phone": "9000011111",
+      "email": "arjun@example.com",
+      "plan": "Half-yearly",
+      "start": "2026-05-15",
+      "expiry": "2026-11-15",
+      "status": "Active",
+      "visits": 22,
+      "due": 0
+    }
+  ],
+  "leads": [
+    {
+      "id": "L-101",
+      "name": "Karan Malhotra",
+      "phone": "9988776655",
+      "source": "Instagram",
+      "stage": "New",
+      "followUp": "2026-09-23"
+    },
+    {
+      "id": "L-102",
+      "name": "Sana Khan",
+      "phone": "9876501234",
+      "source": "Walk-in",
+      "stage": "Trial Booked",
+      "followUp": "2026-09-23"
+    },
+    {
+      "id": "L-103",
+      "name": "Vivek Jain",
+      "phone": "9123456789",
+      "source": "Referral",
+      "stage": "Contacted",
+      "followUp": "2026-09-24"
+    }
+  ],
+  "payments": [
+    {
+      "id": "PAY-1001",
+      "member": "Rahul Sharma",
+      "amount": 18000,
+      "type": "Membership",
+      "mode": "UPI",
+      "date": "2026-09-22"
+    },
+    {
+      "id": "PAY-1002",
+      "member": "Priya Verma",
+      "amount": 5000,
+      "type": "Membership",
+      "mode": "Cash",
+      "date": "2026-09-20"
+    },
+    {
+      "id": "PAY-1003",
+      "member": "Arjun Mehta",
+      "amount": 9000,
+      "type": "PT",
+      "mode": "Card",
+      "date": "2026-09-19"
+    }
+  ],
+  "attendance": [
+    {
+      "id": "A-1790181791411",
+      "member": "Neha Gupta",
+      "memberId": "PF-1004",
+      "date": "2026-09-23",
+      "time": "10:13 PM"
+    },
+    {
+      "id": "A-1790181790955",
+      "member": "Amit Singh",
+      "memberId": "PF-1003",
+      "date": "2026-09-23",
+      "time": "10:13 PM"
+    },
+    {
+      "id": "A-1790181789612",
+      "member": "Ajay Kumar",
+      "memberId": "PF-1006",
+      "date": "2026-09-23",
+      "time": "10:13 PM"
+    },
+    {
+      "id": "A-1",
+      "member": "Rahul Sharma",
+      "date": "2026-09-23",
+      "time": "06:42 PM"
+    },
+    {
+      "id": "A-2",
+      "member": "Priya Verma",
+      "date": "2026-09-23",
+      "time": "07:03 PM"
+    },
+    {
+      "id": "A-3",
+      "member": "Arjun Mehta",
+      "date": "2026-09-23",
+      "time": "07:18 PM"
+    }
+  ],
+  "settings": {
+    "gymName": "Preface Fitness",
+    "currency": "₹",
+    "gymAddress": "Nadan Mahal Rd, above Hdfc Bank, Yahiyaganj, Lucknow, Uttar Pradesh 226003",
+    "gymPhone": "(+91)9369279056",
+    "gymEmail": "preface@example.com",
+    "gstin": "09ABCDE1234F1Z5",
+    "invoicePrefix": "PF-INV",
+    "referralPointsPerReferral": 10,
+    "gymLatitude": "",
+    "gymLongitude": "",
+    "auth": {
+      "username": "admin",
+      "passwordHash": ""
+    },
+    "membershipPlans": [
+      {
+        "name": "Monthly",
+        "months": 1,
+        "price": 1500,
+        "description": "Flexible month-to-month membership"
+      },
+      {
+        "name": "Quarterly",
+        "months": 3,
+        "price": 4000,
+        "description": "3 month membership"
+      },
+      {
+        "name": "Half-yearly",
+        "months": 6,
+        "price": 7000,
+        "description": "6 month membership"
+      },
+      {
+        "name": "Annual",
+        "months": 12,
+        "price": 12000,
+        "description": "12 month membership"
+      }
+    ]
+  },
+  "workoutPlans": [],
+  "dietPlans": [
+    {
+      "id": "DP-1001",
+      "name": "Fat Loss Starter",
+      "goal": "Fat Loss",
+      "calories": 1800,
+      "protein": 130,
+      "durationWeeks": 8,
+      "coach": "Administrator",
+      "notes": "High protein meals with controlled portions and consistent meal timing.",
+      "assignedMemberIds": [
+        "PF-1001",
+        "PF-1002"
+      ],
+      "meals": [
+        {
+          "id": "MEAL-1",
+          "meal": "Breakfast",
+          "food": "Oats + whey + banana",
+          "calories": 420,
+          "protein": 30
+        },
+        {
+          "id": "MEAL-2",
+          "meal": "Lunch",
+          "food": "Paneer + roti + salad",
+          "calories": 520,
+          "protein": 35
+        },
+        {
+          "id": "MEAL-3",
+          "meal": "Snack",
+          "food": "Peanut butter + milk",
+          "calories": 300,
+          "protein": 15
+        },
+        {
+          "id": "MEAL-4",
+          "meal": "Dinner",
+          "food": "Chicken + rice + vegetables",
+          "calories": 560,
+          "protein": 50
+        }
+      ],
+      "createdAt": "2026-09-23T13:18:41.477Z"
+    },
+    {
+      "id": "DP-1002",
+      "name": "Lean Muscle Plan",
+      "goal": "Muscle Building",
+      "calories": 2400,
+      "protein": 160,
+      "durationWeeks": 12,
+      "coach": "Administrator",
+      "notes": "Protein-focused plan with enough calories to support progressive training.",
+      "assignedMemberIds": [
+        "PF-1005"
+      ],
+      "meals": [
+        {
+          "id": "MEAL-5",
+          "meal": "Breakfast",
+          "food": "Eggs + oats + milk",
+          "calories": 560,
+          "protein": 35
+        },
+        {
+          "id": "MEAL-6",
+          "meal": "Lunch",
+          "food": "Chicken + rice + curd",
+          "calories": 680,
+          "protein": 50
+        },
+        {
+          "id": "MEAL-7",
+          "meal": "Snack",
+          "food": "Whey + banana + peanut butter",
+          "calories": 420,
+          "protein": 32
+        },
+        {
+          "id": "MEAL-8",
+          "meal": "Dinner",
+          "food": "Paneer + roti + vegetables",
+          "calories": 740,
+          "protein": 43
+        }
+      ],
+      "createdAt": "2026-09-23T13:18:41.477Z"
+    }
+  ],
+  "membershipPlans": [
+    {
+      "name": "Monthly",
+      "months": 1,
+      "price": 1500,
+      "description": "Flexible month-to-month membership"
+    },
+    {
+      "name": "Quarterly",
+      "months": 3,
+      "price": 4000,
+      "description": "3 month membership"
+    },
+    {
+      "name": "Half-yearly",
+      "months": 6,
+      "price": 7000,
+      "description": "6 month membership"
+    },
+    {
+      "name": "Annual",
+      "months": 12,
+      "price": 12000,
+      "description": "12 month membership"
+    }
+  ]
+}
