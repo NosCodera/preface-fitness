@@ -88,6 +88,18 @@ function getMembershipStatus(expiry) {
   return 'Active';
 }
 
+function formatAttendanceTime(value) {
+  if (!value) return '';
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+  return String(value);
+}
+
 const PRODUCTION_APP_URL = 'https://noscodera.github.io/preface-fitness/';
 
 function getCheckInUrl(gymId = '', gymLat = '', gymLng = '') {
@@ -836,7 +848,8 @@ function App() {
       return setToast('This member is not linked to Supabase yet');
     }
 
-    const time = new Date().toLocaleTimeString([], {
+    const checkInTimestamp = new Date().toISOString();
+    const displayTime = new Date().toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit',
     });
@@ -846,7 +859,7 @@ function App() {
         member_id: member.cloudId,
         legacy_id: `A-${Date.now()}`,
         attendance_date: attendanceDate,
-        check_in_time: time,
+        check_in_time: checkInTimestamp,
         source: 'Manual',
       });
 
@@ -859,7 +872,7 @@ function App() {
             member: name,
             memberId: member.id,
             date: attendanceDate,
-            time,
+            time: formatAttendanceTime(row?.check_in_time) || displayTime,
             source: 'Manual',
           },
           ...d.attendance,
@@ -2870,7 +2883,7 @@ function PublicAttendancePage({ data, setData }) {
         memberId: member?.member_code || member?.id || '',
         memberNumber: member?.attendance_number || number,
         date: today,
-        time: response.attendance?.check_in_time || now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        time: formatAttendanceTime(response.attendance?.check_in_time) || now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         source: 'QR check-in',
         latitude: location.latitude,
         longitude: location.longitude,
