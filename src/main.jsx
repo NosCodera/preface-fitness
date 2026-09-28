@@ -874,6 +874,10 @@ function App() {
       setToast(`${name} marked present`);
     } catch (error) {
       console.error('Supabase attendance insert failed:', error);
+      const message = String(error?.message || '');
+      if (message.includes('ux_attendance_gym_member_date') || message.toLowerCase().includes('duplicate key')) {
+        return setToast(`${name} — attendance already marked for this date`);
+      }
       setToast(error?.message || 'Unable to save attendance in Supabase');
     }
   };
@@ -2849,6 +2853,14 @@ function PublicAttendancePage({ data, setData }) {
         return;
       }
 
+      if (response?.already_present) {
+        setResult({
+          type: 'warning',
+          message: response?.message || 'Attendance already marked today.',
+        });
+        return;
+      }
+
       const member = response.member;
       const now = new Date();
       const record = {
@@ -2886,10 +2898,10 @@ function PublicAttendancePage({ data, setData }) {
   };
 
   return (
-    <div className="auth-screen" style={{ padding: '24px', minHeight: '100vh', background: '#f5f8fa' }}>
-      <div className="auth-card" style={{ width: 'min(460px, 100%)' }}>
-        <img src={LOGO_URL} alt="Preface Fitness" className="auth-logo" />
-        <div style={{ marginTop: '8px', textAlign: 'center' }}>
+    <div className="public-checkin-screen">
+      <div className="public-checkin-card">
+        <img src={LOGO_URL} alt="Preface Fitness" className="public-checkin-logo" />
+        <div className="public-checkin-heading">
           <div className="eyebrow">PREFACE FITNESS</div>
           <h2 style={{ margin: '6px 0 8px' }}>Mark Attendance</h2>
           <p style={{ color: '#718096', fontSize: '14px', lineHeight: 1.5, margin: 0 }}>
@@ -2897,13 +2909,13 @@ function PublicAttendancePage({ data, setData }) {
           </p>
         </div>
 
-        <div style={{ marginTop: '22px', padding: '12px 14px', borderRadius: '12px', background: location ? '#f0faf7' : '#fff8ed', border: `1px solid ${location ? '#cfece3' : '#f0dfbf'}`, color: '#53656f', fontSize: '13px' }}>
+        <div className={`public-location-status ${location ? 'is-ready' : 'is-pending'}`}>
           <strong>{location ? '✓ Location detected' : 'Location required'}</strong>
           <div style={{ marginTop: '3px' }}>{locationStatus}</div>
         </div>
 
-        <div style={{ marginTop: '18px' }}>
-          <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#334155', marginBottom: '7px' }}>Member number</label>
+        <div className="public-member-field">
+          <label className="public-member-label">Member number</label>
           <input
             value={memberNumber}
             onChange={(e) => setMemberNumber(e.target.value.replace(/\D/g, '').slice(0, 8))}
@@ -2911,18 +2923,18 @@ function PublicAttendancePage({ data, setData }) {
             inputMode="numeric"
             autoFocus
             placeholder="e.g. 23"
-            style={{ width: '100%', fontSize: '22px', textAlign: 'center', letterSpacing: '3px', padding: '13px 14px' }}
+            className="public-member-input" 
           />
         </div>
 
-        <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '14px', minHeight: '48px' }} onClick={markPresent} disabled={submitting}>
+        <button className="btn btn-primary public-submit-button" onClick={markPresent} disabled={submitting}>
           <CheckCircle2 size={18} /> {submitting ? 'Checking…' : 'Mark Present'}
         </button>
 
-        <button className="link-btn" style={{ width: '100%', justifyContent: 'center', marginTop: '10px' }} onClick={requestLocation}>Refresh location</button>
+        <button className="link-btn public-refresh-button" onClick={requestLocation}>Refresh location</button>
 
         {result && (
-          <div style={{ marginTop: '14px', padding: '13px 14px', borderRadius: '12px', background: result.type === 'success' ? '#f0faf7' : '#fff4f3', border: `1px solid ${result.type === 'success' ? '#cfece3' : '#f2d1ce'}`, color: result.type === 'success' ? '#26735f' : '#a33a32', fontSize: '13px', lineHeight: 1.5 }}>
+          <div className={`public-result ${result.type === 'success' ? 'is-success' : result.type === 'warning' ? 'is-warning' : 'is-error'}`}>
             {result.message}
           </div>
         )}
