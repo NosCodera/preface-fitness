@@ -3156,6 +3156,17 @@ function PublicAttendancePage({ data, setData }) {
 
   const [memberNumber, setMemberNumber] = useState('');
   const [location, setLocation] = useState(null);
+  const [deviceLocked, setDeviceLocked] = useState(false);
+
+  const DEVICE_ATTENDANCE_KEY = 'preface-fitness-attendance-device-date';
+
+  const getDeviceAttendanceLock = () => {
+    try {
+      return localStorage.getItem(DEVICE_ATTENDANCE_KEY) === today;
+    } catch {
+      return false;
+    }
+  };
   const [locationStatus, setLocationStatus] = useState('Requesting your location…');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
@@ -3186,11 +3197,20 @@ function PublicAttendancePage({ data, setData }) {
     );
   };
 
-  useEffect(() => { requestLocation(); }, []);
+  useEffect(() => {
+    requestLocation();
+    setDeviceLocked(getDeviceAttendanceLock());
+  }, []);
 
   const markPresent = async () => {
     setResult(null);
     const number = String(memberNumber || '').trim();
+
+    if (getDeviceAttendanceLock()) {
+      setDeviceLocked(true);
+      setResult({ type: 'warning', message: 'Attendance already marked on this device today.' });
+      return;
+    }
 
     if (!number) {
       setResult({ type: 'error', message: 'Enter your member number.' });
@@ -3266,7 +3286,13 @@ function PublicAttendancePage({ data, setData }) {
         ),
       }));
 
-      setResult({ type: 'success', message: `${member?.name || 'Member'} — attendance marked successfully.` });
+      try {
+        localStorage.setItem(DEVICE_ATTENDANCE_KEY, today);
+      } catch {
+        // Continue even if browser storage is unavailable.
+      }
+      setDeviceLocked(true);
+      setResult({ type: 'success', message: 'Attendance marked successfully.' });
       setMemberNumber('');
     } catch (error) {
       console.error('Public attendance failed:', error);
@@ -3306,7 +3332,7 @@ function PublicAttendancePage({ data, setData }) {
           />
         </div>
 
-        <button className="btn btn-primary public-submit-button" onClick={markPresent} disabled={submitting}>
+        <button className="btn btn-primary public-submit-button" onClick={markPresent} disabled={submitting || deviceLocked}>
           <CheckCircle2 size={18} /> {submitting ? 'Checking…' : 'Mark Present'}
         </button>
 
