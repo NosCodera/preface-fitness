@@ -115,22 +115,22 @@ function getMembershipStatus(expiry) {
   return 'Active';
 }
 
-function getCheckInPath() {
-  const base = import.meta.env.BASE_URL || '/';
-  return `${base.replace(/\/$/, '')}/#check-in`;
-}
+const PRODUCTION_APP_URL = 'https://noscodera.github.io/preface-fitness/';
+const PRODUCTION_GYM_ID = 'd702119b-3205-46a2-9ee0-294d682ddf14';
 
 function getCheckInUrl() {
-  return `${window.location.origin}${getCheckInPath()}`;
+  // Keep the permanent QR pointed at the deployed GitHub Pages app.
+  // The hash route is intentionally kept as #check-in.
+  return `${PRODUCTION_APP_URL}#check-in`;
 }
 
 function getFeedbackUrl(gymId, gymName = 'Preface Fitness') {
-  const base = import.meta.env.BASE_URL || '/';
-  const cleanBase = base.replace(/\/$/, '');
+  // GitHub Pages serves the SPA from /preface-fitness/. Query parameters
+  // must come before the hash so PublicFeedbackPage can read them.
   const params = new URLSearchParams();
-  if (gymId) params.set('gym', gymId);
-  if (gymName) params.set('name', gymName);
-  return `${window.location.origin}${cleanBase}/?${params.toString()}#feedback`;
+  params.set('gym', gymId || PRODUCTION_GYM_ID);
+  params.set('name', gymName || 'Preface Fitness');
+  return `${PRODUCTION_APP_URL}?${params.toString()}#feedback`;
 }
 
 function distanceInMeters(lat1, lon1, lat2, lon2) {
@@ -6454,7 +6454,7 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
 
   const qrUrl = getCheckInUrl();
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&data=${encodeURIComponent(qrUrl)}`;
-  const feedbackQrUrl = getFeedbackUrl(data.gym?.id || '', form.gymName || 'Preface Fitness');
+  const feedbackQrUrl = getFeedbackUrl(data.gym?.id || PRODUCTION_GYM_ID, form.gymName || 'Preface Fitness');
   const feedbackQrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&data=${encodeURIComponent(feedbackQrUrl)}`;
 
   const openQr = () => window.open(qrImageUrl, '_blank', 'noopener,noreferrer');
