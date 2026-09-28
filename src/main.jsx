@@ -124,8 +124,7 @@ function getCheckInUrl(gymId, gymLatitude, gymLongitude) {
   // Keep the permanent QR on the deployed GitHub Pages app and carry the gym identity/location in the QR URL.
   const params = new URLSearchParams();
   params.set('gym', gymId || PRODUCTION_GYM_ID);
-  if (gymLatitude !== '' && gymLongitude !== '' && Number.isFinite(Number(gymLatitude)) && Number.isFinite(Number(gymLongitude))) { params.set('lat', String(gymLatitude)); params.set('lng', String(gymLongitude)); }
-  return `${PRODUCTION_APP_URL}?${params.toString()}#check-in`;
+  if (gymLatitude !== '' && gymLongitude !== '' && Number.isFinite(Number(gymLatitude)) && Number.isFinite(Number(gymLongitude))) { params.set('lat', String(gymLatitude)); params.set('lng', String(gymLongitude)); } return `${PRODUCTION_APP_URL}?${params.toString()}#check-in`;
 }
 
 function getFeedbackUrl(gymId, gymName = 'Preface Fitness') {
@@ -6434,22 +6433,10 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     }));
     setAuthMessage('');
     setNoticeForm({ enabled: Boolean(current.notice?.enabled), text: current.notice?.text || '', priority: current.notice?.priority || 'medium' });
+    getSupabaseUser().then((user) => {
+      if (user?.email) setAuthForm((form) => ({ ...form, username: user.email }));
+    }).catch(() => {});
   }, [current.gymName, current.gymAddress, current.gymPhone, current.gymEmail, current.gstin, current.defaultGstRate, current.invoicePrefix, current.referralPointsPerReferral, current.gymLatitude, current.gymLongitude, current.auth?.username, current.auth?.passwordHash]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const user = await getSupabaseUser();
-        if (!cancelled && user?.email) {
-          setAuthForm((form) => ({ ...form, username: user.email }));
-        }
-      } catch (error) {
-        console.error('Unable to read current Supabase user:', error);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
 
   const useCurrentLocation = () => {
     if (!navigator.geolocation) return setAuthMessage('This browser does not support location detection.');
@@ -6515,15 +6502,10 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
   };
 
   const saveAuthSettings = async () => {
-    const email = authForm.username.trim();
+    const username = authForm.username.trim().toLowerCase();
 
-    if (!email) {
+    if (!username) {
       setAuthMessage('Login email cannot be empty.');
-      return;
-    }
-
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setAuthMessage('Enter a valid login email address.');
       return;
     }
 
@@ -6548,20 +6530,9 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     }
 
     try {
-      // Re-authenticate with the current Supabase credentials before allowing
-      // an account change. This replaces the old local password-hash check.
-      const currentUser = await getSupabaseUser();
-      const currentEmail = String(currentUser?.email || '').trim();
-
-      if (!currentEmail) {
-        setAuthMessage('Could not determine the current Supabase login email.');
-        return;
-      }
-
-      await signInOwner(currentEmail, authForm.currentPassword);
-
       await changeSupabaseCredentials({
-        email,
+        email: username,
+        currentPassword: authForm.currentPassword,
         password: authForm.newPassword,
       });
 
@@ -6569,14 +6540,15 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
         ...d,
         settings: {
           ...(d.settings || {}),
-          // Keep only the login email locally. Never store the password or
-          // password hash in browser data. Supabase Auth is the source of truth.
-          auth: { username: email, passwordHash: '' },
+          auth: {
+            ...((d.settings || {}).auth || {}),
+            username,
+          },
         },
       }));
 
       setAuthForm({
-        username: email,
+        username,
         currentPassword: '',
         newPassword: '',
         confirmPassword: '',
@@ -6643,12 +6615,12 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
           <div className="card-header">
             <div>
               <h3>Owner login</h3>
-              <p>Change the Supabase login email and password required to open the app.</p>
+              <p>Change the Supabase login email (username) and password required to open the app.</p>
             </div>
           </div>
 
           <div className="form-grid two">
-            <FormField label="Login email">
+            <FormField label="Login email (username)">
               <input
                 value={authForm.username}
                 onChange={(e) => setAuthForm((f) => ({ ...f, username: e.target.value }))}
@@ -6706,7 +6678,7 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
           </button>
 
           <div style={{ marginTop: '12px', fontSize: '12px', color: '#7b8794', lineHeight: 1.5 }}>
-            The login email and password are managed by Supabase Auth. Never store the password in app settings.
+            This login is managed by Supabase Authentication. Change the email and password here after signing in.
           </div>
         </section>
 

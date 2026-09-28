@@ -76,7 +76,7 @@ export function subscribeToAuthChanges(callback) {
   return () => subscription?.unsubscribe();
 }
 
-/*
+/**
  * Change the currently logged-in user's password.
  */
 export async function changeSupabasePassword(newPassword) {
@@ -103,12 +103,11 @@ export async function changeSupabasePassword(newPassword) {
   return data?.user || null;
 }
 
-/*
+/**
  * Change the currently logged-in user's email.
  *
- * Supabase may require the user to confirm the
- * new email address before the change becomes active,
- * depending on the project's Auth settings.
+ * Depending on Supabase Auth settings, the new email
+ * may need to be confirmed before it becomes active.
  */
 export async function changeSupabaseEmail(newEmail) {
   const email = String(newEmail || '').trim();
@@ -130,8 +129,8 @@ export async function changeSupabaseEmail(newEmail) {
   return data?.user || null;
 }
 
-/*
- * Change both email and password together.
+/**
+ * Change the currently logged-in user's email and/or password.
  */
 export async function changeSupabaseCredentials({
   email,
@@ -149,7 +148,11 @@ export async function changeSupabaseCredentials({
     updates.email = cleanEmail;
   }
 
-  if (password !== undefined && password !== null && password !== '') {
+  if (
+    password !== undefined &&
+    password !== null &&
+    password !== ''
+  ) {
     const cleanPassword = String(password);
 
     if (cleanPassword.length < 6) {
