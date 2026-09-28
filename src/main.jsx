@@ -45,7 +45,7 @@ import {
   getSupabaseSession,
   subscribeToAuthChanges,
 } from './supabaseAuth';
-import { loadCloudState, insertRecord, updateRecord, deleteRecord, saveSettings as saveCloudSettings, publicSubmitFeedback } from './cloudData';
+import { loadCloudState, insertRecord, updateRecord, deleteRecord, saveSettings as saveCloudSettings, publicCheckIn, publicSubmitFeedback } from './cloudData';
 
 const LOGO_URL = `${import.meta.env.BASE_URL}preface-logo.jpg`;
 
