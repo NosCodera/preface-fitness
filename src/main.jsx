@@ -88,20 +88,27 @@ function getMembershipStatus(expiry) {
   return 'Active';
 }
 
-function getCheckInPath() {
-  const base = import.meta.env.BASE_URL || '/';
-  return `${base.replace(/\/$/, '')}/#check-in`;
-}
+const PRODUCTION_APP_URL = 'https://noscodera.github.io/preface-fitness/';
 
 function getCheckInUrl(gymId = '', gymLat = '', gymLng = '') {
   const params = new URLSearchParams();
+
   if (gymId) params.set('gym', gymId);
+
   if (gymLat !== '' && gymLng !== '') {
     params.set('lat', gymLat);
     params.set('lng', gymLng);
   }
+
   const query = params.toString();
-  return `${window.location.origin}${getCheckInPath()}${query ? `?${query}` : ''}`;
+  const baseUrl = PRODUCTION_APP_URL.replace(/\/$/, '');
+
+  // Query parameters must come BEFORE the hash.
+  // Example:
+  // https://noscodera.github.io/preface-fitness/?gym=...&lat=...&lng=...#check-in
+  return query
+    ? `${baseUrl}/?${query}#check-in`
+    : `${baseUrl}/#check-in`;
 }
 
 function distanceInMeters(lat1, lon1, lat2, lon2) {
