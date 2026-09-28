@@ -115,22 +115,33 @@ function getMembershipStatus(expiry) {
   return 'Active';
 }
 
+const PRODUCTION_APP_URL = 'https://noscodera.github.io/preface-fitness/';
+
 function getCheckInPath() {
-  const base = import.meta.env.BASE_URL || '/';
-  return `${base.replace(/\/$/, '')}/#check-in`;
+  return `${PRODUCTION_APP_URL.replace(/\/$/, '')}/#check-in`;
 }
 
 function getCheckInUrl() {
-  return `${window.location.origin}${getCheckInPath()}`;
+  return `${PRODUCTION_APP_URL.replace(/\/$/, '')}/#check-in`;
 }
 
 function getFeedbackUrl(gymId, gymName = 'Preface Fitness') {
-  const base = import.meta.env.BASE_URL || '/';
-  const cleanBase = base.replace(/\/$/, '');
   const params = new URLSearchParams();
-  if (gymId) params.set('gym', gymId);
-  if (gymName) params.set('name', gymName);
-  return `${window.location.origin}${cleanBase}/?${params.toString()}#feedback`;
+
+  if (gymId) {
+    params.set('gym', gymId);
+  }
+
+  if (gymName) {
+    params.set('name', gymName);
+  }
+
+  const query = params.toString();
+  const base = PRODUCTION_APP_URL.replace(/\/$/, '');
+
+  return query
+    ? `${base}/?${query}#feedback`
+    : `${base}/#feedback`;
 }
 
 function distanceInMeters(lat1, lon1, lat2, lon2) {
@@ -385,8 +396,7 @@ async function hashPassword(password) {
 }
 
 function openPublicGymPage() {
-  const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
-  const url = `${window.location.origin}${base}/#gym`;
+  const url = `${PRODUCTION_APP_URL.replace(/\/$/, '')}/#gym`;
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 

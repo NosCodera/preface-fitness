@@ -807,10 +807,6 @@ function mapCommunicationLog(
   };
 }
 
-/* ============================================================
-   CUSTOMER FEEDBACK
-   ============================================================ */
-
 function mapFeedback(
   row,
   members
@@ -906,10 +902,6 @@ function buildSettings(rows) {
 
   return out;
 }
-
-/* ============================================================
-   LOAD COMPLETE CLOUD STATE
-   ============================================================ */
 
 export async function loadCloudState() {
   const gym =
@@ -1106,10 +1098,6 @@ export async function loadCloudState() {
   };
 }
 
-/* ============================================================
-   GENERIC INSERT
-   ============================================================ */
-
 export async function insertRecord(
   tableName,
   payload
@@ -1136,10 +1124,6 @@ export async function insertRecord(
 
   return data;
 }
-
-/* ============================================================
-   GENERIC UPDATE
-   ============================================================ */
 
 export async function updateRecord(
   tableName,
@@ -1168,10 +1152,6 @@ export async function updateRecord(
   return data;
 }
 
-/* ============================================================
-   GENERIC DELETE
-   ============================================================ */
-
 export async function deleteRecord(
   tableName,
   id
@@ -1194,10 +1174,6 @@ export async function deleteRecord(
 
   return true;
 }
-
-/* ============================================================
-   SETTINGS
-   ============================================================ */
 
 export async function saveSettings(
   settings
@@ -1293,10 +1269,6 @@ export async function saveSettings(
   return settings;
 }
 
-/* ============================================================
-   PUBLIC QR ATTENDANCE
-   ============================================================ */
-
 export async function publicCheckIn({
   gymId,
   memberNumber,
@@ -1341,12 +1313,13 @@ export async function publicCheckIn({
   return (
     data || {
       success: false,
-
       message:
         'Attendance service returned no response.',
     }
   );
 }
+
+
 /* ============================================================
    PUBLIC CUSTOMER FEEDBACK
    ============================================================ */
