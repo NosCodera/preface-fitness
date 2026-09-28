@@ -43,7 +43,9 @@ import {
   signInOwner,
   signOutOwner,
   getSupabaseSession,
+  getSupabaseUser,
   subscribeToAuthChanges,
+  changeSupabaseCredentials,
 } from './supabaseAuth';
 import { loadCloudState, insertRecord, updateRecord, deleteRecord, saveSettings as saveCloudSettings, publicCheckIn, publicSubmitFeedback } from './cloudData';
 
@@ -122,8 +124,10 @@ function getCheckInUrl(gymId, gymLatitude, gymLongitude) {
   // Keep the permanent QR on the deployed GitHub Pages app and carry the gym identity/location in the QR URL.
   const params = new URLSearchParams();
   params.set('gym', gymId || PRODUCTION_GYM_ID);
-  if (gymLatitude !== '' && gymLongitude !== '' && Number.isFinite(Number(gymLatitude)) && Number.isFinite(Number(gymLongitude))) { params.set('lat', String(gymLatitude)); params.set('lng', String(gymLongitude)); } return `${PRODUCTION_APP_URL}?${params.toString()}#check-in`;
+  if (gymLatitude !== '' && gymLongitude !== '' && Number.isFinite(Number(gymLatitude)) && Number.isFinite(Number(gymLongitude))) { params.set('lat', String(gymLatitude)); params.set('lng', String(gymLongitude)); }
+  return `${PRODUCTION_APP_URL}?${params.toString()}#check-in`;
 }
+
 function getFeedbackUrl(gymId, gymName = 'Preface Fitness') {
   // GitHub Pages serves the SPA from /preface-fitness/. Query parameters
   // must come before the hash so PublicFeedbackPage can read them.
@@ -399,7 +403,6 @@ function App() {
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [storageMode, setStorageMode] = useState('checking');
 
   useEffect(() => {
     let cancelled = false;
@@ -457,9 +460,7 @@ function App() {
         const session = await getSupabaseSession();
 
         if (!cancelled) {
-          const authenticated = Boolean(session?.user);
-          setIsAuthenticated(authenticated);
-          setStorageMode(authenticated ? 'checking' : 'offline');
+          setIsAuthenticated(Boolean(session?.user));
         }
       } catch (error) {
         console.error('Supabase session check failed:', error);
@@ -473,9 +474,7 @@ function App() {
 
       unsubscribeAuth = subscribeToAuthChanges(({ session }) => {
         if (cancelled) return;
-        const authenticated = Boolean(session?.user);
-        setIsAuthenticated(authenticated);
-        setStorageMode(authenticated ? 'checking' : 'offline');
+        setIsAuthenticated(Boolean(session?.user));
       });
     })();
 
@@ -497,32 +496,52 @@ function App() {
 
         setData((current) => ({
           ...current,
-          // Supabase is the source of truth when the owner is authenticated.
-          // Empty cloud collections are intentionally respected instead of
-          // silently falling back to stale browser data.
-          gym: cloud.gym || current.gym,
-          membershipPlans: Array.isArray(cloud.membershipPlans) ? cloud.membershipPlans : [],
-          members: Array.isArray(cloud.members) ? cloud.members : [],
-          leads: Array.isArray(cloud.leads) ? cloud.leads : [],
-          payments: Array.isArray(cloud.payments) ? cloud.payments : [],
-          attendance: Array.isArray(cloud.attendance) ? cloud.attendance : [],
-          trainers: Array.isArray(cloud.trainers) ? cloud.trainers : [],
-          ptSessions: Array.isArray(cloud.ptSessions) ? cloud.ptSessions : [],
-          progressRecords: Array.isArray(cloud.progressRecords) ? cloud.progressRecords : [],
-          workoutPlans: Array.isArray(cloud.workoutPlans) ? cloud.workoutPlans : [],
-          dietPlans: Array.isArray(cloud.dietPlans) ? cloud.dietPlans : [],
-          communicationLogs: Array.isArray(cloud.communicationLogs) ? cloud.communicationLogs : [],
-          feedbacks: Array.isArray(cloud.feedbacks) ? cloud.feedbacks : [],
+          // Only replace a local collection when the cloud actually has
+          // records. This prevents a newly-created/empty cloud database
+          // from wiping the existing local browser data.
+          membershipPlans: cloud.membershipPlans?.length
+            ? cloud.membershipPlans
+            : current.membershipPlans,
+          members: cloud.members?.length
+            ? cloud.members
+            : current.members,
+          leads: cloud.leads?.length
+            ? cloud.leads
+            : current.leads,
+          payments: cloud.payments?.length
+            ? cloud.payments
+            : current.payments,
+          attendance: cloud.attendance?.length
+            ? cloud.attendance
+            : current.attendance,
+          trainers: cloud.trainers?.length
+            ? cloud.trainers
+            : current.trainers,
+          ptSessions: cloud.ptSessions?.length
+            ? cloud.ptSessions
+            : current.ptSessions,
+          progressRecords: cloud.progressRecords?.length
+            ? cloud.progressRecords
+            : current.progressRecords,
+          workoutPlans: cloud.workoutPlans?.length
+            ? cloud.workoutPlans
+            : current.workoutPlans,
+          dietPlans: cloud.dietPlans?.length
+            ? cloud.dietPlans
+            : current.dietPlans,
+          communicationLogs: cloud.communicationLogs?.length
+            ? cloud.communicationLogs
+            : current.communicationLogs,
+          feedbacks: cloud.feedbacks?.length
+            ? cloud.feedbacks
+            : current.feedbacks,
           settings: {
             ...(current.settings || {}),
             ...(cloud.settings || {}),
           },
         }));
-        setStorageMode('cloud');
       } catch (error) {
-        console.error('Supabase cloud state load failed; using local cache:', error);
-        setStorageMode('offline');
-        setToast(error?.message || 'Supabase connection failed. Using local cache.');
+        console.error('Supabase cloud state load failed; keeping local data:', error);
       }
     })();
 
@@ -1610,7 +1629,6 @@ function App() {
     }
 
     setIsAuthenticated(false);
-    setStorageMode('offline');
     setActive('Dashboard');
     setSidebarOpen(false);
     setModal(null);
@@ -1680,23 +1698,9 @@ function App() {
         <div className="sidebar-bottom">
           <button className="nav-item" onClick={openPublicGymPage}><Sparkles size={18} /><span>Public Gym Page</span></button>
           <button className={`nav-item ${active === 'Settings' ? 'active' : ''}`} onClick={() => navigate('Settings')}><Settings size={18} /><span>Settings</span></button>
-
-
-
-
-
           <div className="storage-card">
             <div className="storage-icon"><ShieldCheck size={16} /></div>
-            <div>
-              <strong>{storageMode === 'cloud' ? 'Cloud mode' : storageMode === 'checking' ? 'Connecting…' : 'Offline mode'}</strong>
-              <span>
-                {storageMode === 'cloud'
-                  ? 'Supabase is connected. Cloud database is the source of truth.'
-                  : storageMode === 'checking'
-                    ? 'Connecting to the Preface Fitness cloud database…'
-                    : 'Supabase is unavailable. Changes are currently kept in this browser.'}
-              </span>
-            </div>
+            <div><strong>Local mode</strong><span>Your data is saved in this browser.</span></div>
           </div>
         </div>
       </aside>
@@ -6432,6 +6436,21 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     setNoticeForm({ enabled: Boolean(current.notice?.enabled), text: current.notice?.text || '', priority: current.notice?.priority || 'medium' });
   }, [current.gymName, current.gymAddress, current.gymPhone, current.gymEmail, current.gstin, current.defaultGstRate, current.invoicePrefix, current.referralPointsPerReferral, current.gymLatitude, current.gymLongitude, current.auth?.username, current.auth?.passwordHash]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const user = await getSupabaseUser();
+        if (!cancelled && user?.email) {
+          setAuthForm((form) => ({ ...form, username: user.email }));
+        }
+      } catch (error) {
+        console.error('Unable to read current Supabase user:', error);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const useCurrentLocation = () => {
     if (!navigator.geolocation) return setAuthMessage('This browser does not support location detection.');
     navigator.geolocation.getCurrentPosition(
@@ -6496,23 +6515,20 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
   };
 
   const saveAuthSettings = async () => {
-    const username = authForm.username.trim();
+    const email = authForm.username.trim();
 
-    if (!username) {
-      setAuthMessage('Username cannot be empty.');
+    if (!email) {
+      setAuthMessage('Login email cannot be empty.');
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setAuthMessage('Enter a valid login email address.');
       return;
     }
 
     if (!authForm.currentPassword) {
       setAuthMessage('Enter your current password to make changes.');
-      return;
-    }
-
-    const currentHash = current.auth?.passwordHash || await hashPassword('admin123');
-    const enteredCurrentHash = await hashPassword(authForm.currentPassword);
-
-    if (enteredCurrentHash !== currentHash) {
-      setAuthMessage('Current password is incorrect.');
       return;
     }
 
@@ -6531,23 +6547,45 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
       return;
     }
 
-    const passwordHash = await hashPassword(authForm.newPassword);
+    try {
+      // Re-authenticate with the current Supabase credentials before allowing
+      // an account change. This replaces the old local password-hash check.
+      const currentUser = await getSupabaseUser();
+      const currentEmail = String(currentUser?.email || '').trim();
 
-    setData((d) => ({
-      ...d,
-      settings: {
-        ...(d.settings || {}),
-        auth: { username, passwordHash },
-      },
-    }));
+      if (!currentEmail) {
+        setAuthMessage('Could not determine the current Supabase login email.');
+        return;
+      }
 
-    setAuthForm({
-      username,
-      currentPassword: '',
-      newPassword: '',
-      confirmPassword: '',
-    });
-    setAuthMessage('Login credentials updated successfully.');
+      await signInOwner(currentEmail, authForm.currentPassword);
+
+      await changeSupabaseCredentials({
+        email,
+        password: authForm.newPassword,
+      });
+
+      setData((d) => ({
+        ...d,
+        settings: {
+          ...(d.settings || {}),
+          // Keep only the login email locally. Never store the password or
+          // password hash in browser data. Supabase Auth is the source of truth.
+          auth: { username: email, passwordHash: '' },
+        },
+      }));
+
+      setAuthForm({
+        username: email,
+        currentPassword: '',
+        newPassword: '',
+        confirmPassword: '',
+      });
+      setAuthMessage('Login email and password updated successfully.');
+    } catch (error) {
+      console.error('Supabase credential update failed:', error);
+      setAuthMessage(error?.message || 'Unable to update login credentials.');
+    }
   };
 
 
@@ -6605,12 +6643,12 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
           <div className="card-header">
             <div>
               <h3>Owner login</h3>
-              <p>Change the username and password required to open the app.</p>
+              <p>Change the Supabase login email and password required to open the app.</p>
             </div>
           </div>
 
           <div className="form-grid two">
-            <FormField label="Username">
+            <FormField label="Login email">
               <input
                 value={authForm.username}
                 onChange={(e) => setAuthForm((f) => ({ ...f, username: e.target.value }))}
@@ -6668,7 +6706,7 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
           </button>
 
           <div style={{ marginTop: '12px', fontSize: '12px', color: '#7b8794', lineHeight: 1.5 }}>
-            New installations start with <strong>admin</strong> / <strong>admin123</strong>. Change these from this section after signing in.
+            The login email and password are managed by Supabase Auth. Never store the password in app settings.
           </div>
         </section>
 
