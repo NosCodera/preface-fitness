@@ -43,8 +43,9 @@ import {
   signInOwner,
   signOutOwner,
   getSupabaseSession,
-  getSupabaseUser,
   subscribeToAuthChanges,
+  changeSupabasePassword,
+  changeSupabaseEmail,
   changeSupabaseCredentials,
 } from './supabaseAuth';
 import { loadCloudState, insertRecord, updateRecord, deleteRecord, saveSettings as saveCloudSettings, publicCheckIn, publicSubmitFeedback } from './cloudData';
@@ -120,11 +121,10 @@ function getMembershipStatus(expiry) {
 const PRODUCTION_APP_URL = 'https://noscodera.github.io/preface-fitness/';
 const PRODUCTION_GYM_ID = 'd702119b-3205-46a2-9ee0-294d682ddf14';
 
-function getCheckInUrl(gymId, gymLatitude, gymLongitude) {
-  // Keep the permanent QR on the deployed GitHub Pages app and carry the gym identity/location in the QR URL.
-  const params = new URLSearchParams();
-  params.set('gym', gymId || PRODUCTION_GYM_ID);
-  if (gymLatitude !== '' && gymLongitude !== '' && Number.isFinite(Number(gymLatitude)) && Number.isFinite(Number(gymLongitude))) { params.set('lat', String(gymLatitude)); params.set('lng', String(gymLongitude)); } return `${PRODUCTION_APP_URL}?${params.toString()}#check-in`;
+function getCheckInUrl() {
+  // Keep the permanent QR pointed at the deployed GitHub Pages app.
+  // The hash route is intentionally kept as #check-in.
+  return `${PRODUCTION_APP_URL}#check-in`;
 }
 
 function getFeedbackUrl(gymId, gymName = 'Preface Fitness') {
@@ -388,8 +388,8 @@ async function hashPassword(password) {
 }
 
 function openPublicGymPage() {
-  // Always use the deployed GitHub Pages URL; do not derive it from the current browser origin.
-  const url = `${PRODUCTION_APP_URL}#gym`;
+  const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+  const url = `${window.location.origin}${base}/#gym`;
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
@@ -3147,7 +3147,7 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
 function PublicAttendancePage({ data, setData }) {
   const settings = data.settings || {};
   const params = new URLSearchParams(window.location.search);
-  const gymId = params.get('gym') || data.gym?.id || PRODUCTION_GYM_ID;
+  const gymId = params.get('gym') || data.gym?.id || '';
   const qrGymLat = params.get('lat');
   const qrGymLng = params.get('lng');
 
@@ -6433,9 +6433,6 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     }));
     setAuthMessage('');
     setNoticeForm({ enabled: Boolean(current.notice?.enabled), text: current.notice?.text || '', priority: current.notice?.priority || 'medium' });
-    getSupabaseUser().then((user) => {
-      if (user?.email) setAuthForm((form) => ({ ...form, username: user.email }));
-    }).catch(() => {});
   }, [current.gymName, current.gymAddress, current.gymPhone, current.gymEmail, current.gstin, current.defaultGstRate, current.invoicePrefix, current.referralPointsPerReferral, current.gymLatitude, current.gymLongitude, current.auth?.username, current.auth?.passwordHash]);
 
   const useCurrentLocation = () => {
@@ -6458,7 +6455,7 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     setAuthMessage('Gym location saved.');
   };
 
-  const qrUrl = getCheckInUrl(PRODUCTION_GYM_ID, form.gymLatitude, form.gymLongitude);
+  const qrUrl = getCheckInUrl();
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&data=${encodeURIComponent(qrUrl)}`;
   const feedbackQrUrl = getFeedbackUrl(data.gym?.id || PRODUCTION_GYM_ID, form.gymName || 'Preface Fitness');
   const feedbackQrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&data=${encodeURIComponent(feedbackQrUrl)}`;
@@ -6500,65 +6497,82 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
       setAuthMessage(error?.message || 'Notice saved locally, but cloud save failed.');
     }
   };
-
   const saveAuthSettings = async () => {
-    const username = authForm.username.trim().toLowerCase();
+    const username = String(authForm.username || '').trim();
+    const currentPassword = String(authForm.currentPassword || '');
+    const newPassword = String(authForm.newPassword || '');
+    const confirmPassword = String(authForm.confirmPassword || '');
 
     if (!username) {
-      setAuthMessage('Login email cannot be empty.');
+      setAuthMessage('Username/email is required.');
       return;
     }
 
-    if (!authForm.currentPassword) {
-      setAuthMessage('Enter your current password to make changes.');
+    if (!currentPassword) {
+      setAuthMessage('Enter your current password to verify the change.');
       return;
     }
 
-    if (!authForm.newPassword) {
+    if (!newPassword) {
       setAuthMessage('Enter a new password.');
       return;
     }
 
-    if (authForm.newPassword.length < 6) {
-      setAuthMessage('New password must be at least 6 characters.');
+    if (newPassword.length < 6) {
+      setAuthMessage('New password must be at least 6 characters long.');
       return;
     }
 
-    if (authForm.newPassword !== authForm.confirmPassword) {
+    if (newPassword !== confirmPassword) {
       setAuthMessage('New password and confirmation do not match.');
       return;
     }
 
     try {
-      await changeSupabaseCredentials({
-        email: username,
-        currentPassword: authForm.currentPassword,
-        password: authForm.newPassword,
-      });
+      setAuthMessage('Verifying current credentials...');
 
-      setData((d) => ({
-        ...d,
-        settings: {
-          ...(d.settings || {}),
-          auth: {
-            ...((d.settings || {}).auth || {}),
-            username,
-          },
-        },
-      }));
+      // Re-authenticate before changing credentials so the Settings page
+      // cannot be used to change the account password without knowing the
+      // current password.
+      const session = await getSupabaseSession();
+      const currentEmail = session?.user?.email || '';
 
-      setAuthForm({
-        username,
+      if (!currentEmail) {
+        throw new Error('No authenticated Supabase user was found.');
+      }
+
+      await signInOwner(currentEmail, currentPassword);
+
+      const emailChanged = username.toLowerCase() !== currentEmail.toLowerCase();
+
+      if (emailChanged) {
+        await changeSupabaseCredentials({
+          email: username,
+          password: newPassword,
+        });
+      } else {
+        await changeSupabasePassword(newPassword);
+      }
+
+      setAuthMessage(
+        emailChanged
+          ? 'Login email and password updated successfully. If Supabase email confirmation is enabled, confirm the new email address before using it to sign in.'
+          : 'Password updated successfully.'
+      );
+
+      setAuthForm((form) => ({
+        ...form,
         currentPassword: '',
         newPassword: '',
         confirmPassword: '',
-      });
-      setAuthMessage('Login email and password updated successfully.');
+      }));
+
+      setToast('Login credentials updated successfully');
     } catch (error) {
       console.error('Supabase credential update failed:', error);
       setAuthMessage(error?.message || 'Unable to update login credentials.');
     }
-  };
+  };;
 
 
   return (
@@ -6615,16 +6629,17 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
           <div className="card-header">
             <div>
               <h3>Owner login</h3>
-              <p>Change the Supabase login email (username) and password required to open the app.</p>
+              <p>Change the Supabase login email and password used to open the app.</p>
             </div>
           </div>
 
           <div className="form-grid two">
-            <FormField label="Login email (username)">
+            <FormField label="Login email">
               <input
                 value={authForm.username}
                 onChange={(e) => setAuthForm((f) => ({ ...f, username: e.target.value }))}
                 autoComplete="username"
+                type="email"
               />
             </FormField>
 
@@ -6678,7 +6693,7 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
           </button>
 
           <div style={{ marginTop: '12px', fontSize: '12px', color: '#7b8794', lineHeight: 1.5 }}>
-            This login is managed by Supabase Authentication. Change the email and password here after signing in.
+            Use the email address and password of the currently signed-in Supabase account. Your current password is required before the credentials can be changed.
           </div>
         </section>
 

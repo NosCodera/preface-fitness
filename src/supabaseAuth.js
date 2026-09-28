@@ -76,9 +76,7 @@ export function subscribeToAuthChanges(callback) {
   return () => subscription?.unsubscribe();
 }
 
-/**
- * Change the currently logged-in user's password.
- */
+/* Change the currently logged-in user's password */
 export async function changeSupabasePassword(newPassword) {
   const password = String(newPassword || '');
 
@@ -103,12 +101,7 @@ export async function changeSupabasePassword(newPassword) {
   return data?.user || null;
 }
 
-/**
- * Change the currently logged-in user's email.
- *
- * Depending on Supabase Auth settings, the new email
- * may need to be confirmed before it becomes active.
- */
+/* Change the currently logged-in user's email */
 export async function changeSupabaseEmail(newEmail) {
   const email = String(newEmail || '').trim();
 
@@ -129,9 +122,7 @@ export async function changeSupabaseEmail(newEmail) {
   return data?.user || null;
 }
 
-/**
- * Change the currently logged-in user's email and/or password.
- */
+/* Change email and/or password together */
 export async function changeSupabaseCredentials({
   email,
   password,
@@ -156,17 +147,21 @@ export async function changeSupabaseCredentials({
     const cleanPassword = String(password);
 
     if (cleanPassword.length < 6) {
-      throw new Error('Password must be at least 6 characters long.');
+      throw new Error(
+        'Password must be at least 6 characters long.'
+      );
     }
 
     updates.password = cleanPassword;
   }
 
-  if (!Object.keys(updates).length) {
+  if (Object.keys(updates).length === 0) {
     throw new Error('No account changes were provided.');
   }
 
-  const { data, error } = await supabase.auth.updateUser(updates);
+  const { data, error } = await supabase.auth.updateUser(
+    updates
+  );
 
   if (error) {
     throw new Error(
