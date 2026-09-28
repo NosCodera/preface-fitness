@@ -399,6 +399,7 @@ function App() {
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [storageMode, setStorageMode] = useState('checking');
 
   useEffect(() => {
     let cancelled = false;
@@ -456,7 +457,9 @@ function App() {
         const session = await getSupabaseSession();
 
         if (!cancelled) {
-          setIsAuthenticated(Boolean(session?.user));
+          const authenticated = Boolean(session?.user);
+          setIsAuthenticated(authenticated);
+          setStorageMode(authenticated ? 'checking' : 'offline');
         }
       } catch (error) {
         console.error('Supabase session check failed:', error);
@@ -470,7 +473,9 @@ function App() {
 
       unsubscribeAuth = subscribeToAuthChanges(({ session }) => {
         if (cancelled) return;
-        setIsAuthenticated(Boolean(session?.user));
+        const authenticated = Boolean(session?.user);
+        setIsAuthenticated(authenticated);
+        setStorageMode(authenticated ? 'checking' : 'offline');
       });
     })();
 
@@ -492,52 +497,32 @@ function App() {
 
         setData((current) => ({
           ...current,
-          // Only replace a local collection when the cloud actually has
-          // records. This prevents a newly-created/empty cloud database
-          // from wiping the existing local browser data.
-          membershipPlans: cloud.membershipPlans?.length
-            ? cloud.membershipPlans
-            : current.membershipPlans,
-          members: cloud.members?.length
-            ? cloud.members
-            : current.members,
-          leads: cloud.leads?.length
-            ? cloud.leads
-            : current.leads,
-          payments: cloud.payments?.length
-            ? cloud.payments
-            : current.payments,
-          attendance: cloud.attendance?.length
-            ? cloud.attendance
-            : current.attendance,
-          trainers: cloud.trainers?.length
-            ? cloud.trainers
-            : current.trainers,
-          ptSessions: cloud.ptSessions?.length
-            ? cloud.ptSessions
-            : current.ptSessions,
-          progressRecords: cloud.progressRecords?.length
-            ? cloud.progressRecords
-            : current.progressRecords,
-          workoutPlans: cloud.workoutPlans?.length
-            ? cloud.workoutPlans
-            : current.workoutPlans,
-          dietPlans: cloud.dietPlans?.length
-            ? cloud.dietPlans
-            : current.dietPlans,
-          communicationLogs: cloud.communicationLogs?.length
-            ? cloud.communicationLogs
-            : current.communicationLogs,
-          feedbacks: cloud.feedbacks?.length
-            ? cloud.feedbacks
-            : current.feedbacks,
+          // Supabase is the source of truth when the owner is authenticated.
+          // Empty cloud collections are intentionally respected instead of
+          // silently falling back to stale browser data.
+          gym: cloud.gym || current.gym,
+          membershipPlans: Array.isArray(cloud.membershipPlans) ? cloud.membershipPlans : [],
+          members: Array.isArray(cloud.members) ? cloud.members : [],
+          leads: Array.isArray(cloud.leads) ? cloud.leads : [],
+          payments: Array.isArray(cloud.payments) ? cloud.payments : [],
+          attendance: Array.isArray(cloud.attendance) ? cloud.attendance : [],
+          trainers: Array.isArray(cloud.trainers) ? cloud.trainers : [],
+          ptSessions: Array.isArray(cloud.ptSessions) ? cloud.ptSessions : [],
+          progressRecords: Array.isArray(cloud.progressRecords) ? cloud.progressRecords : [],
+          workoutPlans: Array.isArray(cloud.workoutPlans) ? cloud.workoutPlans : [],
+          dietPlans: Array.isArray(cloud.dietPlans) ? cloud.dietPlans : [],
+          communicationLogs: Array.isArray(cloud.communicationLogs) ? cloud.communicationLogs : [],
+          feedbacks: Array.isArray(cloud.feedbacks) ? cloud.feedbacks : [],
           settings: {
             ...(current.settings || {}),
             ...(cloud.settings || {}),
           },
         }));
+        setStorageMode('cloud');
       } catch (error) {
-        console.error('Supabase cloud state load failed; keeping local data:', error);
+        console.error('Supabase cloud state load failed; using local cache:', error);
+        setStorageMode('offline');
+        setToast(error?.message || 'Supabase connection failed. Using local cache.');
       }
     })();
 
@@ -1625,6 +1610,7 @@ function App() {
     }
 
     setIsAuthenticated(false);
+    setStorageMode('offline');
     setActive('Dashboard');
     setSidebarOpen(false);
     setModal(null);
@@ -1694,9 +1680,23 @@ function App() {
         <div className="sidebar-bottom">
           <button className="nav-item" onClick={openPublicGymPage}><Sparkles size={18} /><span>Public Gym Page</span></button>
           <button className={`nav-item ${active === 'Settings' ? 'active' : ''}`} onClick={() => navigate('Settings')}><Settings size={18} /><span>Settings</span></button>
+
+
+
+
+
           <div className="storage-card">
             <div className="storage-icon"><ShieldCheck size={16} /></div>
-            <div><strong>Local mode</strong><span>Your data is saved in this browser.</span></div>
+            <div>
+              <strong>{storageMode === 'cloud' ? 'Cloud mode' : storageMode === 'checking' ? 'Connecting…' : 'Offline mode'}</strong>
+              <span>
+                {storageMode === 'cloud'
+                  ? 'Supabase is connected. Cloud database is the source of truth.'
+                  : storageMode === 'checking'
+                    ? 'Connecting to the Preface Fitness cloud database…'
+                    : 'Supabase is unavailable. Changes are currently kept in this browser.'}
+              </span>
+            </div>
           </div>
         </div>
       </aside>
