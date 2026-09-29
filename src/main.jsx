@@ -45,7 +45,7 @@ import {
   getSupabaseSession,
   subscribeToAuthChanges,
 } from './supabaseAuth';
-import { loadCloudState, insertRecord, updateRecord, deleteRecord, saveSettings as saveCloudSettings, publicSubmitFeedback } from './cloudData';
+import { loadCloudState, insertRecord, updateRecord, deleteRecord, saveSettings as saveCloudSettings, publicCheckIn, publicSubmitFeedback } from './cloudData';
 
 const LOGO_URL = `${import.meta.env.BASE_URL}preface-logo.jpg`;
 
@@ -116,13 +116,23 @@ function getMembershipStatus(expiry) {
 }
 
 const PRODUCTION_APP_URL = 'https://noscodera.github.io/preface-fitness/';
+const PRODUCTION_GYM_ID = 'd702119b-3205-46a2-9ee0-294d682ddf14';
 
 function getCheckInPath() {
   return `${PRODUCTION_APP_URL.replace(/\/$/, '')}/#check-in`;
 }
 
-function getCheckInUrl() {
-  return `${PRODUCTION_APP_URL.replace(/\/$/, '')}/#check-in`;
+function getCheckInUrl(gymId = PRODUCTION_GYM_ID, gymLat = '', gymLng = '') {
+  const params = new URLSearchParams();
+  if (gymId) params.set('gym', gymId);
+  if (gymLat !== '' && gymLng !== '') {
+    params.set('lat', String(gymLat));
+    params.set('lng', String(gymLng));
+  }
+  const query = params.toString();
+  return query
+    ? `${PRODUCTION_APP_URL}?${query}#check-in`
+    : `${PRODUCTION_APP_URL}#check-in`;
 }
 
 function getFeedbackUrl(gymId, gymName = 'Preface Fitness') {
@@ -409,7 +419,7 @@ function App() {
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [storageMode, setStorageMode] = useState('checking');
+  const [cloudStatus, setCloudStatus] = useState('checking');
 
   useEffect(() => {
     let cancelled = false;
@@ -467,16 +477,13 @@ function App() {
         const session = await getSupabaseSession();
 
         if (!cancelled) {
-          const authenticated = Boolean(session?.user);
-          setIsAuthenticated(authenticated);
-          setStorageMode(authenticated ? 'checking' : 'offline');
+          setIsAuthenticated(Boolean(session?.user));
         }
       } catch (error) {
         console.error('Supabase session check failed:', error);
 
         if (!cancelled) {
           setIsAuthenticated(false);
-          setStorageMode('offline');
         }
       }
 
@@ -484,9 +491,7 @@ function App() {
 
       unsubscribeAuth = subscribeToAuthChanges(({ session }) => {
         if (cancelled) return;
-        const authenticated = Boolean(session?.user);
-        setIsAuthenticated(authenticated);
-        setStorageMode(authenticated ? 'checking' : 'offline');
+        setIsAuthenticated(Boolean(session?.user));
       });
     })();
 
@@ -502,6 +507,7 @@ function App() {
     let cancelled = false;
 
     (async () => {
+      setCloudStatus('checking');
       try {
         const cloud = await loadCloudState();
 
@@ -515,10 +521,10 @@ function App() {
 
         if (cancelled || !cloud) return;
 
-        setStorageMode('cloud');
-
+        setCloudStatus('connected');
         setData((current) => ({
           ...current,
+          gym: cloud.gym || current.gym,
           // Only replace a local collection when the cloud actually has
           // records. This prevents a newly-created/empty cloud database
           // from wiping the existing local browser data.
@@ -564,15 +570,12 @@ function App() {
           },
         }));
       } catch (error) {
+        setCloudStatus('error');
         console.error('===== PREFACE CLOUD LOAD ERROR =====');
         console.error(error);
         console.error(error?.message);
         console.error(error?.stack);
         console.error('====================================');
-        if (!cancelled) {
-          setStorageMode('offline');
-          setToast(error?.message || 'Supabase connection failed. Using local cache.');
-        }
       }
     })();
 
@@ -1660,7 +1663,6 @@ function App() {
     }
 
     setIsAuthenticated(false);
-    setStorageMode('offline');
     setActive('Dashboard');
     setSidebarOpen(false);
     setModal(null);
@@ -1733,13 +1735,15 @@ function App() {
           <div className="storage-card">
             <div className="storage-icon"><ShieldCheck size={16} /></div>
             <div>
-              <strong>{storageMode === 'cloud' ? 'Cloud mode' : storageMode === 'checking' ? 'Connecting…' : 'Offline mode'}</strong>
+              <strong>
+                {cloudStatus === 'connected' ? 'Cloud mode' : cloudStatus === 'checking' ? 'Connecting…' : 'Cloud connection failed'}
+              </strong>
               <span>
-                {storageMode === 'cloud'
-                  ? 'Supabase is connected. Cloud database is the source of truth.'
-                  : storageMode === 'checking'
-                    ? 'Connecting to the Preface Fitness cloud database…'
-                    : 'Supabase is unavailable. Changes are currently kept in this browser.'}
+                {cloudStatus === 'connected'
+                  ? 'Your gym data is connected to Supabase.'
+                  : cloudStatus === 'checking'
+                    ? 'Connecting to Supabase…'
+                    : 'Using local browser data until Supabase reconnects.'}
               </span>
             </div>
           </div>
@@ -3188,15 +3192,24 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
 
 function PublicAttendancePage({ data, setData }) {
   const settings = data.settings || {};
+  const params = new URLSearchParams(window.location.search);
+  const gymId = params.get('gym') || data.gym?.id || PRODUCTION_GYM_ID;
+  const qrGymLat = params.get('lat');
+  const qrGymLng = params.get('lng');
+
+  // The permanent QR carries the gym id + coordinates so the public page
+  // can validate the member's location even though the member is not logged in.
+  const gymLat = Number(qrGymLat ?? settings.gymLatitude);
+  const gymLng = Number(qrGymLng ?? settings.gymLongitude);
+  const hasGymLocation = Number.isFinite(gymLat) && Number.isFinite(gymLng)
+    && String(qrGymLat ?? settings.gymLatitude) !== ''
+    && String(qrGymLng ?? settings.gymLongitude) !== '';
+
   const [memberNumber, setMemberNumber] = useState('');
   const [location, setLocation] = useState(null);
   const [locationStatus, setLocationStatus] = useState('Requesting your location…');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
-
-  const gymLat = Number(settings.gymLatitude);
-  const gymLng = Number(settings.gymLongitude);
-  const hasGymLocation = Number.isFinite(gymLat) && Number.isFinite(gymLng) && settings.gymLatitude !== '' && settings.gymLongitude !== '';
 
   const requestLocation = () => {
     setResult(null);
@@ -3207,11 +3220,17 @@ function PublicAttendancePage({ data, setData }) {
     setLocationStatus('Requesting your location…');
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        setLocation({ latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy });
+        setLocation({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+        });
         setLocationStatus(`Location detected (accuracy ±${Math.round(position.coords.accuracy || 0)} m)`);
       },
       (error) => {
-        const message = error.code === 1 ? 'Location permission was denied. Please allow location access and try again.' : 'Could not detect your location. Please try again.';
+        const message = error.code === 1
+          ? 'Location permission was denied. Please allow location access and try again.'
+          : 'Could not detect your location. Please try again.';
         setLocationStatus(message);
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
@@ -3220,11 +3239,16 @@ function PublicAttendancePage({ data, setData }) {
 
   useEffect(() => { requestLocation(); }, []);
 
-  const markPresent = () => {
+  const markPresent = async () => {
     setResult(null);
     const number = String(memberNumber || '').trim();
+
     if (!number) {
       setResult({ type: 'error', message: 'Enter your member number.' });
+      return;
+    }
+    if (!gymId) {
+      setResult({ type: 'error', message: 'This attendance QR is not linked to a gym.' });
       return;
     }
     if (!hasGymLocation) {
@@ -3243,75 +3267,104 @@ function PublicAttendancePage({ data, setData }) {
       return;
     }
 
-    const member = (data.members || []).find((item) => String(item.attendanceNumber || item.id || '').trim().toLowerCase() === number.toLowerCase());
-    if (!member) {
-      setResult({ type: 'error', message: 'Member number not found.' });
-      return;
-    }
-    if (getMembershipStatus(member.expiry) === 'Expired') {
-      setResult({ type: 'error', message: 'Attendance denied. Your membership has expired.' });
-      return;
-    }
-
-    const already = (data.attendance || []).some((record) => record.memberId === member.id && record.date === today);
-    if (already) {
-      setResult({ type: 'success', message: `${member.name} is already marked present today.` });
-      return;
-    }
-
     setSubmitting(true);
-    const now = new Date();
-    const record = {
-      id: `A-${Date.now()}`,
-      member: member.name,
-      memberId: member.id,
-      memberNumber: member.attendanceNumber || number,
-      date: today,
-      time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      source: 'QR check-in',
-      latitude: location.latitude,
-      longitude: location.longitude,
-      distanceMeters: Math.round(distance),
-    };
+    try {
+      const response = await publicCheckIn({
+        gymId,
+        memberNumber: number,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        gymLatitude: gymLat,
+        gymLongitude: gymLng,
+      });
 
-    setData((current) => ({
-      ...current,
-      attendance: [record, ...(current.attendance || [])],
-      members: (current.members || []).map((item) => item.id === member.id ? { ...item, visits: Number(item.visits || 0) + 1 } : item),
-    }));
-    setSubmitting(false);
-    setResult({ type: 'success', message: `Attendance marked successfully for ${member.name}.` });
-    setMemberNumber('');
+      if (!response?.success) {
+        setResult({ type: 'error', message: response?.message || 'Attendance could not be marked.' });
+        return;
+      }
+
+      if (response?.already_present) {
+        setResult({
+          type: 'warning',
+          message: response?.message || 'Attendance already marked today.',
+        });
+        return;
+      }
+
+      const member = response.member;
+      const now = new Date();
+      const record = {
+        id: response.attendance?.legacy_id || response.attendance?.id || `A-${Date.now()}`,
+        cloudId: response.attendance?.id,
+        member: member?.name || '',
+        memberId: member?.member_code || member?.id || '',
+        memberNumber: member?.attendance_number || number,
+        date: today,
+        time: response.attendance?.check_in_time || now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        source: 'QR check-in',
+        latitude: location.latitude,
+        longitude: location.longitude,
+        distance: Math.round(distance),
+      };
+
+      setData((current) => ({
+        ...current,
+        attendance: [record, ...(current.attendance || [])],
+        members: (current.members || []).map((item) =>
+          item.id === record.memberId
+            ? { ...item, visits: Number(item.visits || 0) + 1 }
+            : item
+        ),
+      }));
+
+      setResult({ type: 'success', message: `${member?.name || 'Member'} — attendance marked successfully.` });
+      setMemberNumber('');
+    } catch (error) {
+      console.error('Public attendance failed:', error);
+      setResult({ type: 'error', message: error?.message || 'Unable to mark attendance.' });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
-    <div className="auth-screen" style={{ padding: '24px', minHeight: '100vh', background: '#f5f8fa' }}>
-      <div className="auth-card" style={{ width: 'min(460px, 100%)' }}>
-        <img src={LOGO_URL} alt="Preface Fitness" className="auth-logo" />
-        <div style={{ marginTop: '8px', textAlign: 'center' }}>
+    <div className="public-checkin-screen">
+      <div className="public-checkin-card">
+        <img src={LOGO_URL} alt="Preface Fitness" className="public-checkin-logo" />
+        <div className="public-checkin-heading">
           <div className="eyebrow">PREFACE FITNESS</div>
           <h2 style={{ margin: '6px 0 8px' }}>Mark Attendance</h2>
-          <p style={{ color: '#718096', fontSize: '14px', lineHeight: 1.5, margin: 0 }}>Scan at the gym entrance and mark your attendance without logging into the owner dashboard.</p>
+          <p style={{ color: '#718096', fontSize: '14px', lineHeight: 1.5, margin: 0 }}>
+            Scan the QR at the gym entrance, enter your member number and allow location access.
+          </p>
         </div>
 
-        <div style={{ marginTop: '22px', padding: '12px 14px', borderRadius: '12px', background: location ? '#f0faf7' : '#fff8ed', border: `1px solid ${location ? '#cfece3' : '#f0dfbf'}`, color: '#53656f', fontSize: '13px' }}>
+        <div className={`public-location-status ${location ? 'is-ready' : 'is-pending'}`}>
           <strong>{location ? '✓ Location detected' : 'Location required'}</strong>
           <div style={{ marginTop: '3px' }}>{locationStatus}</div>
         </div>
 
-        <div style={{ marginTop: '18px' }}>
-          <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#334155', marginBottom: '7px' }}>Member number</label>
-          <input value={memberNumber} onChange={(e) => setMemberNumber(e.target.value.replace(/\D/g, '').slice(0, 8))} onKeyDown={(e) => { if (e.key === 'Enter') markPresent(); }} inputMode="numeric" autoFocus placeholder="e.g. 23" style={{ width: '100%', fontSize: '22px', textAlign: 'center', letterSpacing: '3px', padding: '13px 14px' }} />
+        <div className="public-member-field">
+          <label className="public-member-label">Member number</label>
+          <input
+            value={memberNumber}
+            onChange={(e) => setMemberNumber(e.target.value.replace(/\D/g, '').slice(0, 8))}
+            onKeyDown={(e) => { if (e.key === 'Enter') markPresent(); }}
+            inputMode="numeric"
+            autoFocus
+            placeholder="e.g. 23"
+            className="public-member-input"
+          />
         </div>
 
-        <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '14px', minHeight: '48px' }} onClick={markPresent} disabled={submitting}>
-          <CheckCircle2 size={18} /> {submitting ? 'Marking…' : 'Mark Present'}
+        <button className="btn btn-primary public-submit-button" onClick={markPresent} disabled={submitting}>
+          <CheckCircle2 size={18} /> {submitting ? 'Checking…' : 'Mark Present'}
         </button>
 
-        <button className="link-btn" style={{ width: '100%', justifyContent: 'center', marginTop: '10px' }} onClick={requestLocation}>Refresh location</button>
+        <button className="link-btn public-refresh-button" onClick={requestLocation}>Refresh location</button>
 
         {result && (
-          <div style={{ marginTop: '14px', padding: '13px 14px', borderRadius: '12px', background: result.type === 'success' ? '#f0faf7' : '#fff4f3', border: `1px solid ${result.type === 'success' ? '#cfece3' : '#f2d1ce'}`, color: result.type === 'success' ? '#26735f' : '#a33a32', fontSize: '13px', lineHeight: 1.5 }}>
+          <div className={`public-result ${result.type === 'success' ? 'is-success' : result.type === 'warning' ? 'is-warning' : 'is-error'}`}>
             {result.message}
           </div>
         )}
@@ -5289,7 +5342,7 @@ function openPrintWindow(title, html) {
   const printWindow = window.open('', '_blank', 'width=900,height=800');
   if (!printWindow) return false;
   printWindow.document.open();
-  printWindow.document.write(`<!doctype html><html><head><title>${escapeHtml(title)}</title><meta charset="utf-8"><style>body{margin:0;background:#eef1f4;font-family:Arial,Helvetica,sans-serif;color:#152238}*{box-sizing:border-box}.invoice-page{width:900px;max-width:calc(100vw - 30px);margin:24px auto;background:#fff;box-shadow:0 10px 35px rgba(15,35,60,.10);padding:34px 38px}.invoice-top-rule{height:5px;background:#10233f;margin:-34px -38px 28px}.invoice-header{display:flex;justify-content:space-between;gap:28px;padding-bottom:22px;border-bottom:2px solid #10233f}.brand-row{display:flex;align-items:center;gap:14px}.brand-row img{width:58px;height:58px;object-fit:contain;border:1px solid #e0e5ea;border-radius:9px;padding:4px}.seller-name{font-size:25px;font-weight:800;color:#10233f}.seller-tag{font-size:10px;letter-spacing:.16em;color:#718096;margin-top:3px}.seller-address,.seller-contact,.seller-gstin{font-size:11px;color:#5e6c7b;line-height:1.6}.seller-address{margin-top:12px}.seller-gstin{margin-top:5px}.invoice-meta{text-align:right;min-width:245px}.invoice-title{font-size:24px;font-weight:900;color:#10233f;letter-spacing:.03em}.invoice-status{display:inline-block;margin:7px 0 14px;padding:5px 9px;border-radius:999px;background:#eef7f6;color:#087f76;font-size:9px;font-weight:800;letter-spacing:.08em}.invoice-meta>div:not(.invoice-title):not(.invoice-status){display:flex;justify-content:space-between;gap:18px;font-size:11px;margin-top:6px;color:#6d7a89}.invoice-meta strong{color:#152238}.invoice-parties{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:22px 0}.party-box{border:1px solid #e1e7ed;border-radius:10px;padding:15px;background:#fafbfd;font-size:11px;line-height:1.7;color:#5f6c7a}.party-box strong{display:block;color:#172335;font-size:15px;margin-bottom:4px}.party-label{font-size:9px;font-weight:900;letter-spacing:.12em;color:#758395;margin-bottom:7px}.invoice-table{width:100%;border-collapse:collapse;font-size:10px}.invoice-table th{background:#10233f;color:#fff;text-align:left;padding:10px 9px;font-size:9px;letter-spacing:.04em}.invoice-table td{padding:13px 9px;border-bottom:1px solid #e2e7ec;color:#4f5d6c;vertical-align:top}.invoice-table td strong{display:block;color:#182537;font-size:11px}.invoice-table td small{display:block;color:#8995a3;margin-top:3px}.invoice-table .right{text-align:right}.invoice-lower{display:grid;grid-template-columns:1fr 330px;gap:28px;margin-top:22px}.payment-summary,.amount-summary{border:1px solid #e1e7ed;border-radius:10px;padding:16px}.summary-title{font-size:10px;font-weight:900;letter-spacing:.1em;color:#526274;margin-bottom:10px}.summary-row{display:flex;justify-content:space-between;gap:15px;padding:8px 0;border-bottom:1px solid #edf0f3;font-size:11px;color:#667486}.summary-row strong{color:#172335}.summary-row.grand{border-top:2px solid #10233f;border-bottom:0;margin-top:6px;padding-top:13px;font-size:14px;color:#172335}.summary-row.grand strong{font-size:16px}.payment-chip{display:inline-block;margin-top:13px;background:#f0f7f6;color:#167d75;border-radius:999px;padding:6px 10px;font-size:9px;font-weight:800}.invoice-note{margin-top:18px;padding:11px 13px;background:#f6f8fa;border-left:3px solid #10233f;font-size:10px;color:#596879}.invoice-terms{display:flex;justify-content:space-between;gap:30px;margin-top:22px;padding-top:17px;border-top:1px solid #e1e7ed;font-size:9px;color:#687687;line-height:1.55}.invoice-terms ul{margin:7px 0 0;padding-left:17px}.signature{min-width:190px;text-align:center;padding-top:28px;color:#526274}.signature-line{border-top:1px solid #8995a3;margin:35px 0 7px}.invoice-footer{display:flex;justify-content:space-between;margin-top:22px;padding-top:10px;border-top:1px solid #e1e7ed;font-size:8px;color:#8a95a2}@media(max-width:700px){.invoice-page{padding:20px}.invoice-top-rule{margin:-20px -20px 20px}.invoice-header,.invoice-parties,.invoice-lower,.invoice-terms{grid-template-columns:1fr;display:grid}.invoice-meta{text-align:left}.invoice-meta>div:not(.invoice-title):not(.invoice-status){justify-content:flex-start}.invoice-table{font-size:8px}.invoice-table th,.invoice-table td{padding:7px 5px}}@media print{body{background:#fff}.invoice-page{width:100%;max-width:none;margin:0;box-shadow:none}.no-print{display:none!important}}</style></head><body>${html}<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),350));</script></body></html>`);
+  printWindow.document.write(`<!doctype html><html><head><title>${escapeHtml(title)}</title><meta charset="utf-8"><style>body{margin:0;background:#eef1f4;font-family:Arial,Helvetica,sans-serif;color:#152238}*{box-sizing:border-box}.invoice-page{width:900px;max-width:calc(100vw - 30px);margin:24px auto;background:#fff;box-shadow:0 10px 35px rgba(15,35,60,.10);padding:34px 38px}.invoice-top-rule{height:5px;background:#10233f;margin:-34px -38px 28px}.invoice-header{display:flex;justify-content:space-between;gap:28px;padding-bottom:22px;border-bottom:2px solid #10233f}.brand-row{display:flex;align-items:center;gap:14px}.brand-row img{width:58px;height:58px;object-fit:contain;border:1px solid #e0e5ea;border-radius:9px;padding:4px}.seller-name{font-size:25px;font-weight:800;color:#10233f}.seller-tag{font-size:10px;letter-spacing:.16em;color:#718096;margin-top:3px}.seller-address,.seller-contact,.seller-gstin{font-size:11px;color:#5e6c7b;line-height:1.6}.seller-address{margin-top:12px}.seller-gstin{margin-top:5px}.invoice-meta{text-align:right;min-width:245px}.invoice-title{font-size:24px;font-weight:900;color:#10233f;letter-spacing:.03em}.invoice-status{display:inline-block;margin:7px 0 14px;padding:5px 9px;border-radius:999px;background:#eef7f6;color:#087f76;font-size:9px;font-weight:800;letter-spacing:.08em}.invoice-meta>div:not(.invoice-title):not(.invoice-status){display:flex;justify-content:space-between;gap:18px;font-size:11px;margin-top:6px;color:#6d7a89}.invoice-meta strong{color:#152238}.invoice-parties{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:22px 0}.party-box{border:1px solid #e1e7ed;border-radius:10px;padding:15px;background:#fafbfd;font-size:11px;line-height:1.7;color:#5f6c7a}.party-box strong{display:block;color:#172335;font-size:15px;margin-bottom:4px}.party-label{font-size:9px;font-weight:900;letter-spacing:.12em;color:#758395;margin-bottom:7px}.invoice-table{width:100%;border-collapse:collapse;font-size:10px}.invoice-table th{background:#10233f;color:#fff;text-align:left;padding:10px 9px;font-size:9px;letter-spacing:.04em}.invoice-table td{padding:13px 9px;border-bottom:1px solid #e2e7ec;color:#4f5d6c;vertical-align:top}.invoice-table td strong{display:block;color:#182537;font-size:11px}.invoice-table td small{display:block;color:#8995a3;margin-top:3px}.invoice-table .right{text-align:right}.invoice-lower{display:grid;grid-template-columns:1fr 330px;gap:18px;margin-top:22px}.payment-summary,.amount-summary{border:1px solid #dfe6ed;border-radius:12px;padding:17px 18px;background:#fff;box-shadow:0 4px 16px rgba(15,35,60,.035)}.payment-summary{border-top:3px solid #0f9d8f}.amount-summary{border-top:3px solid #10233f}.summary-title{font-size:9px;font-weight:900;letter-spacing:.14em;color:#647487;margin-bottom:11px;text-transform:uppercase}.summary-row{display:flex;justify-content:space-between;align-items:center;gap:15px;padding:9px 0;border-bottom:1px solid #edf0f3;font-size:10.5px;color:#667486}.summary-row span{color:#657386}.summary-row strong{color:#172335;font-weight:800}.summary-row.grand{border-top:2px solid #10233f;border-bottom:0;margin-top:7px;padding-top:13px;font-size:13px;color:#172335}.summary-row.grand strong{font-size:16px;color:#0b6f68}.payment-chip{display:inline-flex;align-items:center;margin-top:13px;background:#eef8f6;color:#167d75;border:1px solid #d5ebe7;border-radius:999px;padding:6px 10px;font-size:8.5px;font-weight:800;letter-spacing:.02em}.schedule-section{margin-top:18px;border:1px solid #dfe6ed;border-radius:12px;overflow:hidden;background:#fff}.schedule-title{padding:11px 14px;background:#f6f8fa;border-bottom:1px solid #dfe6ed;color:#10233f;font-size:9px;font-weight:900;letter-spacing:.13em;text-transform:uppercase}.schedule-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:9.5px}.schedule-table th{padding:9px 10px;background:#10233f;color:#fff;text-align:left;font-size:8px;font-weight:800;letter-spacing:.04em;text-transform:uppercase}.schedule-table th:nth-child(1){width:26%}.schedule-table th:nth-child(2){width:19%;text-align:right}.schedule-table th:nth-child(3){width:22%}.schedule-table th:nth-child(4){width:33%;text-align:center}.schedule-table td{padding:10px;border-bottom:1px solid #edf0f3;color:#4f5d6c;vertical-align:middle}.schedule-table tr:last-child td{border-bottom:0}.schedule-table td:nth-child(2){text-align:right;font-weight:800;color:#172335}.schedule-table td:nth-child(4){text-align:center}.paid-status,.due-status{display:inline-flex;align-items:center;justify-content:center;min-width:94px;padding:5px 8px;border-radius:999px;font-size:7.5px;font-weight:900;letter-spacing:.06em}.paid-status{background:#eaf7f4;color:#167d75;border:1px solid #cfe9e3}.due-status{background:#fff7e8;color:#93621b;border:1px solid #f0dfbf}.invoice-note{margin-top:16px;padding:12px 14px;background:#f7f9fb;border:1px solid #e1e7ed;border-left:3px solid #0f9d8f;border-radius:0 9px 9px 0;font-size:9.5px;color:#596879;line-height:1.5}.invoice-note strong{color:#344256}.invoice-terms{display:flex;justify-content:space-between;gap:30px;margin-top:20px;padding-top:17px;border-top:1px solid #e1e7ed;font-size:9px;color:#687687;line-height:1.55}.invoice-terms ul{margin:7px 0 0;padding-left:17px}.signature{min-width:190px;text-align:center;padding-top:28px;color:#526274}.signature-line{border-top:1px solid #8995a3;margin:35px 0 7px}.invoice-footer{display:flex;justify-content:space-between;margin-top:20px;padding-top:10px;border-top:1px solid #e1e7ed;font-size:8px;color:#8a95a2}@media(max-width:700px){.invoice-page{padding:20px}.invoice-top-rule{margin:-20px -20px 20px}.invoice-header,.invoice-parties,.invoice-lower,.invoice-terms{grid-template-columns:1fr;display:grid}.invoice-meta{text-align:left}.invoice-meta>div:not(.invoice-title):not(.invoice-status){justify-content:flex-start}.invoice-table{font-size:8px}.invoice-table th,.invoice-table td{padding:7px 5px}.schedule-table{font-size:8px}.schedule-table th,.schedule-table td{padding:7px 6px}.paid-status,.due-status{min-width:76px;font-size:6.5px}}@media print{body{background:#fff}.invoice-page{width:100%;max-width:none;margin:0;box-shadow:none}.no-print{display:none!important}}</style></head><body>${html}<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),350));</script></body></html>`);
   printWindow.document.close();
   return true;
 }
@@ -6413,18 +6466,38 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     );
   };
 
-  const saveGymLocation = () => {
+  const saveGymLocation = async () => {
     const lat = Number(form.gymLatitude);
     const lng = Number(form.gymLongitude);
     if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
       setAuthMessage('Enter valid gym latitude and longitude first.');
       return;
     }
-    setData((d) => ({ ...d, settings: { ...(d.settings || {}), gymLatitude: String(form.gymLatitude).trim(), gymLongitude: String(form.gymLongitude).trim() } }));
-    setAuthMessage('Gym location saved.');
+
+    const locationSettings = {
+      gymLatitude: String(form.gymLatitude).trim(),
+      gymLongitude: String(form.gymLongitude).trim(),
+    };
+
+    setData((d) => ({
+      ...d,
+      settings: { ...(d.settings || {}), ...locationSettings },
+    }));
+
+    try {
+      await saveCloudSettings(locationSettings);
+      setAuthMessage('Gym location saved to the cloud.');
+    } catch (error) {
+      console.error('Supabase gym location save failed:', error);
+      setAuthMessage(error?.message || 'Gym location saved locally, but cloud save failed.');
+    }
   };
 
-  const qrUrl = getCheckInUrl();
+  const qrUrl = getCheckInUrl(
+    data.gym?.id || PRODUCTION_GYM_ID,
+    String(form.gymLatitude || '').trim(),
+    String(form.gymLongitude || '').trim()
+  );
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&data=${encodeURIComponent(qrUrl)}`;
   const feedbackQrUrl = getFeedbackUrl(data.gym?.id || '', form.gymName || 'Preface Fitness');
   const feedbackQrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&data=${encodeURIComponent(feedbackQrUrl)}`;
@@ -6440,15 +6513,27 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     setTimeout(() => printWindow.print(), 250);
   };
 
-  const saveSettings = () => {
+  const saveSettings = async () => {
+    const settingsPatch = {
+      ...form,
+      referralPointsPerReferral: Math.max(0, Number(form.referralPointsPerReferral || 0)),
+    };
+
     setData((d) => ({
       ...d,
       settings: {
         ...(d.settings || {}),
-        ...form,
-        referralPointsPerReferral: Math.max(0, Number(form.referralPointsPerReferral || 0)),
+        ...settingsPatch,
       },
     }));
+
+    try {
+      await saveCloudSettings(settingsPatch);
+      setAuthMessage('Gym settings saved successfully to the cloud.');
+    } catch (error) {
+      console.error('Supabase settings save failed:', error);
+      setAuthMessage(error?.message || 'Settings saved locally, but cloud save failed.');
+    }
   };
 
   const saveNotice = async () => {
