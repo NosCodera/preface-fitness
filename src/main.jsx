@@ -45,7 +45,19 @@ import {
   getSupabaseSession,
   subscribeToAuthChanges,
 } from './supabaseAuth';
-import { loadCloudState, insertRecord, updateRecord, deleteRecord, saveSettings as saveCloudSettings, publicCheckIn, publicSubmitFeedback } from './cloudData';
+import {
+  loadCloudState,
+  insertRecord,
+  updateRecord,
+  deleteRecord,
+  saveSettings as saveCloudSettings,
+  publicCheckIn,
+  publicSubmitFeedback,
+  getMyAccess,
+  getGymStaff,
+  updateStaffPermissions,
+  setStaffActive,
+} from './cloudData';
 
 const LOGO_URL = `${import.meta.env.BASE_URL}preface-logo.jpg`;
 
@@ -53,11 +65,6 @@ const STORAGE_KEY = 'preface-fitness-v1';
 const AUTH_SESSION_KEY = 'preface-fitness-auth-session';
 const AUTH_SESSION_MS = 20 * 60 * 1000;
 const today = new Date().toISOString().slice(0, 10);
-const PUBLIC_ATTENDANCE_DEVICE_LOCK_PREFIX = 'preface-attendance-device-lock-v1';
-
-function getPublicAttendanceDeviceLockKey(gymId) {
-  return `${PUBLIC_ATTENDANCE_DEVICE_LOCK_PREFIX}:${String(gymId || 'unknown')}:${today}`;
-}
 
 const MEMBERSHIP_PLANS = [
   { name: 'Monthly', months: 1, price: 1500, description: 'Flexible month-to-month membership' },
@@ -415,6 +422,38 @@ function openPublicGymPage() {
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
+const STAFF_PERMISSION_DEFINITIONS = [
+  { key: 'dashboard', label: 'Dashboard', description: 'View dashboard and daily overview' },
+  { key: 'performance', label: 'Performance', description: 'View performance analytics' },
+  { key: 'members', label: 'Members', description: 'Add, edit and manage members' },
+  { key: 'leads', label: 'Leads', description: 'Manage enquiries and leads' },
+  { key: 'memberships', label: 'Memberships', description: 'Manage membership renewals and plans' },
+  { key: 'attendance', label: 'Attendance', description: 'View and record attendance' },
+  { key: 'payments', label: 'Payments & Invoices', description: 'Record payments and generate invoices' },
+  { key: 'training', label: 'Training', description: 'Manage workout plans' },
+  { key: 'trainers', label: 'Trainers & PT', description: 'Manage trainers and PT sessions' },
+  { key: 'progress', label: 'Progress', description: 'Manage member progress records' },
+  { key: 'diet', label: 'Diet & Nutrition', description: 'Manage diet plans' },
+  { key: 'communication', label: 'Communication', description: 'Manage member communication' },
+  { key: 'feedback', label: 'Customer Feedback', description: 'View and manage feedback' },
+  { key: 'reports', label: 'Reports', description: 'View reports and business summaries' },
+  { key: 'settings', label: 'Settings', description: 'Change gym settings' },
+];
+
+const DEFAULT_STAFF_PERMISSIONS = Object.fromEntries(
+  STAFF_PERMISSION_DEFINITIONS.map((item) => [
+    item.key,
+    item.key === 'dashboard' ||
+      item.key === 'members' ||
+      item.key === 'attendance' ||
+      item.key === 'payments',
+  ])
+);
+
+const PERMISSION_FOR_PAGE = Object.fromEntries(
+  STAFF_PERMISSION_DEFINITIONS.map((item) => [item.label, item.key])
+);
+
 function App() {
   const [data, setData] = useState(seed);
   const [dbReady, setDbReady] = useState(false);
@@ -425,6 +464,15 @@ function App() {
   const [toast, setToast] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [cloudStatus, setCloudStatus] = useState('checking');
+  const [access, setAccess] = useState({
+    userId: '',
+    gymId: '',
+    role: 'staff',
+    permissions: {},
+  });
+
+  const isOwner = access.role === 'owner';
+  const can = (permission) => isOwner || access.permissions?.[permission] === true;
 
   useEffect(() => {
     let cancelled = false;
@@ -514,6 +562,17 @@ function App() {
     (async () => {
       setCloudStatus('checking');
       try {
+        const currentAccess = await getMyAccess();
+
+        if (cancelled) return;
+
+        setAccess({
+          userId: currentAccess?.userId || '',
+          gymId: currentAccess?.gymId || '',
+          role: currentAccess?.role || 'staff',
+          permissions: currentAccess?.permissions || {},
+        });
+
         const cloud = await loadCloudState();
 
         console.log('===== PREFACE CLOUD LOAD =====');
@@ -1631,21 +1690,27 @@ function App() {
   };
 
   const nav = [
-    { label: 'Dashboard', icon: LayoutDashboard },
-    { label: 'Performance', icon: BarChart3 },
-    { label: 'Members', icon: Users },
-    { label: 'Leads', icon: Target },
-    { label: 'Memberships', icon: ShieldCheck },
-    { label: 'Attendance', icon: CheckCircle2 },
-    { label: 'Payments', icon: CreditCard },
-    { label: 'Training', icon: Dumbbell },
-    { label: 'Trainers & PT', icon: Users },
-  { label: 'Progress', icon: TrendingUp },
-    { label: 'Diet & Nutrition', icon: Target },
-    { label: 'Communication', icon: MessageCircle },
-    { label: 'Customer Feedback', icon: MessageCircle },
-    { label: 'Reports', icon: ClipboardList },
+    { label: 'Dashboard', icon: LayoutDashboard, permission: 'dashboard' },
+    { label: 'Performance', icon: BarChart3, permission: 'performance' },
+    { label: 'Members', icon: Users, permission: 'members' },
+    { label: 'Leads', icon: Target, permission: 'leads' },
+    { label: 'Memberships', icon: ShieldCheck, permission: 'memberships' },
+    { label: 'Attendance', icon: CheckCircle2, permission: 'attendance' },
+    { label: 'Payments', icon: CreditCard, permission: 'payments' },
+    { label: 'Training', icon: Dumbbell, permission: 'training' },
+    { label: 'Trainers & PT', icon: Users, permission: 'trainers' },
+    { label: 'Progress', icon: TrendingUp, permission: 'progress' },
+    { label: 'Diet & Nutrition', icon: Target, permission: 'diet' },
+    { label: 'Communication', icon: MessageCircle, permission: 'communication' },
+    { label: 'Customer Feedback', icon: MessageCircle, permission: 'feedback' },
+    { label: 'Reports', icon: ClipboardList, permission: 'reports' },
+    { label: 'Settings', icon: Settings, permission: 'settings' },
+    ...(isOwner ? [{ label: 'Staff Access', icon: Users, permission: 'staff-access' }] : []),
   ];
+
+  const visibleNav = nav.filter((item) =>
+    item.permission === 'staff-access' ? isOwner : can(item.permission)
+  );
 
   const filteredMembers = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -1654,10 +1719,34 @@ function App() {
   }, [data.members, query]);
 
   const navigate = (label) => {
+    const requiredPermission = PERMISSION_FOR_PAGE[label];
+
+    if (!isOwner && requiredPermission && !can(requiredPermission)) {
+      setToast('You do not have access to this section.');
+      return;
+    }
+
+    if (label === 'Staff Access' && !isOwner) {
+      setToast('You do not have access to this section.');
+      return;
+    }
+
     setActive(label);
     setQuery('');
     setSidebarOpen(false);
   };
+
+  useEffect(() => {
+    if (!isAuthenticated || isOwner) return;
+
+    const requiredPermission = PERMISSION_FOR_PAGE[active];
+
+    if (requiredPermission && !can(requiredPermission)) {
+      const fallback = can('dashboard') ? 'Dashboard' : visibleNav[0]?.label;
+      if (fallback && fallback !== active) setActive(fallback);
+    }
+  }, [active, isAuthenticated, isOwner, access]);
+
 
   const logout = async () => {
     try {
@@ -1704,6 +1793,9 @@ function App() {
     );
   }
 
+  const activePermission = PERMISSION_FOR_PAGE[active];
+  const activeAllowed = isOwner || active === 'Staff Access' || !activePermission || can(activePermission);
+
   return (
     <div className="app-shell">
       <aside
@@ -1728,7 +1820,7 @@ function App() {
         </div>
         <div className="nav-section-title">MAIN MENU</div>
         <nav>
-          {nav.map(({ label, icon: Icon }) => (
+          {visibleNav.map(({ label, icon: Icon }) => (
             <button key={label} className={`nav-item ${active === label ? 'active' : ''}`} onClick={() => navigate(label)}>
               <Icon size={18} strokeWidth={2} /><span>{label}</span>
             </button>
@@ -1736,7 +1828,6 @@ function App() {
         </nav>
         <div className="sidebar-bottom">
           <button className="nav-item" onClick={openPublicGymPage}><Sparkles size={18} /><span>Public Gym Page</span></button>
-          <button className={`nav-item ${active === 'Settings' ? 'active' : ''}`} onClick={() => navigate('Settings')}><Settings size={18} /><span>Settings</span></button>
           <div className="storage-card">
             <div className="storage-icon"><ShieldCheck size={16} /></div>
             <div>
@@ -1766,7 +1857,7 @@ function App() {
           <div className="topbar-actions">
             <button className="icon-btn" title="Logout" onClick={logout}><LogOut size={18} /></button>
             <button className="icon-btn" title="Notifications"><Bell size={19} /><span className="notification-dot" /></button>
-            <div className="admin-chip"><div className="avatar">A</div><div><strong>Administrator</strong><span>Owner</span></div><ChevronDown size={15} /></div>
+            <div className="admin-chip"><div className="avatar">{isOwner ? 'O' : 'S'}</div><div><strong>{isOwner ? 'Administrator' : 'Staff Member'}</strong><span>{isOwner ? 'Owner' : 'Staff'}</span></div><ChevronDown size={15} /></div>
           </div>
         </header>
 
@@ -1779,6 +1870,17 @@ function App() {
         )}
 
         <div className="content">
+          {!activeAllowed ? (
+            <section className="card">
+              <div className="card-header">
+                <div>
+                  <h3>Access restricted</h3>
+                  <p>Your staff account does not have permission to open this section.</p>
+                </div>
+              </div>
+            </section>
+          ) : (
+            <>
           {active === 'Performance' && <PerformancePage data={data} />}
           {active === 'Dashboard' && <Dashboard {...{ activeMembers, expiringMembers, overdue, revenue, data, navigate, setModal, markAttendance }} />}
           {active === 'Members' && <MembersPage members={data.members} query={query} setQuery={setQuery} setModal={setModal} markAttendance={markAttendance} deleteMember={deleteMember} settings={data.settings || {}} payments={data.payments || []} />}
@@ -1793,6 +1895,7 @@ function App() {
           {active === 'Communication' && <CommunicationPage members={data.members} logs={data.communicationLogs || []} setModal={setModal} deleteCommunicationLog={deleteCommunicationLog} />}
           {active === 'Customer Feedback' && <FeedbackPage feedbacks={data.feedbacks || []} members={data.members || []} setModal={setModal} deleteFeedback={deleteFeedback} />}
           {active === 'Reports' && <ReportsPage data={data} revenue={revenue} />}
+          {active === 'Staff Access' && isOwner && <StaffAccessPage />}
           {active === 'Settings' && <SettingsPage exportBackup={exportBackup} importBackup={importBackup} data={data} setData={setData} dbReady={dbReady} resetData={() => {
             if (window.confirm('Reset the local Preface Fitness database to demo data?')) {
               const auth = data.settings?.auth;
@@ -1805,6 +1908,8 @@ function App() {
               });
             }
           }} />}
+            </>
+          )}
         </div>
       </main>
 
@@ -2011,7 +2116,7 @@ function LoginScreen({ onLogin }) {
               marginBottom: '8px',
             }}
           >
-            OWNER LOGIN
+            SECURE LOGIN
           </div>
 
           <h1
@@ -3216,6 +3321,27 @@ function PublicAttendancePage({ data, setData }) {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
 
+  // One public attendance submission per device, per gym, per calendar day.
+  // This prevents the same phone/browser from being passed around to mark
+  // attendance for multiple members on the same day.
+  const deviceAttendanceKey = `preface-attendance-lock:${gymId || 'unknown'}:${today}`;
+  const getDeviceAttendanceLock = () => {
+    try {
+      const raw = localStorage.getItem(deviceAttendanceKey);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  };
+  const setDeviceAttendanceLock = (payload) => {
+    try {
+      localStorage.setItem(deviceAttendanceKey, JSON.stringify(payload));
+    } catch {
+      // Attendance has already been accepted by the server; storage failure
+      // should not turn a successful check-in into an error.
+    }
+  };
+
   const requestLocation = () => {
     setResult(null);
     if (!navigator.geolocation) {
@@ -3252,6 +3378,17 @@ function PublicAttendancePage({ data, setData }) {
       setResult({ type: 'error', message: 'Enter your member number.' });
       return;
     }
+
+    const existingDeviceCheckIn = getDeviceAttendanceLock();
+    if (existingDeviceCheckIn) {
+      const checkedInMember = existingDeviceCheckIn.memberName || existingDeviceCheckIn.memberNumber || 'a member';
+      setResult({
+        type: 'warning',
+        message: `Attendance has already been marked from this device today for ${checkedInMember}. Only one attendance can be marked from one device per day.`,
+      });
+      return;
+    }
+
     if (!gymId) {
       setResult({ type: 'error', message: 'This attendance QR is not linked to a gym.' });
       return;
@@ -3270,20 +3407,6 @@ function PublicAttendancePage({ data, setData }) {
     if (distance > 50) {
       setResult({ type: 'error', message: `Attendance denied. You are approximately ${Math.round(distance)} m from the gym. You must be within 50 m.` });
       return;
-    }
-
-    // One successful public attendance check-in per browser/device per gym per day.
-    // This prevents the same phone/browser from being used to mark multiple
-    // members present on the same day. The existing server-side member/day
-    // protection remains in place as an additional safeguard.
-    const deviceLockKey = getPublicAttendanceDeviceLockKey(gymId);
-    try {
-      if (window.localStorage.getItem(deviceLockKey) === '1') {
-        setResult({ type: 'warning', message: 'Attendance already marked on this device today.' });
-        return;
-      }
-    } catch (storageError) {
-      console.warn('Attendance device lock storage unavailable:', storageError);
     }
 
     setSubmitting(true);
@@ -3336,11 +3459,12 @@ function PublicAttendancePage({ data, setData }) {
         ),
       }));
 
-      try {
-        window.localStorage.setItem(deviceLockKey, '1');
-      } catch (storageError) {
-        console.warn('Unable to persist attendance device lock:', storageError);
-      }
+      setDeviceAttendanceLock({
+        memberNumber: number,
+        memberName: member?.name || '',
+        memberId: member?.member_code || member?.id || '',
+        markedAt: new Date().toISOString(),
+      });
 
       setResult({ type: 'success', message: `${member?.name || 'Member'} — attendance marked successfully.` });
       setMemberNumber('');
@@ -6431,6 +6555,223 @@ function PublicFeedbackPage() {
 
         <div className="public-feedback-footer">{gymName} · Your feedback is submitted securely to the gym management system.</div>
       </div>
+    </div>
+  );
+}
+
+function StaffAccessPage() {
+  const [staff, setStaff] = useState([]);
+  const [selectedStaffId, setSelectedStaffId] = useState('');
+  const [permissions, setPermissions] = useState(DEFAULT_STAFF_PERMISSIONS);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  const loadStaff = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const rows = await getGymStaff();
+      setStaff(rows);
+      if (rows.length) {
+        const first = rows[0];
+        setSelectedStaffId(first.user_id);
+        setPermissions({ ...DEFAULT_STAFF_PERMISSIONS, ...(first.permissions || {}) });
+      } else {
+        setSelectedStaffId('');
+        setPermissions(DEFAULT_STAFF_PERMISSIONS);
+      }
+    } catch (err) {
+      setError(err?.message || 'Unable to load staff accounts.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadStaff();
+  }, []);
+
+  const selectedStaff = staff.find((item) => item.user_id === selectedStaffId);
+
+  const handleStaffChange = (userId) => {
+    setSelectedStaffId(userId);
+    const selected = staff.find((item) => item.user_id === userId);
+    setPermissions({
+      ...DEFAULT_STAFF_PERMISSIONS,
+      ...(selected?.permissions || {}),
+    });
+    setMessage('');
+    setError('');
+  };
+
+  const togglePermission = (key) => {
+    setPermissions((current) => ({
+      ...current,
+      [key]: !current[key],
+    }));
+  };
+
+  const setAllPermissions = (value) => {
+    setPermissions(
+      Object.fromEntries(
+        STAFF_PERMISSION_DEFINITIONS.map((item) => [item.key, value])
+      )
+    );
+  };
+
+  const savePermissions = async () => {
+    if (!selectedStaffId) return;
+    setSaving(true);
+    setMessage('');
+    setError('');
+    try {
+      await updateStaffPermissions(selectedStaffId, permissions);
+      setStaff((current) => current.map((item) => (
+        item.user_id === selectedStaffId
+          ? { ...item, permissions }
+          : item
+      )));
+      setMessage('Permissions saved successfully.');
+    } catch (err) {
+      setError(err?.message || 'Unable to save permissions.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleStaffStatus = async () => {
+    if (!selectedStaff) return;
+    const nextStatus = !selectedStaff.is_active;
+    setMessage('');
+    setError('');
+    try {
+      await setStaffActive(selectedStaff.user_id, nextStatus);
+      setStaff((current) => current.map((item) => (
+        item.user_id === selectedStaff.user_id
+          ? { ...item, is_active: nextStatus }
+          : item
+      )));
+      setMessage(nextStatus ? 'Staff account enabled.' : 'Staff account disabled.');
+    } catch (err) {
+      setError(err?.message || 'Unable to update staff status.');
+    }
+  };
+
+  if (loading) {
+    return (
+      <div>
+        <div className="page-header">
+          <div>
+            <h1>Staff Access</h1>
+            <p>Loading staff accounts...</p>
+          </div>
+        </div>
+        <section className="card">
+          <div style={{ padding: '24px', color: '#718096' }}>Loading...</div>
+        </section>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="page-header">
+        <div>
+          <h1>Staff Access</h1>
+          <p>Choose which sections each staff member can access.</p>
+        </div>
+      </div>
+
+      {error && (
+        <div style={{ marginBottom: '16px', padding: '12px 14px', borderRadius: '10px', background: '#fff4f4', border: '1px solid #ffd7d7', color: '#b83240' }}>
+          {error}
+        </div>
+      )}
+
+      {staff.length === 0 ? (
+        <section className="card">
+          <div className="card-header">
+            <div>
+              <h3>No staff accounts found</h3>
+              <p>Create a new user in Supabase Authentication and add it to <strong>gym_users</strong> with role <strong>staff</strong>.</p>
+            </div>
+          </div>
+        </section>
+      ) : (
+        <>
+          <section className="card" style={{ marginBottom: '18px' }}>
+            <div className="card-header">
+              <div>
+                <h3>Select staff member</h3>
+                <p>Permissions below apply only to the selected staff account.</p>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <select
+                value={selectedStaffId}
+                onChange={(event) => handleStaffChange(event.target.value)}
+                style={{ minWidth: '320px', maxWidth: '100%', height: '42px', border: '1px solid #dce5ea', borderRadius: '10px', padding: '0 12px', background: '#fff', color: '#203246' }}
+              >
+                {staff.map((item) => (
+                  <option key={item.user_id} value={item.user_id}>
+                    {item.email}
+                  </option>
+                ))}
+              </select>
+              <span style={{ fontSize: '13px', fontWeight: 700, color: selectedStaff?.is_active ? '#16736e' : '#b83240' }}>
+                {selectedStaff?.is_active ? 'Active' : 'Disabled'}
+              </span>
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="card-header">
+              <div>
+                <h3>Feature access</h3>
+                <p>Turn sections on or off for this staff member.</p>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button className="btn btn-secondary" type="button" onClick={() => setAllPermissions(true)}>Allow all</button>
+                <button className="btn btn-secondary" type="button" onClick={() => setAllPermissions(false)}>Remove all</button>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '10px' }}>
+              {STAFF_PERMISSION_DEFINITIONS.map((item) => (
+                <label key={item.key} style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', padding: '14px', border: '1px solid #e5ebef', borderRadius: '12px', cursor: 'pointer', background: permissions[item.key] ? '#f7fbfa' : '#fff' }}>
+                  <input
+                    type="checkbox"
+                    checked={permissions[item.key] === true}
+                    onChange={() => togglePermission(item.key)}
+                    style={{ marginTop: '3px' }}
+                  />
+                  <span>
+                    <strong style={{ display: 'block', color: '#203246', marginBottom: '4px' }}>{item.label}</strong>
+                    <span style={{ display: 'block', fontSize: '12px', lineHeight: 1.45, color: '#718096' }}>{item.description}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '20px' }}>
+              <button className="btn btn-primary" type="button" onClick={savePermissions} disabled={saving || !selectedStaffId}>
+                {saving ? 'Saving...' : 'Save permissions'}
+              </button>
+              <button className="btn btn-secondary" type="button" onClick={toggleStaffStatus} disabled={!selectedStaffId}>
+                {selectedStaff?.is_active ? 'Disable staff' : 'Enable staff'}
+              </button>
+            </div>
+
+            {message && (
+              <div style={{ marginTop: '14px', padding: '11px 13px', borderRadius: '10px', background: '#f1faf8', border: '1px solid #d6eee9', color: '#16736e', fontSize: '13px' }}>
+                {message}
+              </div>
+            )}
+          </section>
+        </>
+      )}
     </div>
   );
 }

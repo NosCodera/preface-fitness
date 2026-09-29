@@ -87,10 +87,7 @@ async function getGymId() {
   return gym.id;
 }
 
-async function selectTable(
-  tableName,
-  gymId
-) {
+async function selectTable(tableName, gymId) {
   const {
     data,
     error,
@@ -110,207 +107,111 @@ async function selectTable(
   return data || [];
 }
 
-const memberByCloudId = (
-  members,
-  id
-) =>
-  members.find(
-    (m) => m.cloudId === id
-  );
+const memberByCloudId = (members, id) =>
+  members.find((m) => m.cloudId === id);
 
-const memberByUiId = (
-  members,
-  id
-) =>
-  members.find(
-    (m) => m.id === id
-  );
+const memberByUiId = (members, id) =>
+  members.find((m) => m.id === id);
 
-const trainerByCloudId = (
-  trainers,
-  id
-) =>
-  trainers.find(
-    (t) => t.cloudId === id
-  );
+const trainerByCloudId = (trainers, id) =>
+  trainers.find((t) => t.cloudId === id);
 
 function mapMembershipPlan(row) {
   return {
     id: row.id,
     cloudId: row.id,
-
-    name:
-      row.name || '',
-
-    months:
-      Number(row.months || 0),
-
-    price:
-      Number(row.price || 0),
-
-    description:
-      row.description || '',
+    name: row.name || '',
+    months: Number(row.months || 0),
+    price: Number(row.price || 0),
+    description: row.description || '',
   };
 }
 
 function mapMember(row) {
   return {
-    id:
-      row.member_code ||
-      row.id,
+    id: row.member_code || row.id,
+    cloudId: row.id,
 
-    cloudId:
-      row.id,
+    name: row.name || '',
+    phone: row.phone || '',
+    email: row.email || '',
 
-    name:
-      row.name || '',
+    dob: row.dob || '',
+    birthday: row.dob || '',
+    gender: row.gender || '',
+    address: row.address || '',
+    emergencyContact: row.emergency_contact || '',
 
-    phone:
-      row.phone || '',
+    plan: row.plan_name || '',
+    start: row.start_date || '',
+    expiry: row.expiry_date || '',
+    status: row.status || 'Active',
 
-    email:
-      row.email || '',
+    visits: Number(row.visits || 0),
 
-    dob:
-      row.dob ||
-      row.date_of_birth ||
-      '',
+    due: Number(
+      row.due_amount ??
+      row.due ??
+      0
+    ),
 
-    birthday:
-      row.dob ||
-      row.date_of_birth ||
-      '',
+    amount: Number(
+      row.membership_amount ??
+      row.amount ??
+      0
+    ),
 
-    gender:
-      row.gender || '',
+    paid: Number(
+      row.paid_amount ??
+      row.paid ??
+      0
+    ),
 
-    address:
-      row.address || '',
+    height: row.height || '',
+    weight: row.weight || '',
+    currentWeight: row.weight || '',
+    bodyFat: row.body_fat || '',
+    trainer: row.trainer_name || '',
 
-    emergencyContact:
-      row.emergency_contact || '',
+    referral: row.referral_source || '',
+    notes: row.notes || '',
+    photo: row.photo || '',
+    dietPreference: row.diet_preference || '',
+    attendanceNumber: row.attendance_number || '',
 
-    plan:
-      row.plan_name || '',
-
-    start:
-      row.start_date || '',
-
-    expiry:
-      row.expiry_date || '',
-
-    status:
-      row.status || 'Active',
-
-    visits:
-      Number(row.visits || 0),
-
-    due:
-      Number(
-        row.due_amount ??
-        row.due ??
-        0
-      ),
-
-    amount:
-      Number(
-        row.membership_amount ??
-        row.amount ??
-        0
-      ),
-
-    paid:
-      Number(
-        row.paid_amount ??
-        row.paid ??
-        0
-      ),
-
-    height:
-      row.height || '',
-
-    weight:
-      row.weight || '',
-
-    currentWeight:
-      row.weight || '',
-
-    bodyFat:
-      row.body_fat || '',
-
-    trainer:
-      row.trainer_name || '',
-
-    referral:
-      row.referral_source || '',
-
-    notes:
-      row.notes || '',
-
-    photo:
-      row.photo || '',
-
-    dietPreference:
-      row.diet_preference || '',
-
-    attendanceNumber:
-      row.attendance_number || '',
-
-    referralPoints:
-      Number(
-        row.referral_points || 0
-      ),
+    referralPoints: Number(
+      row.referral_points || 0
+    ),
 
     referredBy:
       row.referred_by_member_code ||
       row.referred_by_member_id ||
       '',
 
-    referredClients:
-      Number(
-        row.referred_clients || 0
-      ),
+    referredClients: Number(
+      row.referred_clients || 0
+    ),
 
-    createdAt:
-      row.created_at || '',
+    createdAt: row.created_at || '',
   };
 }
 
 function mapLead(row) {
   return {
-    id:
-      row.legacy_id ||
-      row.id,
+    id: row.legacy_id || row.id,
+    cloudId: row.id,
 
-    cloudId:
-      row.id,
+    name: row.name || '',
+    phone: row.phone || '',
+    email: row.email || '',
 
-    name:
-      row.name || '',
+    source: row.source || '',
+    stage: row.stage || 'New',
 
-    phone:
-      row.phone || '',
-
-    email:
-      row.email || '',
-
-    source:
-      row.source || '',
-
-    stage:
-      row.stage || 'New',
-
-    followUp:
-      row.follow_up_date || '',
-
-    interestedPlan:
-      row.interested_plan || '',
-
-    notes:
-      row.notes || '',
-
-    lastContact:
-      row.last_contact || '',
+    followUp: row.follow_up_date || '',
+    interestedPlan: row.interested_plan || '',
+    notes: row.notes || '',
+    lastContact: row.last_contact || '',
 
     convertedMemberId:
       row.converted_member_code || '',
@@ -320,113 +221,86 @@ function mapLead(row) {
   };
 }
 
-function mapPayment(
-  row,
-  members
-) {
-  const member =
-    memberByCloudId(
-      members,
-      row.member_id
-    );
+function mapPayment(row, members) {
+  const member = memberByCloudId(
+    members,
+    row.member_id
+  );
 
   return {
-    id:
-      row.legacy_id ||
-      row.id,
+    id: row.legacy_id || row.id,
+    cloudId: row.id,
 
-    cloudId:
-      row.id,
+    memberId: member?.id || '',
+    member: member?.name || '',
 
-    memberId:
-      member?.id || '',
-
-    member:
-      member?.name || '',
-
-    amount:
-      Number(row.amount || 0),
+    amount: Number(
+      row.amount || 0
+    ),
 
     type:
       row.payment_type ||
       'Membership',
 
     mode:
-      row.payment_mode || '',
+      row.payment_mode ||
+      '',
 
     date:
-      row.payment_date || '',
+      row.payment_date ||
+      '',
 
     notes:
-      row.notes || '',
+      row.notes ||
+      '',
 
     invoiceNumber:
-      row.invoice_number || '',
+      row.invoice_number ||
+      '',
 
     gstApplicable:
-      Boolean(
-        row.gst_applicable
-      ),
+      Boolean(row.gst_applicable),
 
     gstRate:
-      Number(
-        row.gst_rate || 0
-      ),
+      Number(row.gst_rate || 0),
 
     taxableAmount:
-      Number(
-        row.taxable_amount || 0
-      ),
+      Number(row.taxable_amount || 0),
 
     cgstAmount:
-      Number(
-        row.cgst_amount || 0
-      ),
+      Number(row.cgst_amount || 0),
 
     sgstAmount:
-      Number(
-        row.sgst_amount || 0
-      ),
+      Number(row.sgst_amount || 0),
 
     invoiceAmount:
-      Number(
-        row.invoice_amount || 0
-      ),
+      Number(row.invoice_amount || 0),
 
     paidAmountAtInvoice:
       Number(
-        row.paid_amount_at_invoice ||
-        0
+        row.paid_amount_at_invoice || 0
       ),
 
     balanceAtInvoice:
       Number(
-        row.balance_at_invoice ||
-        0
+        row.balance_at_invoice || 0
       ),
 
     description:
-      row.description || '',
+      row.description ||
+      '',
   };
 }
 
-function mapAttendance(
-  row,
-  members
-) {
-  const member =
-    memberByCloudId(
-      members,
-      row.member_id
-    );
+function mapAttendance(row, members) {
+  const member = memberByCloudId(
+    members,
+    row.member_id
+  );
 
   return {
-    id:
-      row.legacy_id ||
-      row.id,
-
-    cloudId:
-      row.id,
+    id: row.legacy_id || row.id,
+    cloudId: row.id,
 
     memberId:
       member?.id || '',
@@ -447,8 +321,7 @@ function mapAttendance(
       row.longitude ?? null,
 
     distance:
-      row.distance_meters ??
-      null,
+      row.distance_meters ?? null,
 
     source:
       row.source || 'Manual',
@@ -457,12 +330,8 @@ function mapAttendance(
 
 function mapTrainer(row) {
   return {
-    id:
-      row.legacy_id ||
-      row.id,
-
-    cloudId:
-      row.id,
+    id: row.legacy_id || row.id,
+    cloudId: row.id,
 
     name:
       row.name || '',
@@ -474,17 +343,13 @@ function mapTrainer(row) {
       row.specialization || '',
 
     experience:
-      Number(
-        row.experience || 0
-      ),
+      Number(row.experience || 0),
 
     status:
       row.status || 'Active',
 
     monthlySalary:
-      Number(
-        row.monthly_salary || 0
-      ),
+      Number(row.monthly_salary || 0),
 
     notes:
       row.notes || '',
@@ -496,25 +361,19 @@ function mapPTSession(
   members,
   trainers
 ) {
-  const member =
-    memberByCloudId(
-      members,
-      row.member_id
-    );
+  const member = memberByCloudId(
+    members,
+    row.member_id
+  );
 
-  const trainer =
-    trainerByCloudId(
-      trainers,
-      row.trainer_id
-    );
+  const trainer = trainerByCloudId(
+    trainers,
+    row.trainer_id
+  );
 
   return {
-    id:
-      row.legacy_id ||
-      row.id,
-
-    cloudId:
-      row.id,
+    id: row.legacy_id || row.id,
+    cloudId: row.id,
 
     memberId:
       member?.id || '',
@@ -541,9 +400,7 @@ function mapPTSession(
       row.start_time || '',
 
     duration:
-      Number(
-        row.duration_minutes || 0
-      ),
+      Number(row.duration_minutes || 0),
 
     type:
       row.session_type ||
@@ -554,14 +411,10 @@ function mapPTSession(
       'Scheduled',
 
     fee:
-      Number(
-        row.amount || 0
-      ),
+      Number(row.amount || 0),
 
     amount:
-      Number(
-        row.amount || 0
-      ),
+      Number(row.amount || 0),
 
     notes:
       row.notes || '',
@@ -572,19 +425,14 @@ function mapProgressRecord(
   row,
   members
 ) {
-  const member =
-    memberByCloudId(
-      members,
-      row.member_id
-    );
+  const member = memberByCloudId(
+    members,
+    row.member_id
+  );
 
   return {
-    id:
-      row.legacy_id ||
-      row.id,
-
-    cloudId:
-      row.id,
+    id: row.legacy_id || row.id,
+    cloudId: row.id,
 
     memberId:
       member?.id || '',
@@ -632,20 +480,15 @@ function mapWorkoutPlan(
   row,
   members
 ) {
-  const ids =
-    Array.isArray(
-      row.assigned_member_ids
-    )
-      ? row.assigned_member_ids
-      : [];
+  const ids = Array.isArray(
+    row.assigned_member_ids
+  )
+    ? row.assigned_member_ids
+    : [];
 
   return {
-    id:
-      row.legacy_id ||
-      row.id,
-
-    cloudId:
-      row.id,
+    id: row.legacy_id || row.id,
+    cloudId: row.id,
 
     name:
       row.name || '',
@@ -657,9 +500,7 @@ function mapWorkoutPlan(
       row.level || '',
 
     durationWeeks:
-      Number(
-        row.duration_weeks || 0
-      ),
+      Number(row.duration_weeks || 0),
 
     trainer:
       row.trainer_name || '',
@@ -690,20 +531,15 @@ function mapDietPlan(
   row,
   members
 ) {
-  const ids =
-    Array.isArray(
-      row.assigned_member_ids
-    )
-      ? row.assigned_member_ids
-      : [];
+  const ids = Array.isArray(
+    row.assigned_member_ids
+  )
+    ? row.assigned_member_ids
+    : [];
 
   return {
-    id:
-      row.legacy_id ||
-      row.id,
-
-    cloudId:
-      row.id,
+    id: row.legacy_id || row.id,
+    cloudId: row.id,
 
     name:
       row.name || '',
@@ -712,19 +548,13 @@ function mapDietPlan(
       row.goal || '',
 
     calories:
-      Number(
-        row.calories || 0
-      ),
+      Number(row.calories || 0),
 
     protein:
-      Number(
-        row.protein || 0
-      ),
+      Number(row.protein || 0),
 
     durationWeeks:
-      Number(
-        row.duration_weeks || 0
-      ),
+      Number(row.duration_weeks || 0),
 
     coach:
       row.coach || '',
@@ -755,19 +585,14 @@ function mapCommunicationLog(
   row,
   members
 ) {
-  const member =
-    memberByCloudId(
-      members,
-      row.member_id
-    );
+  const member = memberByCloudId(
+    members,
+    row.member_id
+  );
 
   return {
-    id:
-      row.legacy_id ||
-      row.id,
-
-    cloudId:
-      row.id,
+    id: row.legacy_id || row.id,
+    cloudId: row.id,
 
     memberId:
       member?.id || '',
@@ -803,7 +628,8 @@ function mapCommunicationLog(
       '',
 
     createdAt:
-      row.created_at || '',
+      row.created_at ||
+      '',
   };
 }
 
@@ -811,19 +637,14 @@ function mapFeedback(
   row,
   members
 ) {
-  const member =
-    memberByCloudId(
-      members,
-      row.member_id
-    );
+  const member = memberByCloudId(
+    members,
+    row.member_id
+  );
 
   return {
-    id:
-      row.legacy_id ||
-      row.id,
-
-    cloudId:
-      row.id,
+    id: row.legacy_id || row.id,
+    cloudId: row.id,
 
     memberId:
       member?.id || '',
@@ -887,12 +708,8 @@ function parseSetting(value) {
 function buildSettings(rows) {
   const out = {};
 
-  for (
-    const row of rows
-  ) {
-    if (
-      row.setting_key
-    ) {
+  for (const row of rows) {
+    if (row.setting_key) {
       out[row.setting_key] =
         parseSetting(
           row.setting_value
@@ -902,6 +719,11 @@ function buildSettings(rows) {
 
   return out;
 }
+
+
+/* =========================================================
+   LOAD COMPLETE CLOUD STATE
+   ========================================================= */
 
 export async function loadCloudState() {
   const gym =
@@ -1018,18 +840,18 @@ export async function loadCloudState() {
 
     payments:
       paymentsRows.map(
-        (row) =>
+        (r) =>
           mapPayment(
-            row,
+            r,
             members
           )
       ),
 
     attendance:
       attendanceRows.map(
-        (row) =>
+        (r) =>
           mapAttendance(
-            row,
+            r,
             members
           )
       ),
@@ -1038,9 +860,9 @@ export async function loadCloudState() {
 
     ptSessions:
       ptRows.map(
-        (row) =>
+        (r) =>
           mapPTSession(
-            row,
+            r,
             members,
             trainers
           )
@@ -1048,45 +870,45 @@ export async function loadCloudState() {
 
     progressRecords:
       progressRows.map(
-        (row) =>
+        (r) =>
           mapProgressRecord(
-            row,
+            r,
             members
           )
       ),
 
     workoutPlans:
       workoutRows.map(
-        (row) =>
+        (r) =>
           mapWorkoutPlan(
-            row,
+            r,
             members
           )
       ),
 
     dietPlans:
       dietRows.map(
-        (row) =>
+        (r) =>
           mapDietPlan(
-            row,
+            r,
             members
           )
       ),
 
     communicationLogs:
       communicationRows.map(
-        (row) =>
+        (r) =>
           mapCommunicationLog(
-            row,
+            r,
             members
           )
       ),
 
     feedbacks:
       feedbackRows.map(
-        (row) =>
+        (r) =>
           mapFeedback(
-            row,
+            r,
             members
           )
       ),
@@ -1097,6 +919,11 @@ export async function loadCloudState() {
       ),
   };
 }
+
+
+/* =========================================================
+   GENERIC DATABASE OPERATIONS
+   ========================================================= */
 
 export async function insertRecord(
   tableName,
@@ -1175,6 +1002,11 @@ export async function deleteRecord(
   return true;
 }
 
+
+/* =========================================================
+   SETTINGS
+   ========================================================= */
+
 export async function saveSettings(
   settings
 ) {
@@ -1214,19 +1046,13 @@ export async function saveSettings(
     );
 
     const row = {
-      gym_id:
-        gymId,
-
-      setting_key:
-        key,
-
+      gym_id: gymId,
+      setting_key: key,
       setting_value:
         JSON.stringify(value),
     };
 
-    if (
-      existing?.id
-    ) {
+    if (existing?.id) {
       const {
         error,
       } = await supabase
@@ -1268,6 +1094,11 @@ export async function saveSettings(
 
   return settings;
 }
+
+
+/* =========================================================
+   PUBLIC ATTENDANCE
+   ========================================================= */
 
 export async function publicCheckIn({
   gymId,
@@ -1320,9 +1151,9 @@ export async function publicCheckIn({
 }
 
 
-/* ============================================================
-   PUBLIC CUSTOMER FEEDBACK
-   ============================================================ */
+/* =========================================================
+   PUBLIC FEEDBACK
+   ========================================================= */
 
 export async function publicSubmitFeedback({
   gymId,
@@ -1353,7 +1184,9 @@ export async function publicSubmitFeedback({
       p_priority:
         String(
           priority || 'medium'
-        ).trim().toLowerCase(),
+        )
+          .trim()
+          .toLowerCase(),
 
       p_feedback:
         String(
@@ -1372,4 +1205,134 @@ export async function publicSubmitFeedback({
       success: true,
     }
   );
+}
+
+
+/* =========================================================
+   STAFF / ROLE / PERMISSIONS
+   ========================================================= */
+
+/*
+ * Gets the currently logged-in user's role
+ * and permissions.
+ *
+ * Owner:
+ *   role = owner
+ *   permissions can be ignored because owner
+ *   automatically has complete access.
+ *
+ * Staff:
+ *   role = staff
+ *   permissions are read from gym_users.permissions.
+ */
+
+export async function getMyAccess() {
+  const {
+    data,
+    error,
+  } = await supabase.rpc(
+    'get_my_access'
+  );
+
+  throwIfError(
+    error,
+    'Unable to read user permissions'
+  );
+
+  return (
+    data || {
+      role: 'staff',
+      permissions: {},
+    }
+  );
+}
+
+
+/*
+ * Gets all staff accounts belonging
+ * to the currently logged-in owner's gym.
+ */
+
+export async function getGymStaff() {
+  const {
+    data,
+    error,
+  } = await supabase.rpc(
+    'get_gym_staff'
+  );
+
+  throwIfError(
+    error,
+    'Unable to load staff accounts'
+  );
+
+  return data || [];
+}
+
+
+/*
+ * Updates permissions for one staff member.
+ *
+ * Only the owner can successfully
+ * execute the Supabase RPC.
+ */
+
+export async function updateStaffPermissions(
+  userId,
+  permissions
+) {
+  const {
+    data,
+    error,
+  } = await supabase.rpc(
+    'update_staff_permissions',
+    {
+      p_user_id:
+        userId,
+
+      p_permissions:
+        permissions,
+    }
+  );
+
+  throwIfError(
+    error,
+    'Unable to update staff permissions'
+  );
+
+  return data;
+}
+
+
+/*
+ * Enables or disables a staff account.
+ *
+ * Only the owner can successfully
+ * execute the Supabase RPC.
+ */
+
+export async function setStaffActive(
+  userId,
+  isActive
+) {
+  const {
+    data,
+    error,
+  } = await supabase.rpc(
+    'set_staff_active',
+    {
+      p_user_id:
+        userId,
+
+      p_is_active:
+        isActive,
+    }
+  );
+
+  throwIfError(
+    error,
+    'Unable to update staff status'
+  );
+
+  return data;
 }
