@@ -53,6 +53,11 @@ const STORAGE_KEY = 'preface-fitness-v1';
 const AUTH_SESSION_KEY = 'preface-fitness-auth-session';
 const AUTH_SESSION_MS = 20 * 60 * 1000;
 const today = new Date().toISOString().slice(0, 10);
+const PUBLIC_ATTENDANCE_DEVICE_LOCK_PREFIX = 'preface-attendance-device-lock-v1';
+
+function getPublicAttendanceDeviceLockKey(gymId) {
+  return `${PUBLIC_ATTENDANCE_DEVICE_LOCK_PREFIX}:${String(gymId || 'unknown')}:${today}`;
+}
 
 const MEMBERSHIP_PLANS = [
   { name: 'Monthly', months: 1, price: 1500, description: 'Flexible month-to-month membership' },
@@ -3267,6 +3272,20 @@ function PublicAttendancePage({ data, setData }) {
       return;
     }
 
+    // One successful public attendance check-in per browser/device per gym per day.
+    // This prevents the same phone/browser from being used to mark multiple
+    // members present on the same day. The existing server-side member/day
+    // protection remains in place as an additional safeguard.
+    const deviceLockKey = getPublicAttendanceDeviceLockKey(gymId);
+    try {
+      if (window.localStorage.getItem(deviceLockKey) === '1') {
+        setResult({ type: 'warning', message: 'Attendance already marked on this device today.' });
+        return;
+      }
+    } catch (storageError) {
+      console.warn('Attendance device lock storage unavailable:', storageError);
+    }
+
     setSubmitting(true);
     try {
       const response = await publicCheckIn({
@@ -3316,6 +3335,12 @@ function PublicAttendancePage({ data, setData }) {
             : item
         ),
       }));
+
+      try {
+        window.localStorage.setItem(deviceLockKey, '1');
+      } catch (storageError) {
+        console.warn('Unable to persist attendance device lock:', storageError);
+      }
 
       setResult({ type: 'success', message: `${member?.name || 'Member'} — attendance marked successfully.` });
       setMemberNumber('');
