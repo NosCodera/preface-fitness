@@ -43,11 +43,9 @@ import {
   signInOwner,
   signOutOwner,
   getSupabaseSession,
-  getSupabaseUser,
   subscribeToAuthChanges,
-  changeSupabaseCredentials,
 } from './supabaseAuth';
-import { loadCloudState, insertRecord, updateRecord, deleteRecord, saveSettings as saveCloudSettings, publicCheckIn, publicSubmitFeedback } from './cloudData';
+import { loadCloudState, insertRecord, updateRecord, deleteRecord, saveSettings as saveCloudSettings, publicSubmitFeedback } from './cloudData';
 
 const LOGO_URL = `${import.meta.env.BASE_URL}preface-logo.jpg`;
 
@@ -118,21 +116,32 @@ function getMembershipStatus(expiry) {
 }
 
 const PRODUCTION_APP_URL = 'https://noscodera.github.io/preface-fitness/';
-const PRODUCTION_GYM_ID = 'd702119b-3205-46a2-9ee0-294d682ddf14';
 
-function getCheckInUrl(gymId, gymLatitude, gymLongitude) {
-  // Keep the permanent QR on the deployed GitHub Pages app and carry the gym identity/location in the QR URL.
-  const params = new URLSearchParams();
-  params.set('gym', gymId || PRODUCTION_GYM_ID);
-  if (gymLatitude !== '' && gymLongitude !== '' && Number.isFinite(Number(gymLatitude)) && Number.isFinite(Number(gymLongitude))) { params.set('lat', String(gymLatitude)); params.set('lng', String(gymLongitude)); } return `${PRODUCTION_APP_URL}?${params.toString()}#check-in`;
+function getCheckInPath() {
+  return `${PRODUCTION_APP_URL.replace(/\/$/, '')}/#check-in`;
 }
+
+function getCheckInUrl() {
+  return `${PRODUCTION_APP_URL.replace(/\/$/, '')}/#check-in`;
+}
+
 function getFeedbackUrl(gymId, gymName = 'Preface Fitness') {
-  // GitHub Pages serves the SPA from /preface-fitness/. Query parameters
-  // must come before the hash so PublicFeedbackPage can read them.
   const params = new URLSearchParams();
-  params.set('gym', gymId || PRODUCTION_GYM_ID);
-  params.set('name', gymName || 'Preface Fitness');
-  return `${PRODUCTION_APP_URL}?${params.toString()}#feedback`;
+
+  if (gymId) {
+    params.set('gym', gymId);
+  }
+
+  if (gymName) {
+    params.set('name', gymName);
+  }
+
+  const query = params.toString();
+  const base = PRODUCTION_APP_URL.replace(/\/$/, '');
+
+  return query
+    ? `${base}/?${query}#feedback`
+    : `${base}/#feedback`;
 }
 
 function distanceInMeters(lat1, lon1, lat2, lon2) {
@@ -387,8 +396,7 @@ async function hashPassword(password) {
 }
 
 function openPublicGymPage() {
-  // Always use the deployed GitHub Pages URL; do not derive it from the current browser origin.
-  const url = `${PRODUCTION_APP_URL}#gym`;
+  const url = `${PRODUCTION_APP_URL.replace(/\/$/, '')}/#gym`;
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
@@ -401,6 +409,7 @@ function App() {
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [storageMode, setStorageMode] = useState('checking');
 
   useEffect(() => {
     let cancelled = false;
@@ -458,13 +467,16 @@ function App() {
         const session = await getSupabaseSession();
 
         if (!cancelled) {
-          setIsAuthenticated(Boolean(session?.user));
+          const authenticated = Boolean(session?.user);
+          setIsAuthenticated(authenticated);
+          setStorageMode(authenticated ? 'checking' : 'offline');
         }
       } catch (error) {
         console.error('Supabase session check failed:', error);
 
         if (!cancelled) {
           setIsAuthenticated(false);
+          setStorageMode('offline');
         }
       }
 
@@ -472,7 +484,9 @@ function App() {
 
       unsubscribeAuth = subscribeToAuthChanges(({ session }) => {
         if (cancelled) return;
-        setIsAuthenticated(Boolean(session?.user));
+        const authenticated = Boolean(session?.user);
+        setIsAuthenticated(authenticated);
+        setStorageMode(authenticated ? 'checking' : 'offline');
       });
     })();
 
@@ -490,7 +504,18 @@ function App() {
     (async () => {
       try {
         const cloud = await loadCloudState();
+
+        console.log('===== PREFACE CLOUD LOAD =====');
+        console.log('Cloud object:', cloud);
+        console.log('Cloud members:', cloud?.members);
+        console.log('Cloud members count:', cloud?.members?.length);
+        console.log('Cloud gym:', cloud?.gym);
+        console.log('Cloud payments count:', cloud?.payments?.length);
+        console.log('==============================');
+
         if (cancelled || !cloud) return;
+
+        setStorageMode('cloud');
 
         setData((current) => ({
           ...current,
@@ -539,7 +564,15 @@ function App() {
           },
         }));
       } catch (error) {
-        console.error('Supabase cloud state load failed; keeping local data:', error);
+        console.error('===== PREFACE CLOUD LOAD ERROR =====');
+        console.error(error);
+        console.error(error?.message);
+        console.error(error?.stack);
+        console.error('====================================');
+        if (!cancelled) {
+          setStorageMode('offline');
+          setToast(error?.message || 'Supabase connection failed. Using local cache.');
+        }
       }
     })();
 
@@ -1627,6 +1660,7 @@ function App() {
     }
 
     setIsAuthenticated(false);
+    setStorageMode('offline');
     setActive('Dashboard');
     setSidebarOpen(false);
     setModal(null);
@@ -1698,7 +1732,16 @@ function App() {
           <button className={`nav-item ${active === 'Settings' ? 'active' : ''}`} onClick={() => navigate('Settings')}><Settings size={18} /><span>Settings</span></button>
           <div className="storage-card">
             <div className="storage-icon"><ShieldCheck size={16} /></div>
-            <div><strong>Local mode</strong><span>Your data is saved in this browser.</span></div>
+            <div>
+              <strong>{storageMode === 'cloud' ? 'Cloud mode' : storageMode === 'checking' ? 'Connecting…' : 'Offline mode'}</strong>
+              <span>
+                {storageMode === 'cloud'
+                  ? 'Supabase is connected. Cloud database is the source of truth.'
+                  : storageMode === 'checking'
+                    ? 'Connecting to the Preface Fitness cloud database…'
+                    : 'Supabase is unavailable. Changes are currently kept in this browser.'}
+              </span>
+            </div>
           </div>
         </div>
       </aside>
@@ -3145,33 +3188,15 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
 
 function PublicAttendancePage({ data, setData }) {
   const settings = data.settings || {};
-  const params = new URLSearchParams(window.location.search);
-  const gymId = params.get('gym') || data.gym?.id || PRODUCTION_GYM_ID;
-  const qrGymLat = params.get('lat');
-  const qrGymLng = params.get('lng');
-
-  const gymLat = Number(qrGymLat ?? settings.gymLatitude);
-  const gymLng = Number(qrGymLng ?? settings.gymLongitude);
-  const hasGymLocation = Number.isFinite(gymLat) && Number.isFinite(gymLng)
-    && String(qrGymLat ?? settings.gymLatitude) !== ''
-    && String(qrGymLng ?? settings.gymLongitude) !== '';
-
   const [memberNumber, setMemberNumber] = useState('');
   const [location, setLocation] = useState(null);
-  const [deviceLocked, setDeviceLocked] = useState(false);
-
-  const DEVICE_ATTENDANCE_KEY = 'preface-fitness-attendance-device-date';
-
-  const getDeviceAttendanceLock = () => {
-    try {
-      return localStorage.getItem(DEVICE_ATTENDANCE_KEY) === today;
-    } catch {
-      return false;
-    }
-  };
   const [locationStatus, setLocationStatus] = useState('Requesting your location…');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
+
+  const gymLat = Number(settings.gymLatitude);
+  const gymLng = Number(settings.gymLongitude);
+  const hasGymLocation = Number.isFinite(gymLat) && Number.isFinite(gymLng) && settings.gymLatitude !== '' && settings.gymLongitude !== '';
 
   const requestLocation = () => {
     setResult(null);
@@ -3182,44 +3207,24 @@ function PublicAttendancePage({ data, setData }) {
     setLocationStatus('Requesting your location…');
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        setLocation({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracy: position.coords.accuracy,
-        });
+        setLocation({ latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy });
         setLocationStatus(`Location detected (accuracy ±${Math.round(position.coords.accuracy || 0)} m)`);
       },
       (error) => {
-        const message = error.code === 1
-          ? 'Location permission was denied. Please allow location access and try again.'
-          : 'Could not detect your location. Please try again.';
+        const message = error.code === 1 ? 'Location permission was denied. Please allow location access and try again.' : 'Could not detect your location. Please try again.';
         setLocationStatus(message);
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
   };
 
-  useEffect(() => {
-    requestLocation();
-    setDeviceLocked(getDeviceAttendanceLock());
-  }, []);
+  useEffect(() => { requestLocation(); }, []);
 
-  const markPresent = async () => {
+  const markPresent = () => {
     setResult(null);
     const number = String(memberNumber || '').trim();
-
-    if (getDeviceAttendanceLock()) {
-      setDeviceLocked(true);
-      setResult({ type: 'warning', message: 'Attendance already marked on this device today.' });
-      return;
-    }
-
     if (!number) {
       setResult({ type: 'error', message: 'Enter your member number.' });
-      return;
-    }
-    if (!gymId) {
-      setResult({ type: 'error', message: 'This attendance QR is not linked to a gym.' });
       return;
     }
     if (!hasGymLocation) {
@@ -3238,110 +3243,75 @@ function PublicAttendancePage({ data, setData }) {
       return;
     }
 
-    setSubmitting(true);
-    try {
-      const response = await publicCheckIn({
-        gymId,
-        memberNumber: number,
-        latitude: location.latitude,
-        longitude: location.longitude,
-        gymLatitude: gymLat,
-        gymLongitude: gymLng,
-      });
-
-      if (!response?.success) {
-        setResult({ type: 'error', message: response?.message || 'Attendance could not be marked.' });
-        return;
-      }
-
-      if (response?.already_present) {
-        setResult({
-          type: 'warning',
-          message: response?.message || 'Attendance already marked today.',
-        });
-        return;
-      }
-
-      const member = response.member;
-      const now = new Date();
-      const record = {
-        id: response.attendance?.legacy_id || response.attendance?.id || `A-${Date.now()}`,
-        cloudId: response.attendance?.id,
-        member: member?.name || '',
-        memberId: member?.member_code || member?.id || '',
-        memberNumber: member?.attendance_number || number,
-        date: today,
-        time: response.attendance?.check_in_time || now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        source: 'QR check-in',
-        latitude: location.latitude,
-        longitude: location.longitude,
-        distance: Math.round(distance),
-      };
-
-      setData((current) => ({
-        ...current,
-        attendance: [record, ...(current.attendance || [])],
-        members: (current.members || []).map((item) =>
-          item.id === record.memberId
-            ? { ...item, visits: Number(item.visits || 0) + 1 }
-            : item
-        ),
-      }));
-
-      try {
-        localStorage.setItem(DEVICE_ATTENDANCE_KEY, today);
-      } catch {
-        // Continue even if browser storage is unavailable.
-      }
-      setDeviceLocked(true);
-      setResult({ type: 'success', message: 'Attendance marked successfully.' });
-      setMemberNumber('');
-    } catch (error) {
-      console.error('Public attendance failed:', error);
-      setResult({ type: 'error', message: error?.message || 'Unable to mark attendance.' });
-    } finally {
-      setSubmitting(false);
+    const member = (data.members || []).find((item) => String(item.attendanceNumber || item.id || '').trim().toLowerCase() === number.toLowerCase());
+    if (!member) {
+      setResult({ type: 'error', message: 'Member number not found.' });
+      return;
     }
+    if (getMembershipStatus(member.expiry) === 'Expired') {
+      setResult({ type: 'error', message: 'Attendance denied. Your membership has expired.' });
+      return;
+    }
+
+    const already = (data.attendance || []).some((record) => record.memberId === member.id && record.date === today);
+    if (already) {
+      setResult({ type: 'success', message: `${member.name} is already marked present today.` });
+      return;
+    }
+
+    setSubmitting(true);
+    const now = new Date();
+    const record = {
+      id: `A-${Date.now()}`,
+      member: member.name,
+      memberId: member.id,
+      memberNumber: member.attendanceNumber || number,
+      date: today,
+      time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      source: 'QR check-in',
+      latitude: location.latitude,
+      longitude: location.longitude,
+      distanceMeters: Math.round(distance),
+    };
+
+    setData((current) => ({
+      ...current,
+      attendance: [record, ...(current.attendance || [])],
+      members: (current.members || []).map((item) => item.id === member.id ? { ...item, visits: Number(item.visits || 0) + 1 } : item),
+    }));
+    setSubmitting(false);
+    setResult({ type: 'success', message: `Attendance marked successfully for ${member.name}.` });
+    setMemberNumber('');
   };
 
   return (
-    <div className="public-checkin-screen">
-      <div className="public-checkin-card">
-        <img src={LOGO_URL} alt="Preface Fitness" className="public-checkin-logo" />
-        <div className="public-checkin-heading">
+    <div className="auth-screen" style={{ padding: '24px', minHeight: '100vh', background: '#f5f8fa' }}>
+      <div className="auth-card" style={{ width: 'min(460px, 100%)' }}>
+        <img src={LOGO_URL} alt="Preface Fitness" className="auth-logo" />
+        <div style={{ marginTop: '8px', textAlign: 'center' }}>
           <div className="eyebrow">PREFACE FITNESS</div>
           <h2 style={{ margin: '6px 0 8px' }}>Mark Attendance</h2>
-          <p style={{ color: '#718096', fontSize: '14px', lineHeight: 1.5, margin: 0 }}>
-            Scan the QR at the gym entrance, enter your member number and allow location access.
-          </p>
+          <p style={{ color: '#718096', fontSize: '14px', lineHeight: 1.5, margin: 0 }}>Scan at the gym entrance and mark your attendance without logging into the owner dashboard.</p>
         </div>
 
-        <div className={`public-location-status ${location ? 'is-ready' : 'is-pending'}`}>
+        <div style={{ marginTop: '22px', padding: '12px 14px', borderRadius: '12px', background: location ? '#f0faf7' : '#fff8ed', border: `1px solid ${location ? '#cfece3' : '#f0dfbf'}`, color: '#53656f', fontSize: '13px' }}>
           <strong>{location ? '✓ Location detected' : 'Location required'}</strong>
           <div style={{ marginTop: '3px' }}>{locationStatus}</div>
         </div>
 
-        <div className="public-member-field">
-          <label className="public-member-label">Member number</label>
-          <input
-            value={memberNumber}
-            onChange={(e) => setMemberNumber(e.target.value.replace(/\D/g, '').slice(0, 8))}
-            onKeyDown={(e) => { if (e.key === 'Enter') markPresent(); }}
-            inputMode="numeric"
-            autoFocus
-            placeholder="e.g. 23"
-            className="public-member-input" 
-          />
+        <div style={{ marginTop: '18px' }}>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#334155', marginBottom: '7px' }}>Member number</label>
+          <input value={memberNumber} onChange={(e) => setMemberNumber(e.target.value.replace(/\D/g, '').slice(0, 8))} onKeyDown={(e) => { if (e.key === 'Enter') markPresent(); }} inputMode="numeric" autoFocus placeholder="e.g. 23" style={{ width: '100%', fontSize: '22px', textAlign: 'center', letterSpacing: '3px', padding: '13px 14px' }} />
         </div>
 
-        <button className="btn btn-primary public-submit-button" onClick={markPresent} disabled={submitting || deviceLocked}>
-          <CheckCircle2 size={18} /> {submitting ? 'Checking…' : 'Mark Present'}
+        <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '14px', minHeight: '48px' }} onClick={markPresent} disabled={submitting}>
+          <CheckCircle2 size={18} /> {submitting ? 'Marking…' : 'Mark Present'}
         </button>
 
-        <button className="link-btn public-refresh-button" onClick={requestLocation}>Refresh location</button>
+        <button className="link-btn" style={{ width: '100%', justifyContent: 'center', marginTop: '10px' }} onClick={requestLocation}>Refresh location</button>
 
         {result && (
-          <div className={`public-result ${result.type === 'success' ? 'is-success' : result.type === 'warning' ? 'is-warning' : 'is-error'}`}>
+          <div style={{ marginTop: '14px', padding: '13px 14px', borderRadius: '12px', background: result.type === 'success' ? '#f0faf7' : '#fff4f3', border: `1px solid ${result.type === 'success' ? '#cfece3' : '#f2d1ce'}`, color: result.type === 'success' ? '#26735f' : '#a33a32', fontSize: '13px', lineHeight: 1.5 }}>
             {result.message}
           </div>
         )}
@@ -6402,7 +6372,7 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     gymLongitude: current.gymLongitude || '',
   });
   const [authForm, setAuthForm] = useState({
-    username: current.auth?.username || '',
+    username: current.auth?.username || 'admin',
     currentPassword: '',
     newPassword: '',
     confirmPassword: '',
@@ -6425,30 +6395,13 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     });
     setAuthForm((form) => ({
       ...form,
-      username: current.auth?.username || '',
+      username: current.auth?.username || 'admin',
       currentPassword: '',
       newPassword: '',
       confirmPassword: '',
     }));
     setAuthMessage('');
-
-    let cancelled = false;
-    (async () => {
-      try {
-        const user = await getSupabaseUser();
-        if (!cancelled && user?.email) {
-          setAuthForm((form) => ({ ...form, username: user.email }));
-        }
-      } catch (error) {
-        console.error('Unable to read Supabase account email:', error);
-      }
-    })();
-
     setNoticeForm({ enabled: Boolean(current.notice?.enabled), text: current.notice?.text || '', priority: current.notice?.priority || 'medium' });
-
-    return () => {
-      cancelled = true;
-    };
   }, [current.gymName, current.gymAddress, current.gymPhone, current.gymEmail, current.gstin, current.defaultGstRate, current.invoicePrefix, current.referralPointsPerReferral, current.gymLatitude, current.gymLongitude, current.auth?.username, current.auth?.passwordHash]);
 
   const useCurrentLocation = () => {
@@ -6471,9 +6424,9 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     setAuthMessage('Gym location saved.');
   };
 
-  const qrUrl = getCheckInUrl(PRODUCTION_GYM_ID, form.gymLatitude, form.gymLongitude);
+  const qrUrl = getCheckInUrl();
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&data=${encodeURIComponent(qrUrl)}`;
-  const feedbackQrUrl = getFeedbackUrl(data.gym?.id || PRODUCTION_GYM_ID, form.gymName || 'Preface Fitness');
+  const feedbackQrUrl = getFeedbackUrl(data.gym?.id || '', form.gymName || 'Preface Fitness');
   const feedbackQrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&data=${encodeURIComponent(feedbackQrUrl)}`;
 
   const openQr = () => window.open(qrImageUrl, '_blank', 'noopener,noreferrer');
@@ -6515,15 +6468,23 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
   };
 
   const saveAuthSettings = async () => {
-    const newEmail = authForm.username.trim();
+    const username = authForm.username.trim();
 
-    if (!newEmail) {
-      setAuthMessage('Login email cannot be empty.');
+    if (!username) {
+      setAuthMessage('Username cannot be empty.');
       return;
     }
 
     if (!authForm.currentPassword) {
       setAuthMessage('Enter your current password to make changes.');
+      return;
+    }
+
+    const currentHash = current.auth?.passwordHash || await hashPassword('admin123');
+    const enteredCurrentHash = await hashPassword(authForm.currentPassword);
+
+    if (enteredCurrentHash !== currentHash) {
+      setAuthMessage('Current password is incorrect.');
       return;
     }
 
@@ -6542,52 +6503,23 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
       return;
     }
 
-    setAuthMessage('Updating login credentials…');
+    const passwordHash = await hashPassword(authForm.newPassword);
 
-    try {
-      const currentUser = await getSupabaseUser();
-      const currentEmail = String(currentUser?.email || '').trim();
+    setData((d) => ({
+      ...d,
+      settings: {
+        ...(d.settings || {}),
+        auth: { username, passwordHash },
+      },
+    }));
 
-      if (!currentEmail) {
-        setAuthMessage('Unable to determine the current Supabase login email.');
-        return;
-      }
-
-      // Re-authenticate first so the user must know the existing password.
-      await signInOwner(currentEmail, authForm.currentPassword);
-
-      await changeSupabaseCredentials({
-        email: newEmail,
-        password: authForm.newPassword,
-      });
-
-      setAuthForm({
-        username: newEmail,
-        currentPassword: '',
-        newPassword: '',
-        confirmPassword: '',
-      });
-
-      setData((d) => ({
-        ...d,
-        settings: {
-          ...(d.settings || {}),
-          auth: {
-            ...(d.settings?.auth || {}),
-            username: newEmail,
-          },
-        },
-      }));
-
-      setAuthMessage(
-        newEmail !== currentEmail
-          ? 'Login email and password updated successfully. If Supabase email confirmation is enabled, confirm the new email address before using it to sign in.'
-          : 'Login password updated successfully.'
-      );
-    } catch (error) {
-      console.error('Supabase credential update failed:', error);
-      setAuthMessage(error?.message || 'Unable to update login credentials.');
-    }
+    setAuthForm({
+      username,
+      currentPassword: '',
+      newPassword: '',
+      confirmPassword: '',
+    });
+    setAuthMessage('Login credentials updated successfully.');
   };
 
 
@@ -6645,17 +6577,16 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
           <div className="card-header">
             <div>
               <h3>Owner login</h3>
-              <p>Change the Supabase login email and password required to open the app.</p>
+              <p>Change the username and password required to open the app.</p>
             </div>
           </div>
 
           <div className="form-grid two">
-            <FormField label="Login email">
+            <FormField label="Username">
               <input
                 value={authForm.username}
                 onChange={(e) => setAuthForm((f) => ({ ...f, username: e.target.value }))}
                 autoComplete="username"
-                type="email"
               />
             </FormField>
 
@@ -6709,7 +6640,7 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
           </button>
 
           <div style={{ marginTop: '12px', fontSize: '12px', color: '#7b8794', lineHeight: 1.5 }}>
-            The login email and password are managed securely by Supabase Auth. Change them here after signing in.
+            New installations start with <strong>admin</strong> / <strong>admin123</strong>. Change these from this section after signing in.
           </div>
         </section>
 
