@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   Activity,
@@ -22,6 +22,7 @@ import {
   MessageCircle,
   MoreHorizontal,
   Plus,
+  Phone,
   Search,
   Save,
   Settings,
@@ -39,6 +40,7 @@ import {
 } from 'lucide-react';
 import './styles.css';
 import { readState, writeState, clearState } from './db';
+import { supabase } from './supabase';
 import {
   signInOwner,
   signOutOwner,
@@ -76,6 +78,603 @@ const MEMBERSHIP_PLANS = [
 const DEFAULT_MEMBERSHIP_PRICES = Object.fromEntries(
   MEMBERSHIP_PLANS.map((plan) => [plan.name, plan.price])
 );
+
+
+const VIBRANT_THEME_CSS = `
+  :root { --pf-purple:#6d4aff; --pf-violet:#8d4dff; --pf-teal:#12bfa6; --pf-green:#2acb78; --pf-pink:#f23c92; --pf-gold:#f3bd16; --pf-orange:#f57c18; --pf-blue:#3f8cff; --pf-ink:#15233a; --pf-muted:#64748b; }
+  html, body, #root { min-height:100%; }
+  body { font-size:18px !important; background:radial-gradient(circle at 8% 8%,rgba(109,74,255,.14),transparent 28%),radial-gradient(circle at 92% 18%,rgba(18,191,166,.12),transparent 25%),radial-gradient(circle at 78% 88%,rgba(242,60,146,.10),transparent 28%),linear-gradient(135deg,#eef2ff 0%,#f4efff 42%,#eefbfa 72%,#fff1f8 100%) !important; color:var(--pf-ink) !important; }
+  button, input, select, textarea { font:inherit; }
+  .vibrant-app-shell { min-height:100vh !important; background:radial-gradient(circle at 5% 12%,rgba(109,74,255,.13),transparent 30%),radial-gradient(circle at 96% 18%,rgba(18,191,166,.11),transparent 28%),radial-gradient(circle at 70% 92%,rgba(242,60,146,.09),transparent 30%),linear-gradient(135deg,#eef2ff 0%,#f6f0ff 44%,#edfafa 73%,#fff1f8 100%) !important; }
+  .vibrant-app-shell .sidebar-compact { width:205px !important; min-width:205px !important; background:linear-gradient(180deg,#17183b 0%,#27205a 52%,#3a2169 100%) !important; color:#fff !important; border-right:0 !important; box-shadow:16px 0 40px rgba(54,38,113,.16) !important; position:sticky !important; top:0 !important; height:100vh !important; z-index:80 !important; padding:18px 12px !important; }
+  .vibrant-app-shell .sidebar-compact.collapsed { width:0 !important; min-width:0 !important; padding:0 !important; margin:0 !important; overflow:hidden !important; opacity:0 !important; pointer-events:none !important; box-shadow:none !important; }
+  .vibrant-app-shell .sidebar-compact.collapsed > * { visibility:hidden !important; }
+  .vibrant-app-shell .menu-btn { display:flex !important; align-items:center !important; justify-content:center !important; flex:0 0 46px !important; width:46px !important; height:46px !important; border-radius:13px !important; background:#f5f2ff !important; color:#5b4bc3 !important; border:1px solid #e9e3ff !important; cursor:pointer !important; }
+  .vibrant-collapsed-brand { display:none !important; align-items:center !important; gap:10px !important; margin-right:4px !important; }
+  .vibrant-collapsed-brand img { width:44px !important; height:44px !important; object-fit:cover !important; border-radius:13px !important; box-shadow:0 8px 18px rgba(42,31,104,.16) !important; }
+  .vibrant-collapsed-brand span { font-size:15px !important; font-weight:900 !important; color:#18243d !important; white-space:nowrap !important; }
+  .vibrant-app-shell.sidebar-is-collapsed .vibrant-collapsed-brand { display:flex !important; }
+  .vibrant-app-shell.sidebar-is-collapsed .topbar-primary-row { justify-content:flex-start !important; }
+  .vibrant-app-shell.sidebar-is-collapsed .topbar-primary-row .topbar-actions { margin-left:auto !important; }
+  .vibrant-app-shell .top-navigation-scroll { display:grid !important; grid-template-columns:repeat(8,minmax(120px,1fr)) !important; gap:6px !important; padding:8px 0 12px !important; align-items:stretch !important; }
+  .vibrant-app-shell .top-navigation-item { width:100% !important; min-width:0 !important; justify-content:center !important; min-height:42px !important; padding:0 9px !important; font-size:14px !important; border:1px solid #edf0f7 !important; background:#fff !important; box-shadow:0 2px 7px rgba(31,42,71,.035) !important; }
+  .vibrant-app-shell .top-navigation-item.active { border-color:transparent !important; background:linear-gradient(135deg,#6e4cff,#8a4eff) !important; box-shadow:0 8px 18px rgba(111,77,255,.20) !important; }
+  .vibrant-app-shell .top-navigation-item span { overflow:hidden !important; text-overflow:ellipsis !important; }
+  .vibrant-app-shell .topbar-actions { display:flex !important; align-items:center !important; gap:9px !important; flex-shrink:0 !important; }
+  .vibrant-app-shell .topbar-left { display:flex !important; align-items:center !important; gap:10px !important; min-width:0 !important; }
+  .vibrant-app-shell .vibrant-breadcrumb { white-space:nowrap !important; }
+  /* Final polish: clean responsive navigation, subtle glass/reflection treatment and no page overflow. */
+  html, body, #root { width:100% !important; max-width:100% !important; overflow-x:hidden !important; }
+  .vibrant-app-shell { width:100% !important; max-width:100vw !important; overflow-x:hidden !important; }
+  .vibrant-app-shell .main { max-width:100vw !important; box-sizing:border-box !important; overflow-x:hidden !important; }
+
+  /* Transparent, glass-like fixed navbar. */
+  .vibrant-topbar {
+    background:rgba(255,255,255,.48) !important;
+    backdrop-filter:blur(22px) saturate(145%) !important;
+    -webkit-backdrop-filter:blur(22px) saturate(145%) !important;
+    border-bottom:1px solid rgba(100,88,180,.13) !important;
+    box-shadow:0 8px 28px rgba(31,35,72,.055) !important;
+    padding:10px 20px 12px !important;
+  }
+  .topbar-primary-row { min-height:56px !important; height:56px !important; gap:12px !important; }
+  .vibrant-app-shell .topbar-left { gap:10px !important; flex:1 1 auto !important; min-width:0 !important; }
+  .vibrant-collapsed-brand { flex:0 0 auto !important; }
+  .vibrant-app-shell .menu-btn { flex:0 0 44px !important; width:44px !important; height:44px !important; }
+  .vibrant-app-shell .topbar-actions { margin-left:auto !important; flex:0 0 auto !important; }
+
+  /* Sidebar starts below the fixed navbar. The close button has its own row space. */
+  .vibrant-app-shell .sidebar-compact { top:132px !important; padding:16px 12px 18px !important; }
+  .vibrant-app-shell .sidebar-compact .compact-brand {
+    height:58px !important;
+    min-height:58px !important;
+    margin:0 0 8px !important;
+    padding:0 !important;
+    display:block !important;
+  }
+  .vibrant-app-shell .sidebar-compact .compact-sidebar-label { padding:0 10px 10px !important; }
+
+  /* The complete navigation stays visible: 8 equal columns x 2 rows on desktop. */
+  .vibrant-app-shell .top-navigation-scroll {
+    display:grid !important;
+    grid-template-columns:repeat(8,minmax(0,1fr)) !important;
+    grid-auto-rows:40px !important;
+    gap:7px !important;
+    width:100% !important;
+    max-width:none !important;
+    margin:7px 0 0 !important;
+    padding:0 0 2px !important;
+    overflow:visible !important;
+  }
+  .vibrant-app-shell .top-navigation-item {
+    min-width:0 !important;
+    width:100% !important;
+    height:40px !important;
+    min-height:40px !important;
+    padding:0 7px !important;
+    gap:6px !important;
+    border-radius:10px !important;
+    background:linear-gradient(135deg,rgba(255,255,255,.74),rgba(246,242,255,.58)) !important;
+    border:1px solid rgba(111,77,255,.15) !important;
+    box-shadow:0 2px 8px rgba(40,46,78,.035) !important;
+    white-space:normal !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    transition:transform .16s ease, box-shadow .16s ease, background .16s ease, border-color .16s ease !important;
+  }
+  .vibrant-app-shell .top-navigation-item span {
+    overflow:visible !important;
+    text-overflow:clip !important;
+    white-space:nowrap !important;
+    line-height:1 !important;
+    font-size:12px !important;
+  }
+  .vibrant-app-shell .top-navigation-item:hover {
+    transform:translateY(-1px) !important;
+    background:linear-gradient(135deg,rgba(255,255,255,.94),rgba(239,235,255,.82)) !important;
+    border-color:rgba(105,72,233,.24) !important;
+    box-shadow:0 7px 16px rgba(46,43,91,.08) !important;
+  }
+  .vibrant-app-shell .top-navigation-item.active { background:linear-gradient(135deg,#6e4cff,#8a4eff) !important; }
+
+  /* Professional glass/reflection treatment for controls and tiles. */
+  .vibrant-app-shell button,
+  .vibrant-app-shell .vibrant-stat-tile,
+  .vibrant-app-shell .vibrant-panel,
+  .vibrant-app-shell .dashboard-filter-card {
+    -webkit-tap-highlight-color:transparent !important;
+  }
+  .vibrant-app-shell button { transition:transform .16s ease, box-shadow .16s ease, background .16s ease, border-color .16s ease !important; }
+  .vibrant-app-shell .vibrant-stat-tile,
+  .vibrant-app-shell .vibrant-stat-tile::after,
+  .vibrant-app-shell .top-navigation-item,
+  .vibrant-app-shell .btn,
+  .vibrant-app-shell .quick-action,
+  .vibrant-app-shell .dashboard-filter-btn,
+  .vibrant-app-shell .nav-item {
+    position:relative !important;
+  }
+  .vibrant-app-shell .vibrant-stat-tile::after,
+  .vibrant-app-shell .top-navigation-item::after,
+  .vibrant-app-shell .btn::after,
+  .vibrant-app-shell .quick-action::after,
+  .vibrant-app-shell .dashboard-filter-btn::after,
+  .vibrant-app-shell .nav-item::after {
+    content:"" !important;
+    position:absolute !important;
+    left:-55% !important;
+    top:-80% !important;
+    width:34% !important;
+    height:260% !important;
+    transform:rotate(22deg) !important;
+    background:linear-gradient(90deg,transparent,rgba(255,255,255,.30),transparent) !important;
+    opacity:0 !important;
+    pointer-events:none !important;
+    transition:left .45s ease, opacity .18s ease !important;
+  }
+  .vibrant-app-shell .vibrant-stat-tile:hover::after,
+  .vibrant-app-shell .top-navigation-item:hover::after,
+  .vibrant-app-shell .btn:hover::after,
+  .vibrant-app-shell .quick-action:hover::after,
+  .vibrant-app-shell .dashboard-filter-btn:hover::after,
+  .vibrant-app-shell .nav-item:hover::after { left:125% !important; opacity:1 !important; }
+  .vibrant-app-shell .vibrant-stat-tile:hover { transform:translateY(-3px) !important; box-shadow:0 17px 34px rgba(31,42,71,.13) !important; }
+  .vibrant-app-shell .vibrant-stat-tile:active,
+  .vibrant-app-shell .btn:active,
+  .vibrant-app-shell .top-navigation-item:active { transform:translateY(0) scale(.992) !important; }
+
+  /* Metric progress bars are intentionally subtle, not decorative-only. */
+  .vibrant-stat-progress { height:7px !important; background:rgba(255,255,255,.42) !important; }
+  .vibrant-stat-progress span {
+    min-width:0 !important;
+    max-width:100% !important;
+    background:linear-gradient(90deg,rgba(255,255,255,.98),rgba(255,255,255,.64)) !important;
+    box-shadow:0 0 10px rgba(255,255,255,.38) !important;
+    transition:width .55s ease !important;
+  }
+
+  /* Richer, more vibrant dashboard palette while keeping text readable. */
+  .vibrant-stat-tile:nth-child(4n+1) { background:linear-gradient(135deg,#d9faea 0%,#c5f5e3 55%,#b8efe0 100%) !important; border:1px solid rgba(42,203,120,.18) !important; }
+  .vibrant-stat-tile:nth-child(4n+2) { background:linear-gradient(135deg,#eee1ff 0%,#dfcaff 55%,#d6c0ff 100%) !important; border:1px solid rgba(109,74,255,.17) !important; }
+  .vibrant-stat-tile:nth-child(4n+3) { background:linear-gradient(135deg,#ffdce9 0%,#ffcbe0 55%,#ffc0d9 100%) !important; border:1px solid rgba(242,60,146,.16) !important; }
+  .vibrant-stat-tile:nth-child(4n) { background:linear-gradient(135deg,#fff1bd 0%,#ffe9a0 55%,#ffdf83 100%) !important; border:1px solid rgba(243,189,22,.18) !important; }
+  .vibrant-stat-tile:nth-child(4n+5) { background:linear-gradient(135deg,#ffe4c7 0%,#ffd8ae 55%,#ffcf9e 100%) !important; }
+  .vibrant-stat-tile:nth-child(4n+6) { background:linear-gradient(135deg,#d8f8e8 0%,#c5f0db 55%,#b7ebd4 100%) !important; }
+  .vibrant-stat-tile:nth-child(4n+7) { background:linear-gradient(135deg,#cff5f2 0%,#bcece8 55%,#afe5df 100%) !important; }
+  .vibrant-stat-tile:nth-child(4n+8) { background:linear-gradient(135deg,#e9edf4 0%,#dfe5ee 55%,#d5deea 100%) !important; }
+
+  .vibrant-dashboard-hero h1 { text-shadow:0 4px 20px rgba(74,55,145,.10) !important; }
+  .dashboard-filter-card, .vibrant-panel { background:rgba(255,255,255,.70) !important; border:1px solid rgba(109,74,255,.12) !important; box-shadow:0 14px 40px rgba(67,54,133,.08) !important; backdrop-filter:blur(14px) !important; }
+
+  /* Keep the dashboard inside the viewport instead of forcing horizontal zoom-out. */
+  .vibrant-app-shell .content { width:100% !important; max-width:none !important; padding:26px 28px 48px !important; box-sizing:border-box !important; }
+  .vibrant-dashboard { width:100% !important; max-width:none !important; min-width:0 !important; }
+  .vibrant-tile-grid { width:100% !important; min-width:0 !important; grid-template-columns:repeat(4,minmax(0,1fr)) !important; }
+  .vibrant-stat-tile { min-width:0 !important; }
+  .dashboard-filter-card { min-width:0 !important; }
+  .dashboard-filter-heading { min-width:0 !important; }
+  .dashboard-date-controls { min-width:0 !important; }
+
+  @media (max-width:1450px) {
+    .vibrant-app-shell .top-navigation-scroll { grid-template-columns:repeat(8,minmax(0,1fr)) !important; }
+    .vibrant-app-shell .top-navigation-item span { font-size:11px !important; }
+    .vibrant-app-shell .top-navigation-item { gap:4px !important; padding:0 4px !important; }
+    .vibrant-app-shell .vibrant-tile-grid { grid-template-columns:repeat(4,minmax(0,1fr)) !important; gap:14px !important; }
+    .vibrant-stat-tile { padding-left:16px !important; padding-right:16px !important; gap:11px !important; }
+    .vibrant-stat-copy strong { font-size:27px !important; }
+  }
+  @media (max-width:1200px) {
+    .vibrant-app-shell .top-navigation-scroll { grid-template-columns:repeat(8,minmax(0,1fr)) !important; }
+    .vibrant-app-shell .top-navigation-item span { font-size:10px !important; }
+    .vibrant-app-shell .top-navigation-item svg { width:15px !important; height:15px !important; }
+    .vibrant-app-shell .vibrant-tile-grid { grid-template-columns:repeat(3,minmax(0,1fr)) !important; }
+    .dashboard-filter-card { align-items:flex-start !important; flex-direction:column !important; }
+  }
+  @media (max-width:900px) {
+    .vibrant-topbar { min-height:174px !important; }
+    .vibrant-app-shell .top-navigation-scroll { grid-template-columns:repeat(4,minmax(0,1fr)) !important; grid-auto-rows:38px !important; }
+    .vibrant-app-shell .top-navigation-item span { font-size:11px !important; }
+    .vibrant-app-shell .sidebar-compact { top:174px !important; }
+    .vibrant-app-shell .main { padding-top:174px !important; margin-left:0 !important; width:100% !important; }
+    .vibrant-app-shell .vibrant-tile-grid { grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
+  }
+  @media (max-width:600px) {
+    .vibrant-topbar { min-height:220px !important; padding:8px 10px 10px !important; }
+    .vibrant-app-shell .topbar-primary-row { grid-template-columns:1fr auto !important; display:grid !important; height:54px !important; }
+    .vibrant-app-shell .top-navigation-scroll { grid-template-columns:repeat(2,minmax(0,1fr)) !important; grid-auto-rows:38px !important; }
+    .vibrant-app-shell .sidebar-compact { top:220px !important; }
+    .vibrant-app-shell .main { padding-top:220px !important; }
+    .vibrant-app-shell .content { padding:18px 12px 36px !important; }
+    .vibrant-app-shell .vibrant-tile-grid { grid-template-columns:1fr !important; }
+  }
+
+  .compact-brand { padding:10px 8px 20px !important; border-bottom:1px solid rgba(255,255,255,.12) !important; }
+  .compact-brand .brand-logo { width:48px !important; height:48px !important; border-radius:15px !important; overflow:hidden !important; box-shadow:0 10px 24px rgba(0,0,0,.22) !important; }
+  .compact-brand .brand-logo img { width:100% !important; height:100% !important; object-fit:cover !important; }
+  .compact-brand-copy .brand-name { color:#fff !important; font-size:20px !important; font-weight:900 !important; letter-spacing:.2px !important; }
+  .compact-brand-copy .brand-sub { color:#b9b8dc !important; font-size:10px !important; font-weight:800 !important; letter-spacing:2px !important; }
+  .compact-sidebar-label { padding:22px 10px 8px !important; color:#a9a9cf !important; font-size:11px !important; font-weight:900 !important; letter-spacing:1.6px !important; }
+  .compact-sidebar-nav { display:flex !important; flex-direction:column !important; gap:7px !important; }
+  .vibrant-app-shell .sidebar-compact .nav-item { min-height:52px !important; padding:0 12px !important; border-radius:14px !important; color:#d9d9ef !important; font-size:15px !important; font-weight:750 !important; border:1px solid transparent !important; transition:.2s ease !important; }
+  .vibrant-app-shell .sidebar-compact .nav-item:hover { background:rgba(255,255,255,.10) !important; color:#fff !important; transform:translateX(2px); }
+  .vibrant-app-shell .sidebar-compact .nav-item.active { background:linear-gradient(135deg,#8b5cff,#6846f5) !important; color:#fff !important; box-shadow:0 12px 26px rgba(111,77,255,.32) !important; }
+  .compact-sidebar-bottom { margin-top:auto !important; }
+  .compact-storage-card { background:rgba(255,255,255,.08) !important; border:1px solid rgba(255,255,255,.10) !important; padding:11px !important; border-radius:14px !important; color:#fff !important; }
+  .compact-storage-card strong { color:#fff !important; font-size:12px !important; }
+  .vibrant-app-shell .main { min-width:0 !important; width:calc(100% - 205px) !important; background:transparent !important; transition:width .25s ease !important; }
+  .vibrant-app-shell .sidebar-compact.collapsed + .main { width:100% !important; }
+  .vibrant-topbar { position:sticky !important; top:0 !important; z-index:70 !important; background:linear-gradient(90deg,rgba(255,255,255,.58),rgba(246,241,255,.48),rgba(238,250,249,.46),rgba(255,241,248,.52)) !important; backdrop-filter:blur(24px) saturate(165%) !important; -webkit-backdrop-filter:blur(24px) saturate(165%) !important; border-bottom:1px solid rgba(106,82,220,.16) !important; box-shadow:0 10px 34px rgba(74,55,145,.09) !important; padding:0 22px !important; }
+  .topbar-primary-row { min-height:72px !important; display:flex !important; align-items:center !important; justify-content:space-between !important; gap:18px !important; }
+  .vibrant-breadcrumb { display:flex !important; align-items:center !important; gap:8px !important; font-size:16px !important; color:#8590a5 !important; font-weight:650 !important; }
+  .vibrant-breadcrumb strong { color:#18243d !important; font-size:19px !important; }
+  .vibrant-icon-btn { width:44px !important; height:44px !important; border-radius:13px !important; background:#f5f2ff !important; color:#5b4bc3 !important; border:1px solid #e9e3ff !important; }
+  .vibrant-admin-chip { min-height:48px !important; border-radius:15px !important; background:#f7f6ff !important; border:1px solid #ebe7ff !important; padding:5px 11px 5px 6px !important; }
+  .vibrant-admin-chip .avatar { background:linear-gradient(135deg,#7255ff,#a44cff) !important; color:#fff !important; width:37px !important; height:37px !important; }
+  .top-navigation-scroll { display:flex !important; align-items:center !important; justify-content:flex-start !important; gap:4px 5px !important; flex-wrap:wrap !important; overflow:visible !important; padding:0 0 10px !important; width:100% !important; }
+  .top-navigation-scroll::-webkit-scrollbar { display:none; }
+  .top-navigation-item { flex:0 0 auto !important; display:inline-flex !important; align-items:center !important; gap:6px !important; min-height:38px !important; padding:0 10px !important; border:1px solid transparent !important; border-radius:11px !important; background:transparent !important; color:#68748b !important; font-size:13px !important; font-weight:800 !important; cursor:pointer !important; transition:.18s ease !important; white-space:nowrap !important; }
+  .top-navigation-item:hover { background:#f1efff !important; color:#6049e9 !important; }
+  .top-navigation-item.active { background:linear-gradient(135deg,#6e4cff,#8a4eff) !important; color:#fff !important; box-shadow:0 8px 18px rgba(111,77,255,.23) !important; }
+  .vibrant-app-shell .content { padding:28px 30px 50px !important; max-width:1800px !important; margin:0 auto !important; }
+  .vibrant-dashboard { animation:pfFadeIn .35s ease both; }
+  .vibrant-dashboard-hero { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; padding:10px 4px 25px; }
+  .vibrant-dashboard-hero h1 { margin:7px 0 6px !important; font-size:38px !important; line-height:1.12 !important; font-weight:950 !important; letter-spacing:-1px !important; color:#15233e !important; }
+  .vibrant-dashboard-hero p { margin:0 !important; color:#69768e !important; font-size:18px !important; }
+  .vibrant-dashboard-actions { display:flex; gap:10px; flex-wrap:wrap; }
+  .vibrant-dashboard-actions .btn { min-height:48px !important; border-radius:13px !important; font-size:16px !important; font-weight:850 !important; }
+  .dashboard-filter-card { background:#fff !important; border:1px solid #e9e6f8 !important; border-radius:20px !important; padding:18px 20px !important; box-shadow:0 12px 35px rgba(66,51,132,.07) !important; margin-bottom:20px !important; display:flex; align-items:center; justify-content:space-between; gap:18px; }
+  .dashboard-filter-heading { display:flex; align-items:center; gap:14px; min-width:230px; }
+  .dashboard-filter-heading strong { display:block; font-size:20px !important; color:#1d2940 !important; }
+  .dashboard-filter-heading span { display:block; color:#7b879c; font-size:13px !important; margin-top:3px; }
+  .dashboard-filter-badge { display:inline-flex; align-items:center; gap:6px; color:#0e9d7f; background:#e8fbf5; border:1px solid #c9f4e8; padding:7px 10px; border-radius:999px; font-size:12px; font-weight:900; }
+  .dashboard-date-controls { display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap; }
+  .dashboard-date-controls label { display:flex; flex-direction:column; gap:6px; }
+  .dashboard-date-controls label>span { font-size:12px; font-weight:850; color:#68748b; }
+  .date-input-wrap { position:relative; }
+  .date-input-wrap input { width:180px; height:44px; border:1px solid #e0e4ef; border-radius:11px; padding:0 38px 0 12px; background:#fbfcff; color:#26334a; font-size:15px !important; font-weight:700; }
+  .date-input-wrap svg { position:absolute; right:11px; top:13px; color:#6b54e8; pointer-events:none; }
+  .dashboard-filter-btn { height:44px; border:0; border-radius:11px; padding:0 16px; background:linear-gradient(135deg,#6d4aff,#914cff); color:#fff; font-weight:850; font-size:14px; display:inline-flex; align-items:center; gap:7px; cursor:pointer; }
+  .vibrant-tile-grid { display:grid !important; grid-template-columns:repeat(4,minmax(0,1fr)) !important; gap:18px !important; }
+  .vibrant-stat-tile { position:relative; min-height:152px; border:1px solid transparent !important; border-radius:20px !important; padding:22px 20px 24px !important; display:flex !important; align-items:center !important; gap:16px !important; text-align:left !important; overflow:hidden !important; cursor:pointer !important; box-shadow:0 12px 28px rgba(31,42,71,.08) !important; transition:transform .2s ease, box-shadow .2s ease !important; }
+  .vibrant-stat-tile:hover { transform:translateY(-4px); box-shadow:0 18px 35px rgba(31,42,71,.14) !important; }
+  .vibrant-stat-icon { width:58px; height:58px; min-width:58px; border-radius:50%; display:grid; place-items:center; background:rgba(255,255,255,.72); box-shadow:inset 0 0 0 1px rgba(255,255,255,.5); }
+  .vibrant-stat-copy { min-width:0; }
+  .vibrant-stat-copy span { display:block; font-size:15px !important; line-height:1.2; font-weight:850 !important; color:#202d43 !important; text-transform:none !important; }
+  .vibrant-stat-copy strong { display:block; margin-top:9px; font-size:30px !important; line-height:1 !important; font-weight:950 !important; color:#0f1c31 !important; letter-spacing:-.5px; }
+  .vibrant-stat-arrow { position:absolute; right:14px; top:14px; width:31px; height:31px; border-radius:10px; display:grid; place-items:center; background:rgba(255,255,255,.65); color:#4d5a71; }
+  .vibrant-stat-progress { position:absolute; left:0; right:0; bottom:0; height:8px; background:rgba(255,255,255,.42); }
+  .vibrant-stat-progress span { display:block; width:52%; height:100%; border-radius:0 9px 9px 0; background:rgba(255,255,255,.96); }
+  .tone-mint { background:linear-gradient(135deg,#e8fbf2,#d8f7e9) !important; } .tone-mint .vibrant-stat-icon{color:#17b86e}.tone-violet{background:linear-gradient(135deg,#f3eaff,#e7d9ff)!important}.tone-violet .vibrant-stat-icon{color:#8950c8}.tone-pink{background:linear-gradient(135deg,#ffeaf4,#ffd9eb)!important}.tone-pink .vibrant-stat-icon{color:#ec3b91}.tone-gold{background:linear-gradient(135deg,#fff7d9,#ffedac)!important}.tone-gold .vibrant-stat-icon{color:#e6b000}.tone-orange{background:linear-gradient(135deg,#fff0df,#ffe1c2)!important}.tone-orange .vibrant-stat-icon{color:#ef791a}.tone-green{background:linear-gradient(135deg,#e6faed,#d5f4df)!important}.tone-green .vibrant-stat-icon{color:#20ae63}.tone-teal{background:linear-gradient(135deg,#e1f9f5,#cff2eb)!important}.tone-teal .vibrant-stat-icon{color:#0caf9d}.tone-slate{background:linear-gradient(135deg,#eef2f6,#e2e7ed)!important}.tone-slate .vibrant-stat-icon{color:#43566f}.tone-blue{background:linear-gradient(135deg,#e7f1ff,#d6e6ff)!important}.tone-blue .vibrant-stat-icon{color:#3d81e9}.tone-cyan{background:linear-gradient(135deg,#e3faf8,#cff2ed)!important}.tone-cyan .vibrant-stat-icon{color:#16ad9e}.tone-indigo{background:linear-gradient(135deg,#eeecff,#ddd8ff)!important}.tone-indigo .vibrant-stat-icon{color:#6654e8}.tone-purple{background:linear-gradient(135deg,#eeeaff,#ddd5ff)!important}.tone-purple .vibrant-stat-icon{color:#7255dd}
+  .vibrant-dashboard-lower { display:grid; grid-template-columns:1.15fr .85fr; gap:18px; margin-top:20px; }
+  .vibrant-panel { background:#fff; border:1px solid #e9e6f5; border-radius:20px; padding:20px; box-shadow:0 12px 30px rgba(54,42,110,.06); }
+  .vibrant-panel-heading { display:flex; align-items:center; justify-content:space-between; color:#7358e8; margin-bottom:15px; }
+  .vibrant-panel-heading span { font-size:11px; letter-spacing:1.4px; font-weight:950; color:#8b91a2; }
+  .vibrant-panel-heading h3 { margin:4px 0 0; font-size:22px; color:#18253d; }
+  .vibrant-attention-list { display:flex; flex-direction:column; gap:8px; }
+  .vibrant-attention-list button { border:0; background:#f8f7ff; border-radius:14px; padding:13px 14px; display:grid; grid-template-columns:auto 1fr auto; gap:12px; align-items:center; text-align:left; cursor:pointer; }
+  .vibrant-attention-list button>svg:first-child { color:#7055e7; }
+  .vibrant-attention-list strong { display:block; color:#24324a; font-size:15px; } .vibrant-attention-list span{display:block;color:#7d8798;font-size:12px;margin-top:3px}
+  .vibrant-empty { min-height:110px; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#1baf7d; gap:4px; text-align:center; }
+  .vibrant-empty strong { color:#2a3850; font-size:17px; } .vibrant-empty span { color:#8791a3; font-size:13px; }
+  .vibrant-quick-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .vibrant-quick-grid .quick-action { min-height:92px !important; border-radius:15px !important; background:linear-gradient(135deg,#f7f5ff,#fff) !important; border:1px solid #ece8fb !important; }
+  .vibrant-app-shell .page h1,.vibrant-app-shell .page-heading h1,.vibrant-app-shell .page-header h1 { font-size:34px !important; font-weight:950 !important; color:#17243b !important; }
+  .vibrant-app-shell .page p,.vibrant-app-shell .page-header p { font-size:16px !important; }
+  .vibrant-app-shell .card,.vibrant-app-shell .panel { border-radius:18px !important; box-shadow:0 10px 28px rgba(44,43,90,.06) !important; border-color:#e8e8f2 !important; }
+  .vibrant-app-shell .card-header h3,.vibrant-app-shell .panel h3 { font-size:20px !important; }
+  .vibrant-app-shell input,.vibrant-app-shell select,.vibrant-app-shell textarea { min-height:44px; font-size:16px !important; border-radius:11px !important; }
+  .vibrant-app-shell table { font-size:16px !important; }
+  .vibrant-app-shell th { font-size:13px !important; }
+  .vibrant-app-shell .btn { font-size:15px !important; min-height:44px; border-radius:11px !important; }
+  .vibrant-app-shell .modal { border-radius:22px !important; }
+  .vibrant-app-shell .modal-header h2 { font-size:24px !important; }
+  @keyframes pfFadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
+  @media (max-width:1200px) { .vibrant-tile-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important}.dashboard-filter-card{align-items:flex-start;flex-direction:column}.vibrant-dashboard-lower{grid-template-columns:1fr}.vibrant-app-shell .content{padding:24px 20px 40px!important} }
+  .vibrant-app-shell .backdrop { display:none !important; }
+  @media (max-width:1100px) { .vibrant-app-shell .top-navigation-scroll{grid-template-columns:repeat(5,minmax(120px,1fr))!important}.vibrant-app-shell .sidebar-compact{position:fixed!important;left:0!important;top:0;transition:transform .25s ease,opacity .25s ease;width:205px!important;min-width:205px!important}.vibrant-app-shell .sidebar-compact.collapsed{left:0!important;transform:translateX(-225px);width:205px!important;min-width:205px!important;opacity:1!important;padding:18px 12px!important;pointer-events:none!important}.vibrant-app-shell .sidebar-compact.collapsed > *{visibility:visible!important}.vibrant-app-shell .sidebar-compact.open{left:0!important;transform:translateX(0)}.vibrant-app-shell .main{width:100%!important}.vibrant-app-shell .backdrop{display:block!important;position:fixed!important;inset:0!important;z-index:79!important;background:rgba(11,15,38,.38)!important;border:0!important}.top-navigation-scroll{margin-left:-4px;margin-right:-4px}.vibrant-dashboard-hero{align-items:flex-start;flex-direction:column}.vibrant-dashboard-hero h1{font-size:31px!important}.vibrant-tile-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.vibrant-stat-tile{min-height:135px}.topbar-primary-row{min-height:64px!important}.vibrant-app-shell .content{padding:20px 14px 34px!important} }
+  @media (max-width:560px) { .vibrant-app-shell .top-navigation-scroll{grid-template-columns:repeat(2,minmax(0,1fr))!important}.vibrant-app-shell .vibrant-collapsed-brand span{display:none!important}.vibrant-app-shell .menu-btn{width:42px!important;height:42px!important;flex-basis:42px!important} body{font-size:16px!important}.topbar{padding:0 12px!important}.top-navigation-item{font-size:13px!important;padding:0 11px!important}.vibrant-tile-grid{grid-template-columns:1fr!important}.vibrant-stat-copy strong{font-size:28px!important}.vibrant-dashboard-hero h1{font-size:28px!important}.dashboard-date-controls{width:100%}.date-input-wrap input{width:100%}.dashboard-date-controls label{flex:1;min-width:0}.dashboard-filter-btn{width:100%;justify-content:center}.vibrant-quick-grid{grid-template-columns:1fr 1fr}.vibrant-admin-chip>div:not(.avatar){display:none} }
+
+
+  /* ===== PROFESSIONAL FULL-WIDTH NAVIGATION ===== */
+  .vibrant-app-shell {
+    display:block !important;
+    min-height:100vh !important;
+  }
+
+  /* The navbar belongs to the viewport, not to the sidebar/main column. */
+  .vibrant-topbar {
+    position:fixed !important;
+    inset:0 0 auto 0 !important;
+    width:100vw !important;
+    min-height:132px !important;
+    height:auto !important;
+    padding:10px 22px 12px !important;
+    background:rgba(255,255,255,.97) !important;
+    border-bottom:1px solid #e7e9f2 !important;
+    box-shadow:0 8px 30px rgba(24,35,58,.07) !important;
+    z-index:200 !important;
+    box-sizing:border-box !important;
+  }
+
+  .topbar-primary-row {
+    min-height:58px !important;
+    height:58px !important;
+    max-width:1800px !important;
+    margin:0 auto !important;
+    padding:0 2px !important;
+    display:grid !important;
+    grid-template-columns:auto minmax(250px,1fr) auto !important;
+    align-items:center !important;
+    gap:16px !important;
+  }
+
+  .vibrant-app-shell .topbar-left {
+    display:flex !important;
+    align-items:center !important;
+    gap:11px !important;
+    min-width:0 !important;
+  }
+
+  /* Always-visible brand in the fixed navbar. */
+  .vibrant-collapsed-brand {
+    display:flex !important;
+    align-items:center !important;
+    gap:9px !important;
+    margin:0 8px 0 0 !important;
+    padding-right:16px !important;
+    border-right:1px solid #e8eaf2 !important;
+  }
+  .vibrant-collapsed-brand img {
+    width:42px !important;
+    height:42px !important;
+    border-radius:12px !important;
+    object-fit:cover !important;
+    box-shadow:0 4px 12px rgba(25,35,58,.12) !important;
+  }
+  .vibrant-collapsed-brand span {
+    display:block !important;
+    font-size:15px !important;
+    line-height:1.05 !important;
+    font-weight:850 !important;
+    color:#1a2740 !important;
+    white-space:nowrap !important;
+  }
+
+  .vibrant-app-shell .menu-btn {
+    flex:0 0 42px !important;
+    width:42px !important;
+    height:42px !important;
+    border-radius:11px !important;
+    background:#f7f7fb !important;
+    color:#4e5b73 !important;
+    border:1px solid #e5e8ef !important;
+  }
+  .vibrant-app-shell .menu-btn:hover {
+    background:#f0edff !important;
+    color:#6847e8 !important;
+  }
+
+  .vibrant-breadcrumb {
+    display:flex !important;
+    align-items:center !important;
+    gap:7px !important;
+    min-width:0 !important;
+    white-space:nowrap !important;
+    color:#8490a5 !important;
+    font-size:14px !important;
+    font-weight:650 !important;
+  }
+  .vibrant-breadcrumb span { display:none !important; }
+  .vibrant-breadcrumb strong {
+    color:#17243b !important;
+    font-size:22px !important;
+    font-weight:850 !important;
+    letter-spacing:-.35px !important;
+  }
+
+  .vibrant-app-shell .topbar-actions {
+    display:flex !important;
+    align-items:center !important;
+    justify-content:flex-end !important;
+    gap:8px !important;
+    flex-shrink:0 !important;
+  }
+  .vibrant-icon-btn {
+    width:42px !important;
+    height:42px !important;
+    border-radius:11px !important;
+    background:#fff !important;
+    color:#536078 !important;
+    border:1px solid #e3e6ee !important;
+    box-shadow:none !important;
+  }
+  .vibrant-icon-btn:hover { background:#f7f5ff !important; color:#6847e8 !important; }
+  .vibrant-admin-chip {
+    min-height:42px !important;
+    border-radius:11px !important;
+    background:#fff !important;
+    border:1px solid #e3e6ee !important;
+    padding:3px 10px 3px 5px !important;
+    box-shadow:none !important;
+  }
+  .vibrant-admin-chip .avatar {
+    width:34px !important;
+    height:34px !important;
+    background:#6d4aff !important;
+  }
+
+  /* Exactly two clean rows on desktop. Every item has equal geometry. */
+  .vibrant-app-shell .top-navigation-scroll {
+    max-width:1800px !important;
+    margin:7px auto 0 !important;
+    padding:0 !important;
+    display:grid !important;
+    grid-template-columns:repeat(8,minmax(0,1fr)) !important;
+    grid-auto-rows:38px !important;
+    gap:6px !important;
+    overflow:visible !important;
+    width:100% !important;
+  }
+  .vibrant-app-shell .top-navigation-item {
+    width:100% !important;
+    min-width:0 !important;
+    min-height:38px !important;
+    height:38px !important;
+    padding:0 8px !important;
+    border-radius:9px !important;
+    border:1px solid #e7e9f0 !important;
+    background:#fafbfc !important;
+    color:#536078 !important;
+    box-shadow:none !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    gap:7px !important;
+    font-size:13px !important;
+    font-weight:800 !important;
+    white-space:nowrap !important;
+    overflow:hidden !important;
+  }
+  .vibrant-app-shell .top-navigation-item svg { flex:0 0 auto !important; }
+  .vibrant-app-shell .top-navigation-item span {
+    min-width:0 !important;
+    overflow:hidden !important;
+    text-overflow:ellipsis !important;
+    white-space:nowrap !important;
+  }
+  .vibrant-app-shell .top-navigation-item:hover {
+    background:#f4f2ff !important;
+    border-color:#ddd7ff !important;
+    color:#5f43d6 !important;
+    transform:none !important;
+  }
+  .vibrant-app-shell .top-navigation-item.active {
+    background:#6948e9 !important;
+    border-color:#6948e9 !important;
+    color:#fff !important;
+    box-shadow:0 5px 12px rgba(105,72,233,.20) !important;
+  }
+
+  /* Sidebar sits UNDER the fixed navbar. */
+  .vibrant-app-shell .sidebar-compact {
+    position:fixed !important;
+    left:0 !important;
+    top:132px !important;
+    bottom:0 !important;
+    width:205px !important;
+    min-width:205px !important;
+    height:auto !important;
+    max-height:none !important;
+    overflow-y:auto !important;
+    z-index:150 !important;
+    transition:transform .24s ease, opacity .24s ease !important;
+  }
+  .vibrant-app-shell .sidebar-compact.collapsed {
+    width:205px !important;
+    min-width:205px !important;
+    height:auto !important;
+    padding:4px 12px 18px !important;
+    opacity:0 !important;
+    transform:translateX(-100%) !important;
+    pointer-events:none !important;
+  }
+
+  /* Keep the sidebar itself clean; branding is already permanently in navbar. */
+  .vibrant-app-shell .sidebar-compact .compact-brand {
+    display:none !important;
+    position:relative !important;
+    height:42px !important;
+    padding:0 !important;
+    margin:0 0 4px !important;
+    border:0 !important;
+  }
+  .vibrant-app-shell .sidebar-compact .compact-brand .brand-logo,
+  .vibrant-app-shell .sidebar-compact .compact-brand .compact-brand-copy {
+    display:none !important;
+  }
+  .vibrant-app-shell .sidebar-compact .compact-sidebar-label {
+    padding-top:0 !important;
+  }
+
+  .vibrant-app-shell .main {
+    width:100% !important;
+    min-width:0 !important;
+    margin-left:205px !important;
+    padding-top:132px !important;
+    box-sizing:border-box !important;
+    transition:margin-left .24s ease !important;
+  }
+  .vibrant-app-shell.sidebar-is-collapsed .main {
+    width:100% !important;
+    margin-left:0 !important;
+  }
+  .vibrant-app-shell .content {
+    width:100% !important;
+    max-width:1800px !important;
+    box-sizing:border-box !important;
+  }
+  .vibrant-app-shell .backdrop { display:none !important; }
+
+  @media (max-width:1500px) {
+    .vibrant-app-shell .top-navigation-scroll { grid-template-columns:repeat(8,minmax(0,1fr)) !important; }
+    .vibrant-app-shell .top-navigation-item { font-size:12px !important; gap:5px !important; }
+    .vibrant-app-shell .top-navigation-item svg { width:16px !important; height:16px !important; }
+  }
+
+  @media (max-width:1100px) {
+    .vibrant-topbar { min-height:174px !important; }
+    .topbar-primary-row { grid-template-columns:1fr auto !important; min-height:58px !important; }
+    .vibrant-app-shell .topbar-left { grid-column:1 / 2 !important; }
+    .vibrant-app-shell .topbar-actions { grid-column:2 / 3 !important; grid-row:1 !important; }
+    .vibrant-app-shell .top-navigation-scroll { grid-template-columns:repeat(4,minmax(0,1fr)) !important; grid-auto-rows:36px !important; }
+    .vibrant-app-shell .top-navigation-item { height:36px !important; }
+    .vibrant-app-shell .sidebar-compact { top:174px !important; }
+    .vibrant-app-shell .main { padding-top:174px !important; margin-left:0 !important; }
+    .vibrant-app-shell .sidebar-compact.open { transform:translateX(0) !important; }
+    .vibrant-app-shell .sidebar-compact.collapsed { transform:translateX(-100%) !important; }
+    .vibrant-app-shell .backdrop { display:block !important; position:fixed !important; inset:174px 0 0 0 !important; z-index:140 !important; background:rgba(13,18,38,.35) !important; border:0 !important; }
+  }
+
+  @media (max-width:700px) {
+    .vibrant-topbar { min-height:220px !important; padding:8px 12px 10px !important; }
+    .topbar-primary-row { grid-template-columns:1fr auto !important; gap:8px !important; }
+    .vibrant-collapsed-brand { padding-right:8px !important; margin-right:0 !important; }
+    .vibrant-collapsed-brand img { width:38px !important; height:38px !important; }
+    .vibrant-collapsed-brand span { font-size:13px !important; }
+    .vibrant-breadcrumb strong { font-size:18px !important; }
+    .vibrant-admin-chip > div:not(.avatar), .vibrant-admin-chip > svg { display:none !important; }
+    .vibrant-admin-chip { padding-right:5px !important; }
+    .vibrant-app-shell .top-navigation-scroll { grid-template-columns:repeat(2,minmax(0,1fr)) !important; grid-auto-rows:38px !important; margin-top:7px !important; }
+    .vibrant-app-shell .top-navigation-item { height:38px !important; font-size:12px !important; }
+    .vibrant-app-shell .sidebar-compact { top:220px !important; }
+    .vibrant-app-shell .main { padding-top:220px !important; }
+    .vibrant-app-shell .backdrop { inset:220px 0 0 0 !important; }
+  }
+
+  /* FINAL SIDEBAR SPACING FIX: remove the hidden brand block from layout completely. */
+  .vibrant-app-shell .sidebar-compact .compact-brand {
+    display:none !important;
+    width:0 !important;
+    height:0 !important;
+    min-height:0 !important;
+    max-height:0 !important;
+    margin:0 !important;
+    padding:0 !important;
+    border:0 !important;
+    overflow:hidden !important;
+    visibility:hidden !important;
+  }
+  .vibrant-app-shell .sidebar-compact .compact-sidebar-label {
+    display:block !important;
+    padding:0 10px 10px !important;
+    margin:0 !important;
+  }
+  .vibrant-app-shell .sidebar-compact .compact-sidebar-nav {
+    margin:0 !important;
+    padding:0 !important;
+  }
+
+`;
 
 function addMonthsToDate(dateString, months) {
   const date = new Date(`${dateString}T00:00:00`);
@@ -129,6 +728,7 @@ function getMembershipStatus(expiry) {
 
 const PRODUCTION_APP_URL = 'https://noscodera.github.io/preface-fitness/';
 const PRODUCTION_GYM_ID = 'd702119b-3205-46a2-9ee0-294d682ddf14';
+const PUBLIC_GYM_ID_STORAGE_KEY = 'preface-fitness-public-gym-id';
 
 function getCheckInPath() {
   return `${PRODUCTION_APP_URL.replace(/\/$/, '')}/#check-in`;
@@ -393,8 +993,709 @@ const seed = {
     },
   ],
 
-  settings: { gymName: 'Preface Fitness', currency: '₹', gymAddress: '', gymPhone: '', gymEmail: '', gstin: '', invoicePrefix: 'PF-INV', defaultGstRate: 5, referralPointsPerReferral: 10, gymLatitude: '', gymLongitude: '', notice: { enabled: false, text: '', priority: 'medium' }, gymIntro: { description: 'A modern fitness destination focused on strength, conditioning, personal training and sustainable results.', facilities: ['Strength & cardio zone', 'Personal training', 'Functional training', 'Locker & changing facilities', 'Member progress tracking', 'Diet & nutrition guidance'] }, auth: { username: 'admin', passwordHash: '' } },
+  settings: {
+    gymName: 'Preface Fitness', currency: '₹', gymAddress: '', gymPhone: '', gymEmail: '', gstin: '', invoicePrefix: 'PF-INV', defaultGstRate: 5, referralPointsPerReferral: 10, gymLatitude: '', gymLongitude: '',
+    notice: { enabled: false, dashboardEnabled: false, text: '', priority: 'medium', id: '', createdAt: '' },
+    noticeHistory: [],
+    gymIntro: { description: 'A modern fitness destination focused on strength, conditioning, personal training and sustainable results.', facilities: ['Strength & cardio zone', 'Personal training', 'Functional training', 'Locker & changing facilities', 'Member progress tracking', 'Diet & nutrition guidance'] },
+    publicPage: {
+      whatsappNumber: '', instagramUrl: '', facebookUrl: '', websiteUrl: '',
+      googleRating: '5.0', googleReviewCount: '95', googleMapsUrl: '', googleSearchUrl: 'https://www.google.com/search?q=preface+fitness', googlePlaceName: 'Preface Fitness', googlePhone: '093692 79056', googleAddress: 'Preface Fitness, Nadan Mahal Rd. above Hdfc Bank, Yahiyaganj, Lucknow, Uttar Pradesh 226003', hoursText: 'Mon-Sun · 6 AM - 11 PM',
+      trainers: [],
+      packages: [],
+      reviews: []
+    },
+    auth: { username: 'admin', passwordHash: '' }
+  },
 };
+
+
+const NOTICE_SETTINGS_CSS = `
+  .notice-settings-toggles{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 16px}
+  .notice-toggle{display:flex;align-items:center;gap:9px;padding:10px 13px;border:1px solid #dce3ed;border-radius:11px;background:#f8fafc;color:#334155;font-size:13px;font-weight:700;cursor:pointer}
+  .notice-toggle input{accent-color:#6d4aff;width:17px;height:17px}
+  .notice-preview{position:relative;display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:14px;border:1px solid #dfe5ef;background:#f8f7ff;color:#334155;overflow:hidden}
+  .notice-preview>div{min-width:0}.notice-preview strong,.notice-preview span{display:block}.notice-preview strong{font-size:13px}.notice-preview span{font-size:13px;line-height:1.5;margin-top:3px;color:#64748b;overflow-wrap:anywhere}
+  .notice-preview.priority-high{background:#fff4f6;border-color:#ffd2da}.notice-preview.priority-low{background:#effcf8;border-color:#ccefe6}
+  .notice-preview-pulse{width:9px;height:9px;border-radius:50%;background:#6d4aff;box-shadow:0 0 0 0 rgba(109,74,255,.45);animation:noticeSettingsPulse 2s infinite;flex:0 0 auto}
+  .notice-preview.priority-high .notice-preview-pulse{background:#ef476f;box-shadow:0 0 0 0 rgba(239,71,111,.45)}.notice-preview.priority-low .notice-preview-pulse{background:#12bfa6;box-shadow:0 0 0 0 rgba(18,191,166,.45)}
+  @keyframes noticeSettingsPulse{0%{box-shadow:0 0 0 0 rgba(109,74,255,.45)}70%{box-shadow:0 0 0 8px rgba(109,74,255,0)}100%{box-shadow:0 0 0 0 rgba(109,74,255,0)}}
+  .notice-history{margin-top:24px;border-top:1px solid #e7ebf1;padding-top:20px}.notice-history-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:12px}.notice-history-head h4{margin:0;font-size:16px;color:#18263d}.notice-history-head p{margin:5px 0 0;color:#718096;font-size:12px;line-height:1.5}.notice-history-head>span{font-size:11px;font-weight:900;color:#6d4aff;background:#f0edff;padding:6px 9px;border-radius:999px;white-space:nowrap}
+  .notice-history-item{display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:12px;align-items:center;padding:13px 0;border-bottom:1px solid #edf0f4}.notice-history-item.active{background:#fbfaff;border-radius:12px;padding-left:10px;padding-right:10px}.notice-history-dot{width:9px;height:9px;border-radius:50%;background:#6d4aff}.notice-history-dot.priority-high{background:#ef476f}.notice-history-dot.priority-low{background:#12bfa6}.notice-history-copy{min-width:0}.notice-history-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}.notice-history-meta span{font-size:9px;font-weight:900;letter-spacing:1px;color:#6d4aff}.notice-history-meta small{font-size:10px;color:#94a3b8}.notice-history-meta b{font-size:9px;background:#e9f9f1;color:#168454;padding:3px 6px;border-radius:999px}.notice-history-copy>strong{display:block;color:#334155;font-size:13px;line-height:1.45;overflow-wrap:anywhere}.notice-history-item .btn{white-space:nowrap}.notice-history-empty{display:flex;align-items:center;gap:10px;padding:18px;border-radius:12px;background:#f8fafc;color:#718096;font-size:12px}
+  @media(max-width:620px){.gym-public-dark-v2 .gym-public-brand img{width:50px;height:50px}.gym-public-dark-v2 .gym-public-brand strong{font-size:23px;letter-spacing:-.3px}.gym-public-dark-v2 .gym-public-brand span{font-size:9px;letter-spacing:1.5px}.notice-history-item{grid-template-columns:8px minmax(0,1fr)}.notice-history-item .btn{grid-column:2;justify-self:start}.notice-history-head{align-items:center}}
+`;
+
+const FINAL_UI_FIX_CSS = `
+  html, body, #root { width:100% !important; max-width:100% !important; min-width:0 !important; overflow-x:hidden !important; }
+  body { margin:0 !important; }
+
+  /* ===== FULL-WIDTH FIXED NAVBAR ===== */
+  .vibrant-app-shell .main {
+    width:100% !important;
+    max-width:none !important;
+    min-width:0 !important;
+    margin-left:0 !important;
+    padding-top:132px !important;
+    box-sizing:border-box !important;
+    overflow-x:hidden !important;
+  }
+  .vibrant-app-shell .vibrant-topbar {
+    position:fixed !important;
+    top:0 !important;
+    left:0 !important;
+    right:0 !important;
+    width:100vw !important;
+    max-width:100vw !important;
+    min-height:132px !important;
+    height:132px !important;
+    box-sizing:border-box !important;
+    z-index:300 !important;
+    margin:0 !important;
+    padding:12px 24px 10px !important;
+    background:rgba(255,255,255,.58) !important;
+    backdrop-filter:blur(20px) saturate(150%) !important;
+    -webkit-backdrop-filter:blur(20px) saturate(150%) !important;
+    border-bottom:1px solid rgba(92,76,170,.13) !important;
+    box-shadow:0 5px 22px rgba(32,30,73,.07) !important;
+  }
+  .vibrant-app-shell .topbar-primary-row {
+    width:100% !important;
+    height:56px !important;
+    min-height:56px !important;
+    display:flex !important;
+    align-items:center !important;
+    gap:12px !important;
+    box-sizing:border-box !important;
+  }
+  .vibrant-app-shell .topbar-left {
+    display:flex !important;
+    align-items:center !important;
+    gap:10px !important;
+    min-width:0 !important;
+    flex:1 1 auto !important;
+  }
+  /* Logo is ALWAYS visible, whether sidebar is open or closed. */
+  .vibrant-app-shell .vibrant-collapsed-brand {
+    display:flex !important;
+    align-items:center !important;
+    gap:10px !important;
+    flex:0 0 auto !important;
+    min-width:max-content !important;
+    margin:0 4px 0 0 !important;
+  }
+  .vibrant-app-shell .vibrant-collapsed-brand img {
+    display:block !important;
+    width:46px !important;
+    height:46px !important;
+    object-fit:cover !important;
+    border-radius:12px !important;
+    box-shadow:0 5px 15px rgba(20,20,55,.12) !important;
+  }
+  .vibrant-app-shell .vibrant-collapsed-brand span {
+    display:block !important;
+    color:#1b2942 !important;
+    font-size:16px !important;
+    font-weight:900 !important;
+    white-space:nowrap !important;
+  }
+  .vibrant-app-shell .menu-btn {
+    flex:0 0 44px !important;
+    width:44px !important;
+    height:44px !important;
+    margin:0 !important;
+    order:0 !important;
+  }
+  .vibrant-app-shell .vibrant-breadcrumb {
+    display:flex !important;
+    align-items:center !important;
+    gap:7px !important;
+    min-width:0 !important;
+    white-space:nowrap !important;
+    padding-left:10px !important;
+    border-left:1px solid rgba(94,86,155,.16) !important;
+  }
+  .vibrant-app-shell .vibrant-breadcrumb span { color:#8290a7 !important; font-weight:700 !important; }
+  .vibrant-app-shell .vibrant-breadcrumb strong { color:#17243c !important; font-size:22px !important; }
+  .vibrant-app-shell .topbar-actions {
+    display:flex !important;
+    align-items:center !important;
+    gap:8px !important;
+    flex:0 0 auto !important;
+    margin-left:auto !important;
+  }
+  .vibrant-app-shell .vibrant-icon-btn {
+    width:44px !important;
+    height:44px !important;
+    flex:0 0 44px !important;
+  }
+  .vibrant-app-shell .vibrant-admin-chip { min-height:44px !important; }
+
+  /* Navigation is a real two-row grid, not a scrolling strip. */
+  .vibrant-app-shell .top-navigation-scroll {
+    display:grid !important;
+    grid-template-columns:repeat(8,minmax(0,1fr)) !important;
+    grid-template-rows:repeat(2,40px) !important;
+    grid-auto-flow:row !important;
+    gap:6px !important;
+    width:100% !important;
+    height:86px !important;
+    margin:0 !important;
+    padding:0 !important;
+    overflow:visible !important;
+    box-sizing:border-box !important;
+  }
+  .vibrant-app-shell .top-navigation-item {
+    width:100% !important;
+    min-width:0 !important;
+    height:40px !important;
+    min-height:40px !important;
+    box-sizing:border-box !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    gap:7px !important;
+    padding:0 8px !important;
+    border-radius:10px !important;
+    border:1px solid rgba(107,113,137,.16) !important;
+    background:rgba(255,255,255,.30) !important;
+    color:#536078 !important;
+    box-shadow:0 2px 8px rgba(31,42,71,.035) !important;
+    font-size:13px !important;
+    font-weight:800 !important;
+    white-space:nowrap !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    position:relative !important;
+  }
+  .vibrant-app-shell .top-navigation-item span {
+    display:inline !important;
+    min-width:max-content !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    white-space:nowrap !important;
+  }
+  .vibrant-app-shell .top-navigation-item svg { flex:0 0 auto !important; }
+  .vibrant-app-shell .top-navigation-item.active {
+    color:#fff !important;
+    background:linear-gradient(135deg,#6d4aff,#8750ff) !important;
+    border-color:transparent !important;
+    box-shadow:0 7px 16px rgba(109,74,255,.20) !important;
+  }
+  .vibrant-app-shell .top-navigation-item:hover {
+    transform:translateY(-1px) !important;
+    border-color:rgba(109,74,255,.25) !important;
+    background:rgba(255,255,255,.62) !important;
+  }
+
+  /* ===== SIDEBAR: UNDER NAVBAR, NEVER CHANGES PAGE WIDTH ===== */
+  .vibrant-app-shell .sidebar-compact {
+    position:fixed !important;
+    left:0 !important;
+    top:132px !important;
+    bottom:0 !important;
+    width:225px !important;
+    min-width:225px !important;
+    height:auto !important;
+    max-height:none !important;
+    margin:0 !important;
+    padding:16px 12px 18px !important;
+    box-sizing:border-box !important;
+    overflow-y:auto !important;
+    overflow-x:hidden !important;
+    z-index:290 !important;
+    transform:translateX(0) !important;
+    opacity:1 !important;
+    transition:transform .22s ease, opacity .22s ease !important;
+  }
+  .vibrant-app-shell .sidebar-compact.collapsed {
+    width:225px !important;
+    min-width:225px !important;
+    transform:translateX(-101%) !important;
+    opacity:0 !important;
+    pointer-events:none !important;
+  }
+  .vibrant-app-shell .sidebar-compact .compact-brand {
+    position:relative !important;
+    height:48px !important;
+    min-height:48px !important;
+    margin:0 0 14px !important;
+    padding:0 !important;
+    display:block !important;
+  }
+  .vibrant-app-shell .sidebar-compact .compact-brand .brand-logo,
+  .vibrant-app-shell .sidebar-compact .compact-brand .compact-brand-copy { display:none !important; }
+  .vibrant-app-shell .compact-sidebar-label { padding:0 10px 10px !important; }
+  .vibrant-app-shell .compact-sidebar-nav { display:flex !important; flex-direction:column !important; gap:7px !important; }
+  .vibrant-app-shell .sidebar-compact .nav-item { min-height:50px !important; }
+  .vibrant-app-shell .backdrop {
+    position:fixed !important;
+    left:0 !important;
+    right:0 !important;
+    top:132px !important;
+    bottom:0 !important;
+    z-index:280 !important;
+    background:rgba(17,20,48,.30) !important;
+    border:0 !important;
+  }
+
+  /* Main content always uses the entire viewport. */
+  .vibrant-app-shell .content {
+    width:100% !important;
+    max-width:none !important;
+    min-width:0 !important;
+    margin:0 !important;
+    padding:28px 30px 48px !important;
+    box-sizing:border-box !important;
+    overflow-x:hidden !important;
+  }
+  .vibrant-app-shell .vibrant-dashboard { width:100% !important; max-width:1800px !important; margin:0 auto !important; }
+
+  /* Subtle professional reflection / micro-animation. */
+  .vibrant-app-shell .vibrant-stat-tile,
+  .vibrant-app-shell .top-navigation-item,
+  .vibrant-app-shell .btn,
+  .vibrant-app-shell .quick-action,
+  .vibrant-app-shell .dashboard-filter-btn,
+  .vibrant-app-shell .nav-item { overflow:hidden !important; }
+  .vibrant-app-shell .vibrant-stat-tile::before,
+  .vibrant-app-shell .top-navigation-item::before,
+  .vibrant-app-shell .btn::before,
+  .vibrant-app-shell .quick-action::before,
+  .vibrant-app-shell .dashboard-filter-btn::before,
+  .vibrant-app-shell .nav-item::before {
+    content:"" !important;
+    position:absolute !important;
+    top:-30% !important;
+    left:-80% !important;
+    width:42% !important;
+    height:160% !important;
+    transform:rotate(20deg) !important;
+    background:linear-gradient(90deg,transparent,rgba(255,255,255,.34),transparent) !important;
+    opacity:0 !important;
+    pointer-events:none !important;
+    transition:left .42s ease,opacity .18s ease !important;
+  }
+  .vibrant-app-shell .vibrant-stat-tile:hover::before,
+  .vibrant-app-shell .top-navigation-item:hover::before,
+  .vibrant-app-shell .btn:hover::before,
+  .vibrant-app-shell .quick-action:hover::before,
+  .vibrant-app-shell .dashboard-filter-btn:hover::before,
+  .vibrant-app-shell .nav-item:hover::before { left:125% !important; opacity:1 !important; }
+
+  .vibrant-app-shell .vibrant-stat-tile { transition:transform .18s ease,box-shadow .18s ease !important; }
+  .vibrant-app-shell .vibrant-stat-tile:hover { transform:translateY(-3px) !important; box-shadow:0 18px 36px rgba(31,42,71,.14) !important; }
+  .vibrant-app-shell .top-navigation-item:active,
+  .vibrant-app-shell .btn:active,
+  .vibrant-app-shell .nav-item:active { transform:scale(.992) !important; }
+
+  /* Data-driven progress indicator remains visible at the bottom of each tile. */
+  .vibrant-app-shell .vibrant-stat-progress { height:7px !important; background:rgba(255,255,255,.46) !important; }
+  .vibrant-app-shell .vibrant-stat-progress span { transition:width .5s ease !important; }
+
+  @media (max-width:1500px) {
+    .vibrant-app-shell .top-navigation-item { font-size:12px !important; gap:5px !important; padding-left:5px !important; padding-right:5px !important; }
+    .vibrant-app-shell .top-navigation-item svg { width:16px !important; height:16px !important; }
+  }
+  @media (max-width:1150px) {
+    .vibrant-app-shell .vibrant-topbar { height:174px !important; min-height:174px !important; }
+    .vibrant-app-shell .main { padding-top:174px !important; }
+    .vibrant-app-shell .top-navigation-scroll { grid-template-columns:repeat(4,minmax(0,1fr)) !important; grid-template-rows:repeat(4,38px) !important; height:158px !important; }
+    .vibrant-app-shell .top-navigation-item { height:38px !important; min-height:38px !important; font-size:12px !important; }
+    .vibrant-app-shell .sidebar-compact { top:174px !important; }
+    .vibrant-app-shell .backdrop { top:174px !important; }
+  }
+  @media (max-width:700px) {
+    .vibrant-app-shell .vibrant-topbar { height:220px !important; min-height:220px !important; padding:8px 12px 10px !important; }
+    .vibrant-app-shell .main { padding-top:220px !important; }
+    .vibrant-app-shell .topbar-primary-row { height:54px !important; min-height:54px !important; }
+    .vibrant-app-shell .vibrant-collapsed-brand span { font-size:13px !important; }
+    .vibrant-app-shell .vibrant-breadcrumb span,.vibrant-app-shell .vibrant-breadcrumb svg { display:none !important; }
+    .vibrant-app-shell .vibrant-breadcrumb strong { font-size:18px !important; }
+    .vibrant-app-shell .top-navigation-scroll { grid-template-columns:repeat(2,minmax(0,1fr)) !important; grid-template-rows:repeat(8,36px) !important; height:330px !important; }
+    .vibrant-app-shell .top-navigation-item { height:36px !important; min-height:36px !important; font-size:11px !important; }
+    .vibrant-app-shell .sidebar-compact { top:220px !important; }
+    .vibrant-app-shell .backdrop { top:220px !important; }
+    .vibrant-app-shell .content { padding:20px 14px 34px !important; }
+  }
+`;
+
+const FINAL_LAYOUT_CSS = `
+  /* NAVBAR FINAL POLISH: full-width two-row layout with no redundant page-title block. */
+  .vibrant-app-shell .vibrant-topbar {
+    display:flex !important;
+    flex-direction:column !important;
+    align-items:stretch !important;
+    justify-content:flex-start !important;
+    overflow:visible !important;
+  }
+  .vibrant-app-shell .topbar-primary-row {
+    flex:0 0 58px !important;
+    height:58px !important;
+    min-height:58px !important;
+    width:100% !important;
+  }
+  .vibrant-app-shell .topbar-left {
+    flex:0 0 auto !important;
+    width:auto !important;
+  }
+  .vibrant-app-shell .topbar-actions {
+    margin-left:auto !important;
+  }
+  .vibrant-app-shell .top-navigation-scroll {
+    flex:0 0 auto !important;
+    align-self:stretch !important;
+    width:100% !important;
+    max-width:none !important;
+    display:grid !important;
+    grid-template-columns:repeat(8,minmax(0,1fr)) !important;
+    grid-template-rows:repeat(2,44px) !important;
+    grid-auto-flow:row !important;
+    gap:8px !important;
+    margin:7px 0 0 !important;
+    padding:0 0 7px !important;
+    height:96px !important;
+    box-sizing:border-box !important;
+    overflow:visible !important;
+  }
+  .vibrant-app-shell .top-navigation-item {
+    min-width:0 !important;
+    width:100% !important;
+    height:44px !important;
+    min-height:44px !important;
+    padding:0 16px !important;
+    gap:9px !important;
+    justify-content:center !important;
+    align-items:center !important;
+    box-sizing:border-box !important;
+    border-radius:12px !important;
+    font-size:15px !important;
+    font-weight:800 !important;
+    line-height:1 !important;
+    white-space:nowrap !important;
+    overflow:hidden !important;
+    text-overflow:clip !important;
+  }
+  /* Keep the second navigation row clearly inside the navbar. */
+  .vibrant-app-shell .top-navigation-item:nth-child(n+9) {
+    transform:translateY(-12px) !important;
+  }
+  .vibrant-app-shell .top-navigation-item:nth-child(n+9):hover {
+    transform:translateY(-13px) !important;
+  }
+  .vibrant-app-shell .top-navigation-item:nth-child(n+9):active {
+    transform:translateY(-11px) scale(.992) !important;
+  }
+
+  .vibrant-app-shell .top-navigation-item svg {
+    width:20px !important;
+    height:20px !important;
+    flex:0 0 20px !important;
+  }
+  .vibrant-app-shell .top-navigation-item span {
+    display:block !important;
+    width:auto !important;
+    max-width:none !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    white-space:nowrap !important;
+  }
+  @media (max-width:1500px) {
+    .vibrant-app-shell .top-navigation-scroll { grid-template-columns:repeat(5,minmax(0,1fr)) !important; grid-template-rows:repeat(3,44px) !important; height:148px !important; }
+    .vibrant-app-shell .vibrant-topbar { height:204px !important; min-height:204px !important; }
+    .vibrant-app-shell .main { padding-top:204px !important; }
+    .vibrant-app-shell .sidebar-compact { top:204px !important; }
+  }
+  @media (max-width:900px) {
+    .vibrant-app-shell .top-navigation-scroll { grid-template-columns:repeat(4,minmax(0,1fr)) !important; grid-template-rows:repeat(4,42px) !important; height:174px !important; }
+    .vibrant-app-shell .vibrant-topbar { height:230px !important; min-height:230px !important; }
+    .vibrant-app-shell .main { padding-top:230px !important; }
+    .vibrant-app-shell .sidebar-compact { top:230px !important; }
+  }
+  @media (max-width:600px) {
+    .vibrant-app-shell .top-navigation-scroll { grid-template-columns:repeat(2,minmax(0,1fr)) !important; grid-template-rows:repeat(8,40px) !important; height:326px !important; }
+    .vibrant-app-shell .vibrant-topbar { height:382px !important; min-height:382px !important; }
+    .vibrant-app-shell .main { padding-top:382px !important; }
+    .vibrant-app-shell .sidebar-compact { top:382px !important; }
+  }
+
+  /* =========================================================
+     FINAL DASHBOARD / NAVBAR LAYOUT
+     ========================================================= */
+  html, body, #root { width:100%; max-width:100%; overflow-x:hidden !important; }
+  .vibrant-app-shell { width:100%; min-height:100vh; overflow-x:hidden !important; }
+
+  /* Navbar: full viewport width, stable two-row navigation. */
+  .vibrant-app-shell .vibrant-topbar {
+    position:fixed !important;
+    top:0 !important; left:0 !important; right:0 !important;
+    width:100vw !important;
+    height:132px !important;
+    min-height:132px !important;
+    margin:0 !important;
+    padding:10px 22px 12px !important;
+    box-sizing:border-box !important;
+    background:rgba(248,249,255,.58) !important;
+    backdrop-filter:blur(18px) saturate(135%) !important;
+    -webkit-backdrop-filter:blur(18px) saturate(135%) !important;
+    border-bottom:1px solid rgba(82,74,145,.12) !important;
+    box-shadow:0 8px 28px rgba(31,35,72,.055) !important;
+    z-index:1000 !important;
+  }
+  .vibrant-app-shell .topbar-primary-row {
+    width:100% !important;
+    height:56px !important;
+    min-height:56px !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:flex-start !important;
+    gap:14px !important;
+    margin:0 !important;
+  }
+  .vibrant-app-shell .topbar-left { flex:0 0 auto !important; min-width:0 !important; }
+  .vibrant-app-shell .topbar-actions { margin-left:auto !important; flex:0 0 auto !important; }
+  .vibrant-app-shell .vibrant-collapsed-brand { display:flex !important; flex:0 0 auto !important; }
+  .vibrant-app-shell .menu-btn { flex:0 0 46px !important; width:46px !important; height:46px !important; }
+  .vibrant-app-shell .top-navigation-scroll {
+    position:static !important;
+    display:grid !important;
+    grid-template-columns:repeat(8,minmax(0,1fr)) !important;
+    grid-template-rows:repeat(2,38px) !important;
+    grid-auto-flow:row !important;
+    width:100% !important;
+    height:82px !important;
+    margin:6px 0 0 !important;
+    padding:0 !important;
+    gap:6px !important;
+    overflow:visible !important;
+    box-sizing:border-box !important;
+  }
+  .vibrant-app-shell .top-navigation-item {
+    width:100% !important; min-width:0 !important; height:38px !important;
+    min-height:38px !important; box-sizing:border-box !important;
+    display:flex !important; align-items:center !important; justify-content:center !important;
+    padding:0 12px !important; gap:8px !important; border-radius:11px !important;
+    transform:none !important; opacity:1 !important; pointer-events:auto !important;
+    white-space:nowrap !important; overflow:visible !important; text-overflow:clip !important;
+    font-size:14px !important; font-weight:800 !important;
+    background:rgba(255,255,255,.42) !important;
+    border:1px solid rgba(96,105,139,.15) !important;
+    box-shadow:0 3px 10px rgba(34,43,76,.045) !important;
+  }
+  .vibrant-app-shell .top-navigation-item span {
+    display:inline-block !important; overflow:visible !important; text-overflow:clip !important;
+    white-space:nowrap !important; max-width:none !important;
+  }
+  .vibrant-app-shell .top-navigation-item.active { background:linear-gradient(135deg,#6d4aff,#8a4eff) !important; color:#fff !important; }
+  .vibrant-app-shell .top-navigation-item:hover { transform:translateY(-1px) !important; box-shadow:0 7px 16px rgba(46,43,91,.10) !important; }
+
+  /* Sidebar occupies layout width rather than covering dashboard. */
+  .vibrant-app-shell .sidebar-compact {
+    position:fixed !important; left:0 !important; top:132px !important; bottom:0 !important;
+    width:205px !important; min-width:205px !important; height:auto !important;
+    z-index:900 !important; transform:translateX(0) !important; opacity:1 !important;
+  }
+  .vibrant-app-shell .sidebar-compact.collapsed { transform:translateX(-100%) !important; opacity:0 !important; pointer-events:none !important; }
+  .vibrant-app-shell .main {
+    width:calc(100% - 205px) !important;
+    max-width:none !important;
+    min-width:0 !important;
+    margin-left:205px !important;
+    padding-top:132px !important;
+    box-sizing:border-box !important;
+    overflow-x:hidden !important;
+    transition:width .22s ease, margin-left .22s ease !important;
+  }
+  .vibrant-app-shell.sidebar-is-collapsed .main { width:100% !important; margin-left:0 !important; }
+  .vibrant-app-shell .content { width:100% !important; max-width:none !important; box-sizing:border-box !important; }
+
+  /* Dashboard tiles: four columns while space permits, then shrink cleanly. */
+  .vibrant-app-shell .vibrant-tile-grid {
+    display:grid !important;
+    grid-template-columns:repeat(4,minmax(0,1fr)) !important;
+    gap:16px !important;
+    width:100% !important;
+  }
+  .vibrant-app-shell .vibrant-stat-tile { min-width:0 !important; width:100% !important; box-sizing:border-box !important; }
+
+  /* Remove the old lower attention/shortcut area if any legacy markup survives. */
+  .vibrant-app-shell .vibrant-dashboard-lower { display:none !important; }
+
+  /* Subtle professional reflection + hover. */
+  .vibrant-app-shell .vibrant-stat-tile,
+  .vibrant-app-shell .top-navigation-item,
+  .vibrant-app-shell .btn,
+  .vibrant-app-shell .nav-item {
+    position:relative !important; overflow:hidden !important;
+    transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease !important;
+  }
+  .vibrant-app-shell .vibrant-stat-tile::before,
+  .vibrant-app-shell .top-navigation-item::before,
+  .vibrant-app-shell .btn::before,
+  .vibrant-app-shell .nav-item::before {
+    content:"" !important; position:absolute !important; top:0 !important; left:-120% !important;
+    width:55% !important; height:100% !important;
+    background:linear-gradient(105deg,transparent,rgba(255,255,255,.34),transparent) !important;
+    transform:skewX(-18deg) !important; pointer-events:none !important; transition:left .5s ease !important;
+  }
+  .vibrant-app-shell .vibrant-stat-tile:hover,
+  .vibrant-app-shell .top-navigation-item:hover,
+  .vibrant-app-shell .btn:hover,
+  .vibrant-app-shell .nav-item:hover { transform:translateY(-2px) !important; }
+  .vibrant-app-shell .vibrant-stat-tile:hover::before,
+  .vibrant-app-shell .top-navigation-item:hover::before,
+  .vibrant-app-shell .btn:hover::before,
+  .vibrant-app-shell .nav-item:hover::before { left:125% !important; }
+
+  @media (max-width:1500px) {
+    .vibrant-app-shell .top-navigation-item { padding:0 8px !important; font-size:13px !important; gap:6px !important; }
+    .vibrant-app-shell .vibrant-tile-grid { gap:13px !important; }
+  }
+  @media (max-width:1250px) {
+    .vibrant-app-shell .top-navigation-scroll { grid-template-columns:repeat(5,minmax(0,1fr)) !important; grid-template-rows:repeat(3,38px) !important; height:126px !important; }
+    .vibrant-app-shell .vibrant-topbar { height:176px !important; min-height:176px !important; }
+    .vibrant-app-shell .main { padding-top:176px !important; }
+    .vibrant-app-shell .sidebar-compact { top:176px !important; }
+    .vibrant-app-shell .vibrant-tile-grid { grid-template-columns:repeat(3,minmax(0,1fr)) !important; }
+  }
+  @media (max-width:900px) {
+    .vibrant-app-shell .top-navigation-scroll { grid-template-columns:repeat(4,minmax(0,1fr)) !important; grid-template-rows:repeat(4,38px) !important; height:164px !important; }
+    .vibrant-app-shell .vibrant-topbar { height:214px !important; min-height:214px !important; }
+    .vibrant-app-shell .main { padding-top:214px !important; width:100% !important; margin-left:0 !important; }
+    .vibrant-app-shell .sidebar-compact { top:214px !important; }
+    .vibrant-app-shell .vibrant-tile-grid { grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
+  }
+  @media (max-width:600px) {
+    .vibrant-app-shell .top-navigation-scroll { grid-template-columns:repeat(2,minmax(0,1fr)) !important; grid-template-rows:repeat(8,38px) !important; height:318px !important; }
+    .vibrant-app-shell .vibrant-topbar { height:368px !important; min-height:368px !important; }
+    .vibrant-app-shell .main { padding-top:368px !important; }
+    .vibrant-app-shell .sidebar-compact { top:368px !important; }
+    .vibrant-app-shell .vibrant-tile-grid { grid-template-columns:1fr !important; }
+  }
+
+  /* =========================================================
+     DEFINITIVE NAVBAR OVERRIDE
+     Full-width navigation; no redundant Dashboard title in row 1.
+     ========================================================= */
+  .vibrant-app-shell .vibrant-topbar {
+    display:flex !important;
+    flex-direction:column !important;
+    align-items:stretch !important;
+    justify-content:flex-start !important;
+    height:162px !important;
+    min-height:162px !important;
+    width:100vw !important;
+    left:0 !important;
+    right:0 !important;
+    padding:8px 22px 7px !important;
+    box-sizing:border-box !important;
+  }
+  .vibrant-app-shell .main { padding-top:162px !important; }
+  .vibrant-app-shell .sidebar-compact { top:162px !important; }
+  .vibrant-app-shell .topbar-primary-row {
+    flex:0 0 58px !important;
+    width:100% !important;
+    height:58px !important;
+    min-height:58px !important;
+    margin:0 !important;
+    display:flex !important;
+    align-items:center !important;
+  }
+  .vibrant-app-shell .topbar-left {
+    flex:0 0 auto !important;
+    width:auto !important;
+    min-width:0 !important;
+    margin:0 !important;
+  }
+  .vibrant-app-shell .topbar-actions {
+    margin-left:auto !important;
+    flex:0 0 auto !important;
+  }
+  .vibrant-app-shell .top-navigation-scroll {
+    position:static !important;
+    display:grid !important;
+    align-self:stretch !important;
+    flex:0 0 96px !important;
+    width:100% !important;
+    max-width:none !important;
+    height:96px !important;
+    min-height:96px !important;
+    margin:7px 0 0 !important;
+    padding:0 !important;
+    box-sizing:border-box !important;
+    grid-template-columns:repeat(8,minmax(0,1fr)) !important;
+    grid-template-rows:repeat(2,44px) !important;
+    grid-auto-flow:row !important;
+    gap:8px !important;
+    overflow:visible !important;
+  }
+  .vibrant-app-shell .top-navigation-item {
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    width:100% !important;
+    min-width:0 !important;
+    height:44px !important;
+    min-height:44px !important;
+    box-sizing:border-box !important;
+    padding:0 15px !important;
+    gap:9px !important;
+    border-radius:12px !important;
+    font-size:15px !important;
+    font-weight:800 !important;
+    line-height:1 !important;
+    white-space:nowrap !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+  }
+  .vibrant-app-shell .top-navigation-item svg {
+    width:20px !important;
+    height:20px !important;
+    min-width:20px !important;
+    flex:0 0 20px !important;
+  }
+  .vibrant-app-shell .top-navigation-item span {
+    display:inline-block !important;
+    width:auto !important;
+    max-width:none !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    white-space:nowrap !important;
+  }
+
+  @media (max-width:1500px) {
+    .vibrant-app-shell .vibrant-topbar { height:214px !important; min-height:214px !important; }
+    .vibrant-app-shell .top-navigation-scroll {
+      flex-basis:148px !important; height:148px !important; min-height:148px !important;
+      grid-template-columns:repeat(5,minmax(0,1fr)) !important;
+      grid-template-rows:repeat(3,44px) !important;
+      gap:8px !important;
+    }
+    .vibrant-app-shell .main { padding-top:214px !important; }
+    .vibrant-app-shell .sidebar-compact { top:214px !important; }
+  }
+  @media (max-width:900px) {
+    .vibrant-app-shell .vibrant-topbar { height:266px !important; min-height:266px !important; }
+    .vibrant-app-shell .top-navigation-scroll {
+      flex-basis:200px !important; height:200px !important; min-height:200px !important;
+      grid-template-columns:repeat(4,minmax(0,1fr)) !important;
+      grid-template-rows:repeat(4,44px) !important;
+      gap:8px !important;
+    }
+    .vibrant-app-shell .main { padding-top:266px !important; }
+    .vibrant-app-shell .sidebar-compact { top:266px !important; }
+  }
+  @media (max-width:600px) {
+    .vibrant-app-shell .vibrant-topbar { height:474px !important; min-height:474px !important; }
+    .vibrant-app-shell .top-navigation-scroll {
+      flex-basis:408px !important; height:408px !important; min-height:408px !important;
+      grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+      grid-template-rows:repeat(8,44px) !important;
+      gap:8px !important;
+    }
+    .vibrant-app-shell .main { padding-top:474px !important; }
+    .vibrant-app-shell .sidebar-compact { top:474px !important; }
+  }
+`;
 
 function loadLegacyData() {
   try {
@@ -417,8 +1718,77 @@ async function hashPassword(password) {
   return window.btoa(unescape(encodeURIComponent(value)));
 }
 
-function openPublicGymPage() {
-  const url = `${PRODUCTION_APP_URL.replace(/\/$/, '')}/#gym`;
+async function getPublicGymProfile(gymId) {
+  const cleanGymId = String(gymId || '').trim();
+  if (!cleanGymId) throw new Error('Public gym page is missing the gym ID.');
+  const { data, error } = await supabase.rpc('public_get_gym_profile', { p_gym_id: cleanGymId });
+  if (error) throw new Error(error.message || 'Unable to load public gym profile');
+  if (!data || !data.settings) throw new Error('Public gym profile returned no settings. Run the public gym profile SQL in Supabase.');
+  return data;
+}
+
+async function resizePublicImage(file, maxSize = 900, quality = 0.82) {
+  if (!file) return '';
+
+  if (!file.type || !file.type.startsWith('image/')) {
+    throw new Error('Please select an image file.');
+  }
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onerror = () => reject(new Error('Unable to read the selected image.'));
+
+    reader.onload = () => {
+      const image = new Image();
+
+      image.onerror = () => reject(new Error('Unable to process the selected image.'));
+
+      image.onload = () => {
+        const scale = Math.min(
+          1,
+          maxSize / Math.max(image.naturalWidth || image.width, image.naturalHeight || image.height)
+        );
+
+        const width = Math.max(1, Math.round((image.naturalWidth || image.width) * scale));
+        const height = Math.max(1, Math.round((image.naturalHeight || image.height) * scale));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+
+        const context = canvas.getContext('2d');
+        if (!context) {
+          reject(new Error('Your browser could not prepare the image.'));
+          return;
+        }
+
+        context.drawImage(image, 0, 0, width, height);
+
+        const output = canvas.toDataURL('image/jpeg', quality);
+
+        if (!output || output === 'data:,') {
+          reject(new Error('Unable to create the image preview.'));
+          return;
+        }
+
+        resolve(output);
+      };
+
+      image.src = String(reader.result || '');
+    };
+
+    reader.readAsDataURL(file);
+  });
+}
+
+function openPublicGymPage(gymId = '') {
+  const storedGymId = (() => { try { return window.localStorage.getItem(PUBLIC_GYM_ID_STORAGE_KEY) || ''; } catch { return ''; } })();
+  const cleanGymId = String(gymId || storedGymId || PRODUCTION_GYM_ID).trim();
+  const isLocal = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+  const baseUrl = isLocal ? window.location.origin : PRODUCTION_APP_URL.replace(/\/$/, '');
+  const separator = isLocal ? '/' : '/';
+  const url = `${baseUrl}${separator}?gym=${encodeURIComponent(cleanGymId)}#gym`;
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
@@ -459,7 +1829,7 @@ function App() {
   const [dbReady, setDbReady] = useState(false);
   const [active, setActive] = useState('Dashboard');
   const [query, setQuery] = useState('');
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -584,6 +1954,8 @@ function App() {
         console.log('==============================');
 
         if (cancelled || !cloud) return;
+
+        if (cloud.gym?.id) { try { window.localStorage.setItem(PUBLIC_GYM_ID_STORAGE_KEY, String(cloud.gym.id)); } catch {} }
 
         setCloudStatus('connected');
         setData((current) => ({
@@ -1733,7 +3105,6 @@ function App() {
 
     setActive(label);
     setQuery('');
-    setSidebarOpen(false);
   };
 
   useEffect(() => {
@@ -1782,7 +3153,10 @@ function App() {
   }
 
   if (isPublicGymRoute) {
-    return <PublicGymIntroPage settings={data.settings || {}} />;
+    let storedGymId = '';
+    try { storedGymId = window.localStorage.getItem(PUBLIC_GYM_ID_STORAGE_KEY) || ''; } catch {}
+    const publicGymId = new URLSearchParams(window.location.search).get('gym') || data.gym?.id || storedGymId || PRODUCTION_GYM_ID;
+    return <PublicGymIntroPage settings={data.settings || {}} gymId={publicGymId} />;
   }
 
   if (!isAuthenticated) {
@@ -1797,51 +3171,34 @@ function App() {
   const activeAllowed = isOwner || active === 'Staff Access' || !activePermission || can(activePermission);
 
   return (
-    <div className="app-shell">
-      <aside
-        className={`sidebar ${sidebarOpen ? 'open' : ''}`}
-        style={{
-          height: '100vh',
-          maxHeight: '100vh',
-          overflowY: 'auto',
-          overflowX: 'hidden',
-          WebkitOverflowScrolling: 'touch',
-          overscrollBehavior: 'contain',
-          scrollbarWidth: 'thin',
-        }}
-      >
-        <div className="brand-block">
+    <div className={`app-shell vibrant-app-shell ${sidebarOpen ? 'sidebar-is-open' : 'sidebar-is-collapsed'}`}>
+      <style>{VIBRANT_THEME_CSS}</style>
+      <style>{NOTICE_SETTINGS_CSS}</style>
+      <style>{FINAL_UI_FIX_CSS}</style>
+      <style>{FINAL_LAYOUT_CSS}</style>
+      <style>{SIDEBAR_ONLY_NAV_CSS}</style>
+      <style>{DEVELOPER_CONTACT_BAR_CSS}</style>
+      <aside className={`sidebar sidebar-compact ${sidebarOpen ? 'open' : 'collapsed'}`}>
+        <div className="brand-block compact-brand">
           <div className="brand-logo"><img src={LOGO_URL} alt="Preface Fitness logo" /></div>
-          <div>
-            <div className="brand-name">Preface Fitness</div>
-            <div className="brand-sub">GYM MANAGEMENT</div>
+          <div className="compact-brand-copy">
+            <div className="brand-name">Preface</div>
+            <div className="brand-sub">FITNESS</div>
           </div>
-          <button className="icon-btn mobile-close" onClick={() => setSidebarOpen(false)}><X size={18} /></button>
         </div>
-        <div className="nav-section-title">MAIN MENU</div>
-        <nav>
-          {visibleNav.map(({ label, icon: Icon }) => (
-            <button key={label} className={`nav-item ${active === label ? 'active' : ''}`} onClick={() => navigate(label)}>
-              <Icon size={18} strokeWidth={2} /><span>{label}</span>
+        <div className="compact-sidebar-label">QUICK ACCESS</div>
+        <nav className="compact-sidebar-nav">
+          {visibleNav.filter((item) => ['Dashboard', 'Members', 'Attendance', 'Payments', 'Settings', 'Staff Access'].includes(item.label)).slice(0, isOwner ? 6 : 5).map(({ label, icon: Icon }) => (
+            <button key={label} className={`nav-item ${active === label ? 'active' : ''}`} onClick={() => navigate(label)} title={label}>
+              <Icon size={21} strokeWidth={2.1} /><span>{label}</span>
             </button>
           ))}
         </nav>
-        <div className="sidebar-bottom">
-          <button className="nav-item" onClick={openPublicGymPage}><Sparkles size={18} /><span>Public Gym Page</span></button>
-          <div className="storage-card">
-            <div className="storage-icon"><ShieldCheck size={16} /></div>
-            <div>
-              <strong>
-                {cloudStatus === 'connected' ? 'Cloud mode' : cloudStatus === 'checking' ? 'Connecting…' : 'Cloud connection failed'}
-              </strong>
-              <span>
-                {cloudStatus === 'connected'
-                  ? 'Your gym data is connected to Supabase.'
-                  : cloudStatus === 'checking'
-                    ? 'Connecting to Supabase…'
-                    : 'Using local browser data until Supabase reconnects.'}
-              </span>
-            </div>
+        <div className="sidebar-bottom compact-sidebar-bottom">
+          <button className="nav-item" onClick={() => openPublicGymPage(data.gym?.id || PRODUCTION_GYM_ID)}><Sparkles size={20} /><span>Public page</span></button>
+          <div className="storage-card compact-storage-card">
+            <div className="storage-icon"><ShieldCheck size={17} /></div>
+            <div><strong>{cloudStatus === 'connected' ? 'Cloud connected' : cloudStatus === 'checking' ? 'Connecting…' : 'Cloud offline'}</strong></div>
           </div>
         </div>
       </aside>
@@ -1849,23 +3206,37 @@ function App() {
       {sidebarOpen && <button className="backdrop" onClick={() => setSidebarOpen(false)} aria-label="Close menu" />}
 
       <main className="main">
-        <header className="topbar">
-          <div className="topbar-left">
-            <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)}><Menu size={21} /></button>
-            <div className="breadcrumb"><span>Preface Fitness</span><ChevronDown size={14} /><strong>{active}</strong></div>
+        <header className="topbar vibrant-topbar">
+          <div className="topbar-primary-row">
+            <div className="topbar-left">
+              <div className="vibrant-collapsed-brand" aria-label="Preface Fitness">
+                <img src={LOGO_URL} alt="Preface Fitness logo" />
+                <span>Preface Fitness</span>
+              </div>
+              <button className="icon-btn menu-btn" onClick={() => setSidebarOpen((open) => !open)} aria-label={sidebarOpen ? "Close sidebar" : "Open sidebar"} title={sidebarOpen ? "Close sidebar" : "Open sidebar"}><Menu size={23} /></button>
+            </div>
+            <div className="topbar-actions">
+              <button className="icon-btn vibrant-icon-btn" title="Logout" onClick={logout}><LogOut size={19} /></button>
+              <button className="icon-btn vibrant-icon-btn" title="Notifications"><Bell size={20} /><span className="notification-dot" /></button>
+              <div className="admin-chip vibrant-admin-chip"><div className="avatar">{isOwner ? 'O' : 'S'}</div><div><strong>{isOwner ? 'Administrator' : 'Staff Member'}</strong><span>{isOwner ? 'Owner' : 'Staff'}</span></div><ChevronDown size={15} /></div>
+            </div>
           </div>
-          <div className="topbar-actions">
-            <button className="icon-btn" title="Logout" onClick={logout}><LogOut size={18} /></button>
-            <button className="icon-btn" title="Notifications"><Bell size={19} /><span className="notification-dot" /></button>
-            <div className="admin-chip"><div className="avatar">{isOwner ? 'O' : 'S'}</div><div><strong>{isOwner ? 'Administrator' : 'Staff Member'}</strong><span>{isOwner ? 'Owner' : 'Staff'}</span></div><ChevronDown size={15} /></div>
+          <div className="top-navigation-scroll" aria-label="Main navigation">
+            {visibleNav
+              .filter(({ label }) => !['Dashboard', 'Members', 'Attendance', 'Payments', 'Settings', 'Staff Access'].includes(label))
+              .map(({ label, icon: Icon }) => (
+                <button key={label} className={`top-navigation-item ${active === label ? 'active' : ''}`} onClick={() => navigate(label)}>
+                  <Icon size={18} strokeWidth={2.2} /><span>{label}</span>
+                </button>
+              ))}
           </div>
         </header>
 
-        {data.settings?.notice?.enabled && data.settings?.notice?.text && (
+        {(data.settings?.notice?.dashboardEnabled ?? data.settings?.notice?.enabled) && data.settings?.notice?.text && (
           <div className={`global-notice global-notice-${data.settings.notice.priority || 'medium'}`}>
             <div className="global-notice-icon"><Bell size={18} /></div>
             <div className="global-notice-copy"><strong>{data.settings.notice.priority === 'high' ? 'Important notice' : 'Gym announcement'}</strong><span>{data.settings.notice.text}</span></div>
-            <button className="global-notice-close" onClick={() => setData((d) => ({ ...d, settings: { ...(d.settings || {}), notice: { ...(d.settings?.notice || {}), enabled: false } } }))} title="Hide for now"><X size={16} /></button>
+            <button className="global-notice-close" onClick={() => setData((d) => ({ ...d, settings: { ...(d.settings || {}), notice: { ...(d.settings?.notice || {}), dashboardEnabled: false } } }))} title="Hide on dashboard"><X size={16} /></button>
           </div>
         )}
 
@@ -1911,6 +3282,7 @@ function App() {
             </>
           )}
         </div>
+        <DeveloperContactBar app />
       </main>
 
       {modal === 'member' && <MemberModal onClose={() => setModal(null)} onSave={addMember} planPrices={planPrices} members={data.members} trainers={data.trainers || []} existingMemberIds={data.members.map((m) => m.id)} />}
@@ -1934,12 +3306,212 @@ function App() {
 
 
 
-function PublicGymIntroPage({ settings = {} }) {
-  const gymName = settings.gymName || 'Preface Fitness';
-  const description = settings.gymIntro?.description || 'A modern fitness destination focused on strength, conditioning, personal training and sustainable results.';
-  const facilities = Array.isArray(settings.gymIntro?.facilities) && settings.gymIntro.facilities.length
-    ? settings.gymIntro.facilities
+
+/* ===== DEVELOPER CONTACT BAR — FINAL AESTHETIC + SIDEBAR AWARE ===== */
+const DEVELOPER_CONTACT_BAR_CSS = `
+  .vibrant-app-shell.sidebar-is-open .pf-developer-bar.app{
+    width:calc(100% - 18px) !important;
+    margin-left:0 !important;
+    margin-right:18px !important;
+  }
+  .vibrant-app-shell.sidebar-is-collapsed .pf-developer-bar.app{
+    width:calc(100% - 36px) !important;
+    margin-left:18px !important;
+    margin-right:18px !important;
+  }
+  .vibrant-app-shell .pf-developer-bar.app {
+    position:relative !important;
+    isolation:isolate !important;
+    width:calc(100% - 36px) !important;
+    max-width:none !important;
+    min-height:76px !important;
+    margin:22px 18px 20px !important;
+    padding:14px 16px !important;
+    box-sizing:border-box !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:space-between !important;
+    gap:18px !important;
+    overflow:hidden !important;
+    border:1px solid rgba(112,82,230,.20) !important;
+    border-radius:20px !important;
+    background:radial-gradient(circle at 8% 0%,rgba(112,82,230,.16),transparent 32%),radial-gradient(circle at 92% 100%,rgba(18,191,166,.12),transparent 34%),linear-gradient(135deg,rgba(255,255,255,.92),rgba(247,244,255,.88) 48%,rgba(239,250,249,.90)) !important;
+    box-shadow:0 16px 42px rgba(53,43,122,.10),inset 0 1px 0 rgba(255,255,255,.95) !important;
+  }
+  .pf-developer-bar{position:relative;isolation:isolate;display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:74px;padding:13px 16px;box-sizing:border-box;border:1px solid rgba(109,74,255,.18);border-radius:18px;background:linear-gradient(135deg,rgba(255,255,255,.92),rgba(247,244,255,.92) 52%,rgba(239,250,249,.92));box-shadow:0 14px 34px rgba(42,36,94,.09),inset 0 1px 0 rgba(255,255,255,.95);overflow:hidden}
+  .pf-developer-bar::before{content:'';position:absolute;inset:0;border-radius:inherit;background:radial-gradient(circle at 5% 0%,rgba(109,74,255,.13),transparent 30%),radial-gradient(circle at 95% 100%,rgba(18,191,166,.11),transparent 32%);pointer-events:none}
+  .pf-developer-brand{position:relative;z-index:1;display:flex;align-items:center;gap:12px;min-width:0;flex:1}
+  .pf-developer-mark{width:42px;height:42px;min-width:42px;border-radius:13px;display:grid;place-items:center;color:#6d4aff;background:linear-gradient(135deg,#eee8ff,#dcfbf5);border:1px solid rgba(109,74,255,.16);box-shadow:0 8px 18px rgba(70,54,145,.10)}
+  .pf-developer-copy{display:flex;flex-direction:column;gap:3px;min-width:0}
+  .pf-developer-copy strong{font-size:14px;font-weight:900;letter-spacing:.1px;color:#172943}
+  .pf-developer-copy span{font-size:11px;color:#718094;line-height:1.35}
+  .pf-developer-copy b{color:#4e3aa9}
+  .pf-developer-contact{position:relative;z-index:1;display:flex;align-items:center;gap:8px;padding-left:15px;border-left:1px solid rgba(103,91,176,.14)}
+  .pf-developer-contact::before{content:'CONTACT';position:absolute;right:0;top:-15px;color:#8a94a7;font-size:7px;font-weight:900;letter-spacing:1.5px}
+  .pf-developer-contact a{width:42px;height:42px;min-width:42px;display:grid;place-items:center;border-radius:12px;border:1px solid rgba(91,75,181,.14);background:rgba(255,255,255,.78);color:#4f3eb2;box-shadow:0 6px 16px rgba(45,41,93,.07);text-decoration:none;transition:transform .18s ease,box-shadow .18s ease,background .18s ease}
+  .pf-developer-contact a:hover{transform:translateY(-2px);background:#fff;box-shadow:0 10px 22px rgba(75,57,165,.14)}
+  .pf-developer-contact a:last-child{color:#128c75;border-color:rgba(18,191,166,.18)}
+  .gym-public-dark-v2 .public-developer-footer .pf-developer-bar{border-color:rgba(143,119,255,.24);background:linear-gradient(135deg,rgba(20,23,42,.96),rgba(30,24,63,.94) 52%,rgba(13,48,48,.92));box-shadow:0 18px 45px rgba(0,0,0,.24),inset 0 1px 0 rgba(255,255,255,.08);color:#aeb7c8}
+  .gym-public-dark-v2 .public-developer-footer .pf-developer-copy strong{color:#f7f4ff}
+  .gym-public-dark-v2 .public-developer-footer .pf-developer-copy span{color:#9da9bc}
+  .gym-public-dark-v2 .public-developer-footer .pf-developer-copy b{color:#d8caff}
+  .gym-public-dark-v2 .public-developer-footer .pf-developer-contact{border-left-color:rgba(255,255,255,.10)}
+  .gym-public-dark-v2 .public-developer-footer .pf-developer-contact a{color:#c9b9ff;background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.12)}
+  .gym-public-dark-v2 .public-developer-footer .pf-developer-contact a:last-child{color:#5ce0bf;border-color:rgba(92,224,191,.18)}
+  @media(max-width:700px){
+    .pf-developer-bar{min-height:0;padding:13px;align-items:flex-start;flex-direction:column;gap:12px}
+    .pf-developer-brand{width:100%}.pf-developer-copy strong{font-size:13px}
+    .pf-developer-contact{width:100%;padding:10px 0 0;border-left:0;border-top:1px solid rgba(103,91,176,.14)}
+    .pf-developer-contact::before{display:none}.pf-developer-contact a{width:40px;height:40px;min-width:40px}
+    .vibrant-app-shell .pf-developer-bar.app{width:calc(100% - 24px) !important;margin:16px 12px 16px !important}
+    .public-developer-footer{padding:0 12px 18px !important}
+  }
+`;
+function DeveloperContactBar({ app = false }) {
+  return (
+    <div className={`pf-developer-bar${app ? ' app' : ''}`} aria-label="Developer contact">
+      <div className="pf-developer-brand">
+        <div className="pf-developer-mark"><Dumbbell size={17} strokeWidth={2.4} /></div>
+        <div className="pf-developer-copy">
+          <strong>Powered by Navyexa Technologies</strong>
+          <span>Developed by <b>Akash Gupta</b> · Preface Fitness Management System</span>
+        </div>
+      </div>
+      <div className="pf-developer-contact">
+        <a href="tel:7905572486" aria-label="Call developer" title="Call developer"><Phone size={17} /></a>
+        <a href="https://wa.me/917905572486" target="_blank" rel="noreferrer" aria-label="WhatsApp developer" title="WhatsApp developer"><MessageCircle size={17} /></a>
+      </div>
+    </div>
+  );
+}
+
+
+function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
+  const [remoteSettings, setRemoteSettings] = useState(settings || {});
+  const [remotePlans, setRemotePlans] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [noticeOpen, setNoticeOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setLoadError('');
+    (async () => {
+      try {
+        const profile = await getPublicGymProfile(gymId);
+        if (!cancelled) {
+          const nextSettings = profile?.settings || {};
+          setRemoteSettings(nextSettings);
+          setRemotePlans(Array.isArray(profile?.membershipPlans) ? profile.membershipPlans : []);
+          const nextNotice = nextSettings?.notice || {};
+          setNoticeOpen(Boolean(nextNotice?.enabled && String(nextNotice?.text || '').trim()));
+        }
+      } catch (error) {
+        console.error('Public gym profile load failed:', error);
+        if (!cancelled) setLoadError(error?.message || 'Unable to load the latest public gym data.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [gymId]);
+
+  const publicSettings = remoteSettings || {};
+  const gymName = publicSettings.gymName || 'Preface Fitness';
+  const description = publicSettings.gymIntro?.description || 'A modern fitness destination focused on strength, conditioning, personal training and sustainable results.';
+  const baseFacilities = Array.isArray(publicSettings.gymIntro?.facilities) && publicSettings.gymIntro.facilities.length
+    ? publicSettings.gymIntro.facilities
     : ['Strength & cardio zone', 'Personal training', 'Functional training', 'Locker & changing facilities', 'Member progress tracking', 'Diet & nutrition guidance'];
+
+  // Each built-in facility gets its own relevant image. If the administrator has
+  // custom facility names, we match common names first and otherwise use a
+  // rotating set of still-unique gym images.
+  const facilityImageMap = {
+    'strength & cardio zone': 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=1000&q=85',
+    'personal training': 'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?auto=format&fit=crop&w=1000&q=85',
+    'functional training': 'https://images.unsplash.com/photo-1579758629938-03607ccdbaba?auto=format&fit=crop&w=1000&q=85',
+    'locker & changing facilities': 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=1000&q=85',
+    'member progress tracking': 'https://images.unsplash.com/photo-1599058917212-d750089860fc?auto=format&fit=crop&w=1000&q=85',
+    'diet & nutrition guidance': 'https://images.unsplash.com/photo-1490645935967-10de6ba17061?auto=format&fit=crop&w=1000&q=85',
+  };
+
+  const uniqueFacilityFallbacks = [
+    'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=1000&q=85',
+    'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?auto=format&fit=crop&w=1000&q=85',
+    'https://images.unsplash.com/photo-1579758629938-03607ccdbaba?auto=format&fit=crop&w=1000&q=85',
+    'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=1000&q=85',
+    'https://images.unsplash.com/photo-1599058917212-d750089860fc?auto=format&fit=crop&w=1000&q=85',
+    'https://images.unsplash.com/photo-1490645935967-10de6ba17061?auto=format&fit=crop&w=1000&q=85',
+  ];
+
+  const additionalFacilities = [
+    { name: 'Weight loss', description: 'Structured cardio and training support to help you burn fat and build sustainable habits.', image: 'https://images.unsplash.com/photo-1517964603305-11c0f6f66012?auto=format&fit=crop&w=1000&q=85' },
+    { name: 'Weight gain', description: 'Strength-focused training and progressive workouts to support healthy muscle and weight gain.', image: 'https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?auto=format&fit=crop&w=1000&q=85' },
+    { name: 'Yoga', description: 'Improve mobility, flexibility, breathing and balance with guided yoga sessions.', image: 'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?auto=format&fit=crop&w=1000&q=85' },
+    { name: 'Aerobics', description: 'Energetic group movement sessions designed to improve stamina, coordination and fitness.', image: 'https://images.unsplash.com/photo-1518611012118-696072aa579a?auto=format&fit=crop&w=1000&q=85' },
+    { name: 'Zumba', description: 'Fun, high-energy dance workouts that make cardio engaging and enjoyable.', image: 'https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1000&q=85' },
+    { name: 'Steam Bath', description: 'Relax and unwind after training with a refreshing steam bath experience.', image: 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?auto=format&fit=crop&w=1000&q=85' },
+    { name: 'Shower', description: 'Clean, convenient shower facilities to freshen up before heading back to your day.', image: 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=1000&q=85' },
+  ];
+
+  const facilityNames = new Set(baseFacilities.map((item) => String(item || '').trim().toLowerCase()));
+  const usedFacilityImages = new Set();
+  const facilities = [
+    ...baseFacilities.map((name, index) => {
+      const cleanName = String(name || '').trim();
+      const key = cleanName.toLowerCase();
+      const mappedImage = facilityImageMap[key] || uniqueFacilityFallbacks.find((image) => !usedFacilityImages.has(image)) || uniqueFacilityFallbacks[index % uniqueFacilityFallbacks.length];
+      usedFacilityImages.add(mappedImage);
+      return {
+        name: cleanName,
+        description: 'Designed to make every training session simple, focused and effective.',
+        image: mappedImage,
+      };
+    }),
+    ...additionalFacilities.filter((item) => !facilityNames.has(item.name.toLowerCase())),
+  ];
+  const publicPage = publicSettings.publicPage || {};
+  const publicNotice = publicSettings.notice || {};
+  const publicNoticeText = String(publicNotice?.text || '').trim();
+  const publicNoticePriority = publicNotice?.priority || 'medium';
+  const trainers = Array.isArray(publicPage.trainers) ? publicPage.trainers.filter((t) => t && (t.name || t.photo || t.description)) : [];
+  const configuredPlanPrices = publicSettings.membershipPrices || {};
+  const remotePlanByName = Object.fromEntries((remotePlans || []).map((p) => [String(p?.name || '').trim().toLowerCase(), p]));
+  const packageSource = Array.isArray(publicPage.packages) && publicPage.packages.length
+    ? publicPage.packages
+    : (remotePlans.length ? remotePlans : MEMBERSHIP_PLANS);
+  const packages = packageSource.map((pkg) => {
+    const key = String(pkg?.name || '').trim().toLowerCase();
+    const standardPlan = MEMBERSHIP_PLANS.find((plan) => String(plan.name).trim().toLowerCase() === key);
+    const remotePlan = remotePlanByName[key];
+    const price = standardPlan
+      ? Number(configuredPlanPrices[standardPlan.name] ?? remotePlan?.price ?? pkg?.price ?? standardPlan.price)
+      : Number(remotePlan?.price ?? pkg?.price ?? 0);
+    return {
+      ...pkg,
+      months: Number(remotePlan?.months ?? standardPlan?.months ?? pkg?.months ?? 1),
+      price,
+      description: pkg?.description || remotePlan?.description || standardPlan?.description || '',
+    };
+  });
+  const reviews = Array.isArray(publicPage.reviews) ? publicPage.reviews.filter((r) => r && (r.name || r.text)) : [];
+  const configuredGymPhone = String(publicSettings.gymPhone || '').trim();
+  const phone = configuredGymPhone === '7905572486' ? '' : configuredGymPhone;
+  const configuredWhatsapp = String(publicPage.whatsappNumber || '').trim();
+  const whatsapp = (configuredWhatsapp === '7905572486' || configuredWhatsapp === '917905572486') ? '' : configuredWhatsapp.replace(/\D/g, '');
+  const email = String(publicSettings.gymEmail || '').trim();
+  const instagram = String(publicPage.instagramUrl || '').trim();
+  const facebook = String(publicPage.facebookUrl || '').trim();
+  const website = String(publicPage.websiteUrl || '').trim();
+  const mapsUrl = String(publicPage.googleMapsUrl || '').trim();
+  const googleRating = publicPage.googleRating || '5.0';
+  const googleReviewCount = publicPage.googleReviewCount || '95';
+  const googlePlaceName = publicPage.googlePlaceName || gymName;
+  const googleAddress = publicPage.googleAddress || publicSettings.gymAddress || 'Preface Fitness, Nadan Mahal Rd. above Hdfc Bank, Yahiyaganj, Lucknow, Uttar Pradesh 226003';
+  const googlePhone = publicPage.googlePhone || '093692 79056';
+  const hoursText = publicPage.hoursText || 'Mon-Sun · 6 AM - 11 PM';
+  const googleSearchUrl = publicPage.googleSearchUrl || 'https://www.google.com/search?q=preface+fitness';
   const gallery = [
     'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=1200&q=85',
     'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?auto=format&fit=crop&w=1200&q=85',
@@ -1948,50 +3520,96 @@ function PublicGymIntroPage({ settings = {} }) {
   ];
 
   return (
-    <div className="gym-public-page">
-      {settings.notice?.enabled && String(settings.notice?.text || '').trim() && (
-        <div className={`gym-public-notice gym-public-notice-${settings.notice?.priority || 'medium'}`} role="status">
-          <div className="gym-public-notice-icon"><Bell size={18} /></div>
-          <div className="gym-public-notice-content">
-            <span>GYM NOTICE</span>
-            <strong>{settings.notice.text}</strong>
+    <div className="gym-public-page gym-public-dark-v2" style={{ background: '#080b12', color: '#eef2ff', minHeight: '100vh', width: '100%', overflowX: 'hidden' }}>
+      <style>{`
+        .gym-public-dark-v2{background:#080b12;color:#eef2ff;min-height:100vh;overflow:hidden;font-family:Inter,system-ui,sans-serif}
+        .gym-public-dark-v2 *{box-sizing:border-box}
+        .gym-public-dark-v2 .gym-public-nav{position:sticky;top:0;z-index:20;background:rgba(8,11,18,.84);backdrop-filter:blur(18px);border-bottom:1px solid rgba(255,255,255,.08);padding:18px clamp(20px,5vw,76px);display:flex;align-items:center;justify-content:space-between;gap:20px}
+        .gym-public-dark-v2 .gym-public-brand{display:flex;align-items:center;gap:14px}.gym-public-dark-v2 .gym-public-brand img{width:58px;height:58px;object-fit:contain;border-radius:14px}.gym-public-dark-v2 .gym-public-brand strong{display:block;font-size:28px;line-height:1.05;font-weight:900;letter-spacing:-.6px;color:#ffffff;text-shadow:0 2px 18px rgba(112,71,255,.18)}.gym-public-dark-v2 .gym-public-brand span{display:block;color:#8e98ab;font-size:11px;letter-spacing:2px;margin-top:4px}
+        .gym-public-dark-v2 .public-contact-actions{display:flex;gap:9px;flex-wrap:wrap;justify-content:flex-end}.gym-public-dark-v2 .public-contact-actions a{color:#fff;text-decoration:none;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);border-radius:999px;padding:10px 14px;font-size:13px;font-weight:800}.gym-public-dark-v2 .public-contact-actions a.primary{background:#7047ff;border-color:#7047ff}
+        .gym-public-dark-v2 .gym-hero{min-height:640px;padding:80px clamp(20px,7vw,110px);display:grid;grid-template-columns:1fr .92fr;gap:60px;align-items:center;background:radial-gradient(circle at 15% 20%,rgba(112,71,255,.22),transparent 38%),radial-gradient(circle at 90% 30%,rgba(16,185,129,.13),transparent 35%)}
+        .gym-public-dark-v2 .gym-kicker,.gym-public-dark-v2 .gym-section-kicker{font-size:12px;font-weight:900;letter-spacing:2.2px;background:linear-gradient(90deg,#c78cff 0%,#7ea7ff 52%,#32e6d0 100%);-webkit-background-clip:text;background-clip:text;color:transparent;text-shadow:0 0 24px rgba(112,71,255,.12)}.gym-public-dark-v2 .gym-hero-rule{width:170px;height:4px;border-radius:999px;margin:14px 0 21px;background:linear-gradient(90deg,#8d4dff 0%,#b95cff 42%,#22d9c0 100%);box-shadow:0 0 24px rgba(139,77,255,.48),0 0 34px rgba(34,217,192,.18)}.gym-public-dark-v2 .gym-hero h1{font-size:clamp(48px,7vw,86px);line-height:1.10;margin:0 0 26px;letter-spacing:-4.5px;font-weight:950;overflow:visible;padding-bottom:.18em}.gym-public-dark-v2 .gym-hero h1 .hero-line{display:inline-block;line-height:1.10;padding-bottom:.18em;overflow:visible}.gym-public-dark-v2 .gym-hero h1 .hero-line{display:inline-block}.gym-public-dark-v2 .gym-hero h1 .hero-line-1{color:#f5f2ff;text-shadow:0 0 28px rgba(190,170,255,.16)}.gym-public-dark-v2 .gym-hero h1 .hero-line-2{background:linear-gradient(100deg,#ff6de7 0%,#bd68ff 48%,#8f7bff 100%);-webkit-background-clip:text;background-clip:text;color:transparent}.gym-public-dark-v2 .gym-hero h1 .hero-line-3{background:linear-gradient(100deg,#69ddff 0%,#53cfff 38%,#52e5b0 100%);-webkit-background-clip:text;background-clip:text;color:transparent}.gym-public-dark-v2 .gym-hero p{max-width:650px;color:#d3d8e7;font-size:18px;line-height:1.72;text-shadow:0 2px 18px rgba(0,0,0,.22)}.gym-public-dark-v2 .gym-trust-row{display:flex;flex-wrap:wrap;gap:18px;margin-top:30px;color:#e9edf7;font-size:13px}.gym-public-dark-v2 .gym-trust-row span{display:flex;align-items:center;gap:8px;font-weight:700}.gym-public-dark-v2 .gym-trust-row b{color:#ffffff}.gym-public-dark-v2 .trust-icon{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-style:normal;background:#0d1420;border:1px solid rgba(255,255,255,.14);box-shadow:0 0 24px rgba(112,71,255,.10)}.gym-public-dark-v2 .trust-icon-1{color:#d26cff;border-color:rgba(210,108,255,.65);box-shadow:0 0 22px rgba(210,108,255,.18)}.gym-public-dark-v2 .trust-icon-2{color:#55aaff;border-color:rgba(85,170,255,.65);box-shadow:0 0 22px rgba(85,170,255,.16)}.gym-public-dark-v2 .trust-icon-3{color:#37e0bd;border-color:rgba(55,224,189,.65);box-shadow:0 0 22px rgba(55,224,189,.16)}.gym-public-dark-v2 .gym-hero-visual{position:relative}.gym-public-dark-v2 .gym-hero-visual img{width:100%;height:500px;object-fit:cover;border-radius:28px;border:1px solid rgba(255,255,255,.1);box-shadow:0 30px 90px rgba(0,0,0,.42)}.gym-public-dark-v2 .gym-hero-float{position:absolute;left:-24px;bottom:26px;background:rgba(13,17,27,.9);border:1px solid rgba(255,255,255,.1);padding:16px 19px;border-radius:15px;box-shadow:0 15px 40px rgba(0,0,0,.35)}.gym-public-dark-v2 .gym-hero-float strong,.gym-public-dark-v2 .gym-hero-float span{display:block}.gym-public-dark-v2 .gym-hero-float span{color:#929db0;font-size:12px;margin-top:5px}
+        .gym-public-dark-v2 .gym-public-section{padding:78px clamp(20px,7vw,110px)}.gym-public-dark-v2 .gym-about-grid{display:grid;grid-template-columns:1fr 1fr;gap:70px;border-top:1px solid rgba(255,255,255,.07);border-bottom:1px solid rgba(255,255,255,.07)}.gym-public-dark-v2 h2{font-size:clamp(30px,4vw,48px);line-height:1.05;margin:12px 0 0;letter-spacing:-1.5px}.gym-public-dark-v2 .gym-about-grid p{color:#9da8bb;font-size:16px;line-height:1.8;margin:0 0 15px}
+        .gym-public-dark-v2 .gym-section-heading{display:flex;justify-content:space-between;align-items:end;margin-bottom:28px}.gym-public-dark-v2 .gym-section-heading>span{color:#717d91;font-size:12px}.gym-public-dark-v2 .gym-facility-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.gym-public-dark-v2 .gym-facility-card{background:linear-gradient(145deg,#111827,#0d121d);border:1px solid rgba(255,255,255,.09);border-radius:20px;overflow:hidden;min-height:300px;box-shadow:0 18px 50px rgba(0,0,0,.20);transition:transform .28s ease,border-color .28s ease,box-shadow .28s ease}.gym-public-dark-v2 .gym-facility-card:hover{transform:translateY(-6px);border-color:rgba(169,145,255,.38);box-shadow:0 24px 65px rgba(0,0,0,.32),0 0 35px rgba(112,71,255,.10)}.gym-public-dark-v2 .gym-facility-image-wrap{position:relative;height:158px;overflow:hidden;background:#0b0f17}.gym-public-dark-v2 .gym-facility-image-wrap img{width:100%;height:100%;object-fit:cover;display:block;filter:saturate(.92) contrast(1.06);transition:transform .55s ease,filter .35s ease}.gym-public-dark-v2 .gym-facility-card:hover .gym-facility-image-wrap img{transform:scale(1.06);filter:saturate(1.05) contrast(1.08)}.gym-public-dark-v2 .gym-facility-image-overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(5,8,15,.04) 25%,rgba(5,8,15,.78) 100%);pointer-events:none}.gym-public-dark-v2 .gym-facility-number{position:absolute;left:18px;bottom:14px;color:#d7caff;font-weight:950;font-size:12px;letter-spacing:1px;background:rgba(10,13,23,.70);border:1px solid rgba(169,145,255,.30);padding:6px 9px;border-radius:999px;backdrop-filter:blur(8px)}.gym-public-dark-v2 .gym-facility-card-body{padding:21px 22px 24px}.gym-public-dark-v2 .gym-facility-card h3{margin:0 0 8px;font-size:19px;color:#f5f7ff;font-weight:900;letter-spacing:-.2px}.gym-public-dark-v2 .gym-facility-card p{color:#aeb8c8;font-size:13px;line-height:1.6;margin:0}
+        .gym-public-dark-v2 .gym-trainer-list{display:flex;flex-direction:column;gap:26px}.gym-public-dark-v2 .public-trainer-card{width:min(900px,92%);display:grid;grid-template-columns:260px 1fr;gap:30px;align-items:center;background:linear-gradient(135deg,#111722,#0c1018);border:1px solid rgba(255,255,255,.09);border-radius:24px;padding:18px;box-shadow:0 20px 60px rgba(0,0,0,.18)}.gym-public-dark-v2 .public-trainer-card:nth-child(odd){align-self:flex-start;transform:translateX(0)}.gym-public-dark-v2 .public-trainer-card:nth-child(even){align-self:flex-end;transform:translateX(-2%)}.gym-public-dark-v2 .public-trainer-card img,.gym-public-dark-v2 .public-trainer-photo-placeholder{width:260px;height:280px;object-fit:cover;border-radius:18px;background:linear-gradient(135deg,#27203f,#111827);display:grid;place-items:center;color:#a991ff;font-size:48px;font-weight:900}.gym-public-dark-v2 .public-trainer-copy .eyebrow{color:#8e98ab;font-size:11px;letter-spacing:2px;font-weight:900}.gym-public-dark-v2 .public-trainer-copy h3{font-size:31px;margin:8px 0}.gym-public-dark-v2 .public-trainer-copy p{color:#9ea8ba;line-height:1.7}.gym-public-dark-v2 .public-trainer-meta{display:flex;flex-wrap:wrap;gap:8px}.gym-public-dark-v2 .public-trainer-meta span{border:1px solid rgba(112,71,255,.3);background:rgba(112,71,255,.09);padding:8px 11px;border-radius:999px;color:#c8bcff;font-size:12px;font-weight:800}
+        .gym-public-dark-v2 .public-package-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:15px}.gym-public-dark-v2 .public-package-card{background:linear-gradient(145deg,#141a27,#0d111a);border:1px solid rgba(255,255,255,.09);border-radius:20px;padding:25px}.gym-public-dark-v2 .public-package-card.featured{border-color:rgba(119,82,255,.65);box-shadow:0 0 0 1px rgba(119,82,255,.14),0 22px 55px rgba(54,33,128,.25)}.gym-public-dark-v2 .public-package-card .package-tag{font-size:10px;letter-spacing:1.5px;color:#9d8bff;font-weight:900}.gym-public-dark-v2 .public-package-card h3{font-size:23px;margin:9px 0}.gym-public-dark-v2 .public-package-price{font-size:34px;font-weight:900}.gym-public-dark-v2 .public-package-price small{font-size:12px;color:#7e899b;font-weight:600}.gym-public-dark-v2 .public-package-card p{color:#8490a2;line-height:1.6;font-size:13px;min-height:43px}
+        .gym-public-dark-v2 .gym-gallery{display:grid;grid-template-columns:1.25fr .75fr;grid-template-rows:245px 245px;gap:12px}.gym-public-dark-v2 .gym-gallery-item{overflow:hidden;border-radius:18px}.gym-public-dark-v2 .gym-gallery-item img{width:100%;height:100%;object-fit:cover;transition:transform .5s}.gym-public-dark-v2 .gym-gallery-item:hover img{transform:scale(1.04)}.gym-public-dark-v2 .gallery-1{grid-row:1/3}.gym-public-dark-v2 .gym-gallery-item img{filter:saturate(.88) contrast(1.05)}
+        .gym-public-dark-v2 .public-google-card{display:grid;grid-template-columns:1.15fr .85fr;gap:20px;background:#10151f;border:1px solid rgba(255,255,255,.09);border-radius:24px;padding:28px}.gym-public-dark-v2 .google-rating{font-size:38px;font-weight:900}.gym-public-dark-v2 .stars{color:#ffc533;letter-spacing:2px;font-size:19px}.gym-public-dark-v2 .google-muted{color:#7f8a9d;font-size:13px}.gym-public-dark-v2 .google-map-box{min-height:180px;border-radius:17px;background:linear-gradient(135deg,#162133,#0c121c);display:flex;align-items:center;justify-content:center;text-align:center;padding:20px}.gym-public-dark-v2 .google-map-box a{color:#b9aaff;text-decoration:none;font-weight:800}
+        .gym-public-dark-v2 .review-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:22px}.gym-public-dark-v2 .public-review{background:#10151f;border:1px solid rgba(255,255,255,.08);border-radius:18px;padding:21px}.gym-public-dark-v2 .public-review-head{display:flex;gap:11px;align-items:center}.gym-public-dark-v2 .public-review-avatar{width:42px;height:42px;border-radius:50%;object-fit:cover;background:#27203f;display:grid;place-items:center;color:#b6a5ff;font-weight:900}.gym-public-dark-v2 .public-review strong{display:block}.gym-public-dark-v2 .public-review small{color:#758196}.gym-public-dark-v2 .public-review p{color:#a6afbf;line-height:1.6;font-size:13px}
+        .gym-public-dark-v2 .gym-cta{padding:75px clamp(20px,7vw,110px);background:linear-gradient(110deg,#211348,#0c1020);border-top:1px solid rgba(255,255,255,.08);border-bottom:1px solid rgba(255,255,255,.08)}.gym-public-dark-v2 .public-contact-panel{display:flex;justify-content:space-between;gap:30px;align-items:center}.gym-public-dark-v2 .public-contact-panel p{color:#8d98ab}.gym-public-dark-v2 .public-socials{display:flex;flex-wrap:wrap;gap:10px}.gym-public-dark-v2 .public-socials a{color:#fff;text-decoration:none;padding:12px 15px;border-radius:12px;background:#151b29;border:1px solid rgba(255,255,255,.09);font-weight:800;font-size:13px}
+        /* Public page readability upgrade */
+        .gym-public-dark-v2 h2{color:#ffffff;text-shadow:0 2px 18px rgba(0,0,0,.18)}
+        .gym-public-dark-v2 .gym-section-kicker,.gym-public-dark-v2 .gym-kicker{color:#b9a7ff;text-shadow:0 0 18px rgba(112,71,255,.18)}
+        .gym-public-dark-v2 .gym-about-grid p{color:#c3cada}
+        .gym-public-dark-v2 .gym-section-heading>span{color:#aab4c5}
+        .gym-public-dark-v2 .gym-facility-card h3{color:#f4f7ff;font-weight:850}
+        .gym-public-dark-v2 .gym-facility-card p{color:#aeb8c8}
+        .gym-public-dark-v2 .public-trainer-copy .eyebrow{color:#aaa0d5}
+        .gym-public-dark-v2 .public-trainer-copy h3{color:#ffffff;font-weight:900}
+        .gym-public-dark-v2 .public-trainer-copy p{color:#c0c8d6}
+        .gym-public-dark-v2 .public-package-card .package-tag{color:#b7a8ff}
+        .gym-public-dark-v2 .public-package-card h3{color:#ffffff;font-weight:900}
+        .gym-public-dark-v2 .public-package-price{color:#f7f8ff}
+        .gym-public-dark-v2 .public-package-price small{color:#aeb8c8}
+        .gym-public-dark-v2 .public-package-card p{color:#adb7c7}
+        .gym-public-dark-v2 .public-google-card h3{color:#ffffff}
+        .gym-public-dark-v2 .google-muted{color:#aeb8c8}
+        .gym-public-dark-v2 .public-review strong{color:#f5f7ff}
+        .gym-public-dark-v2 .public-review small{color:#9da8ba}
+        .gym-public-dark-v2 .public-review p{color:#c0c8d6}
+        .gym-public-dark-v2 .gym-cta h2{color:#ffffff}
+        .gym-public-dark-v2 .gym-cta p{color:#c0c8d6}
+        .gym-public-dark-v2 .gym-hero p{color:#c5ccda}
+        .gym-public-dark-v2 .gym-trust-row{color:#edf1f8}
+        .gym-public-dark-v2 .gym-hero-float{color:#f4f7ff}
+        .gym-public-dark-v2 .gym-hero-float span{color:#aeb8c8}
+        .gym-public-dark-v2 .gym-public-notice-overlay{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:28px;background:rgba(2,4,10,.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);animation:gymNoticeOverlayIn .28s ease-out both}.gym-public-dark-v2 .gym-public-notice-overlay:before,.gym-public-dark-v2 .gym-public-notice-overlay:after{content:'';position:absolute;border-radius:999px;filter:blur(4px);pointer-events:none}.gym-public-dark-v2 .gym-public-notice-overlay:before{width:420px;height:420px;left:-130px;top:-150px;background:radial-gradient(circle,rgba(112,71,255,.32),transparent 68%);animation:gymNoticeFloat 7s ease-in-out infinite}.gym-public-dark-v2 .gym-public-notice-overlay:after{width:360px;height:360px;right:-100px;bottom:-130px;background:radial-gradient(circle,rgba(16,185,129,.20),transparent 68%);animation:gymNoticeFloat 8s ease-in-out infinite reverse}.gym-public-dark-v2 .gym-public-notice-modal{position:relative;width:min(680px,100%);max-height:min(78vh,720px);overflow:auto;border-radius:30px;border:1px solid rgba(255,255,255,.18);background:linear-gradient(145deg,rgba(25,29,47,.98),rgba(8,11,18,.99) 58%,rgba(14,24,27,.98));box-shadow:0 35px 120px rgba(0,0,0,.70),0 0 0 1px rgba(112,71,255,.10),0 0 90px rgba(112,71,255,.16);padding:42px 42px 38px;animation:gymNoticeModalIn .38s cubic-bezier(.18,.8,.24,1) both;isolation:isolate}.gym-public-dark-v2 .gym-public-notice-modal:before{content:'';position:absolute;inset:0;border-radius:inherit;padding:1px;background:linear-gradient(120deg,rgba(169,145,255,.55),rgba(255,255,255,.06) 38%,rgba(97,230,168,.42));-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none}.gym-public-dark-v2 .gym-public-notice-modal:after{content:'';position:absolute;width:330px;height:170px;left:50%;top:-90px;transform:translateX(-50%);background:radial-gradient(circle,rgba(112,71,255,.26),transparent 70%);filter:blur(12px);z-index:-1;pointer-events:none}.gym-public-dark-v2 .gym-public-notice-close{position:absolute;right:16px;top:16px;width:42px;height:42px;border-radius:50%;display:grid;place-items:center;border:1px solid rgba(255,255,255,.13);background:rgba(255,255,255,.07);color:#eef2ff;cursor:pointer;transition:transform .18s ease,background .18s ease,border-color .18s ease;z-index:4}.gym-public-dark-v2 .gym-public-notice-close:hover{transform:rotate(90deg) scale(1.05);background:rgba(255,255,255,.13);border-color:rgba(255,255,255,.28)}.gym-public-dark-v2 .gym-public-notice-badge{width:max-content;max-width:100%;display:flex;align-items:center;gap:9px;padding:8px 12px;border-radius:999px;background:rgba(112,71,255,.13);border:1px solid rgba(169,145,255,.24);color:#bcaeff;font-size:10px;font-weight:900;letter-spacing:1.8px}.gym-public-dark-v2 .gym-public-notice-badge-dot{width:8px;height:8px;border-radius:50%;background:#61e6a8;box-shadow:0 0 0 0 rgba(97,230,168,.55);animation:gymNoticePulse 1.8s infinite;flex:0 0 auto}.gym-public-dark-v2 .gym-public-notice-modal h3{margin:20px 48px 12px 0;font-size:clamp(28px,5vw,48px);line-height:1.02;letter-spacing:-2px;color:#fff}.gym-public-dark-v2 .gym-public-notice-modal-copy{color:#d8deea;font-size:clamp(16px,2vw,20px);line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere}.gym-public-dark-v2 .gym-public-notice-divider{height:1px;background:linear-gradient(90deg,rgba(255,255,255,.16),rgba(255,255,255,.03));margin:26px 0 20px}.gym-public-dark-v2 .gym-public-notice-footer{display:flex;align-items:center;justify-content:space-between;gap:16px;color:#7f8b9e;font-size:11px}.gym-public-dark-v2 .gym-public-notice-continue{display:inline-flex;align-items:center;gap:8px;color:#fff;background:#7047ff;border:1px solid #805cff;border-radius:999px;padding:11px 17px;font-size:12px;font-weight:900;cursor:pointer;box-shadow:0 10px 30px rgba(112,71,255,.25)}.gym-public-dark-v2 .gym-public-notice-high .gym-public-notice-modal{border-color:rgba(255,96,128,.28);box-shadow:0 35px 120px rgba(0,0,0,.70),0 0 80px rgba(239,71,111,.14)}.gym-public-dark-v2 .gym-public-notice-high .gym-public-notice-badge{background:rgba(239,71,111,.12);border-color:rgba(255,96,128,.28);color:#ff9fb2}.gym-public-dark-v2 .gym-public-notice-high .gym-public-notice-badge-dot{background:#ff6686;box-shadow:0 0 0 0 rgba(255,102,134,.55)}.gym-public-dark-v2 .gym-public-notice-high .gym-public-notice-continue{background:#e83f68;border-color:#f15b7c;box-shadow:0 10px 30px rgba(232,63,104,.25)}.gym-public-dark-v2 .gym-public-notice-low .gym-public-notice-modal{border-color:rgba(18,191,166,.22)}.gym-public-dark-v2 .gym-public-notice-low .gym-public-notice-badge{background:rgba(18,191,166,.10);border-color:rgba(18,191,166,.24);color:#72e6d2}.gym-public-dark-v2 .gym-public-notice-low .gym-public-notice-badge-dot{background:#72e6d2;box-shadow:0 0 0 0 rgba(114,230,210,.50)}.gym-public-dark-v2 .gym-public-notice-text{white-space:pre-wrap}@keyframes gymNoticeOverlayIn{from{opacity:0}to{opacity:1}}@keyframes gymNoticeModalIn{from{opacity:0;transform:translateY(24px) scale(.94)}to{opacity:1;transform:translateY(0) scale(1)}}@keyframes gymNoticeFloat{0%,100%{transform:translate3d(0,0,0)}50%{transform:translate3d(18px,14px,0)}}@keyframes gymNoticePulse{0%{box-shadow:0 0 0 0 rgba(97,230,168,.5)}70%{box-shadow:0 0 0 9px rgba(97,230,168,0)}100%{box-shadow:0 0 0 0 rgba(97,230,168,0)}}
+        .gym-public-dark-v2 h2{color:#f4f1ff;text-shadow:0 2px 20px rgba(112,71,255,.10)}
+        .gym-public-dark-v2 .gym-section-heading>span{color:#aeb9ca}
+        .gym-public-dark-v2 .gym-facility-card h3,.gym-public-dark-v2 .public-trainer-copy h3,.gym-public-dark-v2 .public-package-card h3{color:#f1f3fb}
+        .gym-public-dark-v2 .gym-facility-card p,.gym-public-dark-v2 .public-trainer-copy p,.gym-public-dark-v2 .public-package-card p{color:#b3bdcd}
+        .gym-public-dark-v2 .public-package-price{color:#ffffff}
+        .gym-public-dark-v2 .gym-about-grid p{color:#b9c3d2}
+        .gym-public-dark-v2 .public-trainer-copy .eyebrow{color:#a998ff}
+        .gym-public-dark-v2 .gym-public-footer{display:flex;justify-content:space-between;gap:20px;padding:28px clamp(20px,7vw,110px);background:#05070b;color:#818b9c}.gym-public-dark-v2 .gym-public-footer strong{display:block;color:#f2f4f8}.gym-public-dark-v2 .gym-public-footer span{display:block;margin-top:5px}.gym-public-dark-v2 .public-developer-footer{padding:14px clamp(18px,5vw,70px);border-top:1px solid rgba(168,151,255,.16);background:linear-gradient(180deg,#090b13,#06080d);color:#8792a6;font-size:12px}.gym-public-dark-v2 .public-developer-footer .pf-developer-bar{max-width:1180px;margin:0 auto}.gym-public-dark-v2 .public-developer-footer strong{color:#e7e9f2}.gym-public-dark-v2 .public-developer-footer a{color:#fff;text-decoration:none;font-weight:800}.pf-developer-bar{width:100%;box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;gap:18px;padding:14px 18px;border:1px solid rgba(120,105,255,.18);border-radius:16px;background:linear-gradient(135deg,rgba(109,74,255,.12),rgba(18,191,166,.07));box-shadow:0 10px 28px rgba(0,0,0,.12)}.pf-developer-brand{display:flex;align-items:center;gap:12px;min-width:0}.pf-developer-mark{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:linear-gradient(135deg,#6d4aff,#12bfa6);color:#fff;box-shadow:0 7px 18px rgba(109,74,255,.25);flex:0 0 auto}.pf-developer-copy{min-width:0;line-height:1.35}.pf-developer-copy strong{display:block;font-size:12px;letter-spacing:.01em}.pf-developer-copy span{display:block;margin-top:2px;color:#7e899b;font-size:11px}.pf-developer-contact{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.pf-developer-contact a{display:inline-flex;align-items:center;gap:7px;width:38px;height:38px;padding:0;border-radius:10px;justify-content:center;border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.045);color:#e7e9f2!important;text-decoration:none;font-weight:800;transition:.18s ease}.pf-developer-contact a:hover{transform:translateY(-1px);background:rgba(255,255,255,.09);border-color:rgba(169,145,255,.35)}.pf-developer-contact svg{width:16px;height:16px}.pf-developer-bar.app{margin:24px 24px 18px;width:calc(100% - 48px);background:linear-gradient(135deg,rgba(109,74,255,.08),rgba(18,191,166,.06));border-color:rgba(92,76,170,.15);box-shadow:0 8px 24px rgba(32,30,73,.07)}.pf-developer-bar.app .pf-developer-copy strong{color:#24344b}.pf-developer-bar.app .pf-developer-copy span{color:#7b8998}.pf-developer-bar.app .pf-developer-contact a{background:#fff;border-color:#dce5ec;color:#26364b!important}.pf-developer-bar.app .pf-developer-contact a:hover{background:#f5f2ff;border-color:#d9d0ff}.pf-developer-bar.app .pf-developer-mark{box-shadow:0 7px 18px rgba(109,74,255,.18)}@media(max-width:650px){.pf-developer-bar{align-items:flex-start;flex-direction:column}.pf-developer-contact{width:100%;justify-content:flex-start}.pf-developer-contact a{flex:1 1 auto;justify-content:center}}.gym-public-dark-v2 .public-loading{min-height:100vh;display:grid;place-items:center;color:#aeb7c8}
+        @media(max-width:900px){.gym-public-dark-v2 .gym-hero,.gym-public-dark-v2 .gym-about-grid,.gym-public-dark-v2 .public-google-card{grid-template-columns:1fr}.gym-public-dark-v2 .gym-facility-grid,.gym-public-dark-v2 .public-package-grid,.gym-public-dark-v2 .review-grid{grid-template-columns:1fr 1fr}.gym-public-dark-v2 .public-trainer-card{width:100%;grid-template-columns:180px 1fr}.gym-public-dark-v2 .public-trainer-card img,.gym-public-dark-v2 .public-trainer-photo-placeholder{width:180px;height:210px}}
+        @media(max-width:620px){.gym-public-dark-v2 .gym-public-notice-overlay{padding:14px}.gym-public-dark-v2 .gym-public-notice-modal{max-height:86vh;border-radius:24px;padding:34px 22px 24px}.gym-public-dark-v2 .gym-public-notice-close{right:11px;top:11px;width:38px;height:38px}.gym-public-dark-v2 .gym-public-notice-modal h3{font-size:32px;letter-spacing:-1.2px;margin-right:40px}.gym-public-dark-v2 .gym-public-notice-modal-copy{font-size:15px;line-height:1.65}.gym-public-dark-v2 .gym-public-notice-footer{align-items:flex-start;flex-direction:column}.gym-public-dark-v2 .gym-public-notice-continue{width:100%;justify-content:center}.gym-public-dark-v2 .gym-public-nav{align-items:flex-start;flex-direction:column}.gym-public-dark-v2 .public-contact-actions{justify-content:flex-start}.gym-public-dark-v2 .gym-hero{padding-top:55px}.gym-public-dark-v2 .gym-hero-rule{width:125px;height:3px}.gym-public-dark-v2 .gym-hero h1{letter-spacing:-2px;line-height:1.10;padding-bottom:.18em}.gym-public-dark-v2 .gym-hero h1 .hero-line{line-height:1.10;padding-bottom:.18em}.gym-public-dark-v2 .gym-hero-visual img{height:360px}.gym-public-dark-v2 .gym-facility-grid,.gym-public-dark-v2 .public-package-grid,.gym-public-dark-v2 .review-grid{grid-template-columns:1fr}.gym-public-dark-v2 .public-trainer-card{grid-template-columns:1fr}.gym-public-dark-v2 .public-trainer-card:nth-child(even){transform:none}.gym-public-dark-v2 .public-trainer-card img,.gym-public-dark-v2 .public-trainer-photo-placeholder{width:100%;height:300px}.gym-public-dark-v2 .gym-gallery{grid-template-columns:1fr;grid-template-rows:280px 180px 180px 180px}.gym-public-dark-v2 .gallery-1{grid-row:auto}.gym-public-dark-v2 .public-contact-panel,.gym-public-dark-v2 .gym-public-footer{flex-direction:column;align-items:flex-start}}
+      `}</style>
+      {!loading && noticeOpen && publicNoticeText && publicNotice?.enabled && <div className={`gym-public-notice-overlay gym-public-notice-${publicNoticePriority}`} role="dialog" aria-modal="true" aria-label="Gym notice">
+        <div className="gym-public-notice-modal">
+          <button className="gym-public-notice-close" onClick={() => setNoticeOpen(false)} aria-label="Close notice" title="Close notice"><X size={20} /></button>
+          <div className="gym-public-notice-badge"><span className="gym-public-notice-badge-dot" aria-hidden="true" />{publicNoticePriority === 'high' ? 'IMPORTANT NOTICE' : publicNoticePriority === 'low' ? 'GYM UPDATE' : 'GYM NOTICE'}</div>
+          <h3>{publicNoticePriority === 'high' ? 'Important announcement' : publicNoticePriority === 'low' ? 'A quick update for you' : 'Something you should know'}</h3>
+          <div className="gym-public-notice-modal-copy">{publicNoticeText}</div>
+          <div className="gym-public-notice-divider" />
+          <div className="gym-public-notice-footer">
+            <span>Close this notice to continue to the website.</span>
+            <button className="gym-public-notice-continue" onClick={() => setNoticeOpen(false)}><span>Continue to website</span><ArrowDownRight size={15} /></button>
           </div>
-          <div className="gym-public-notice-pulse" aria-hidden="true" />
         </div>
-      )}
+      </div>}
       <header className="gym-public-nav">
         <div className="gym-public-brand"><img src={LOGO_URL} alt={gymName} /><div><strong>{gymName}</strong><span>FITNESS • STRENGTH • WELLNESS</span></div></div>
-        
-      </header>
-
-      <section className="gym-hero">
-        <div className="gym-hero-copy">
-          <div className="gym-kicker">YOUR FITNESS. YOUR PROGRESS. YOUR SPACE.</div>
-          <h1>Train stronger.<br /><span>Live better.</span></h1>
-          <p>{description}</p>
-          
-          <div className="gym-trust-row"><span><CheckCircle2 size={16} /> Professional training</span><span><CheckCircle2 size={16} /> Progress focused</span><span><CheckCircle2 size={16} /> Member first</span></div>
+        <div className="public-contact-actions">
+          {phone && <a className="primary" href={`tel:${phone}`}>Call</a>}
+          {whatsapp && <a href={`https://wa.me/${whatsapp}`} target="_blank" rel="noreferrer">WhatsApp</a>}
+          {email && <a href={`mailto:${email}`}>Email</a>}
+          {instagram && <a href={instagram} target="_blank" rel="noreferrer">Instagram</a>}
         </div>
-        <div className="gym-hero-visual"><img src={gallery[0]} alt="Fitness training area" /><div className="gym-hero-float"><strong>Built for consistency</strong><span>Strength • Conditioning • Results</span></div></div>
-      </section>
-
-      <section className="gym-public-section gym-about-grid">
-        <div><div className="gym-section-kicker">ABOUT THE GYM</div><h2>A focused environment for people who want to make progress.</h2></div>
-        <div><p>{description}</p><p>Whether your goal is fat loss, strength, muscle development or simply becoming more active, the space is designed to keep your training structured, measurable and sustainable.</p></div>
-      </section>
-
-      <section className="gym-public-section">
-        <div className="gym-section-heading"><div><div className="gym-section-kicker">FACILITIES</div><h2>Everything you need to train with purpose.</h2></div></div>
-        <div className="gym-facility-grid">{facilities.map((item, index) => <div className="gym-facility-card" key={`${item}-${index}`}><div className="gym-facility-number">0{index + 1}</div><div><h3>{item}</h3><p>Designed to make every training session simple, focused and effective.</p></div></div>)}</div>
-      </section>
-
-      <section className="gym-public-section">
-        <div className="gym-section-heading"><div><div className="gym-section-kicker">THE SPACE</div><h2>Train in a space built around movement.</h2></div><span>Swipe / scroll through the gallery</span></div>
-        <div className="gym-gallery">{gallery.map((src, index) => <div className={`gym-gallery-item gallery-${index + 1}`} key={src}><img src={src} alt={`Gym training ${index + 1}`} /></div>)}</div>
-      </section>
-
-      <section className="gym-cta"><div><div className="gym-section-kicker">READY TO START?</div><h2>Show up. Put in the work. Track the progress.</h2></div></section>
-      <footer className="gym-public-footer"><div><strong>{gymName}</strong><span>{settings.gymAddress || 'Fitness • Strength • Wellness'}</span></div><div>{settings.gymPhone || ''}{settings.gymEmail ? ` • ${settings.gymEmail}` : ''}</div></footer>
+      </header>
+      {loading && !publicSettings.publicPage ? <div className="public-loading">Loading gym profile…</div> : <>
+      <section className="gym-hero"><div className="gym-hero-copy"><div className="gym-kicker">YOUR FITNESS. YOUR PROGRESS. YOUR SPACE.</div><div className="gym-hero-rule" aria-hidden="true" /><h1><span className="hero-line hero-line-1">Train</span><br /><span className="hero-line hero-line-2">stronger.</span><br /><span className="hero-line hero-line-3">Live better.</span></h1><p>{description}</p><div className="gym-trust-row"><span><i className="trust-icon trust-icon-1"><Dumbbell size={17} /></i><b>Professional</b> training</span><span><i className="trust-icon trust-icon-2"><TrendingUp size={17} /></i><b>Progress</b> focused</span><span><i className="trust-icon trust-icon-3"><Users size={17} /></i><b>Member</b> first</span></div></div><div className="gym-hero-visual"><img src={gallery[0]} alt="Fitness training area" /><div className="gym-hero-float"><strong>Built for consistency</strong><span>Strength • Conditioning • Results</span></div></div></section>
+      <section className="gym-public-section gym-about-grid"><div><div className="gym-section-kicker">ABOUT THE GYM</div><h2>A focused environment for people who want to make progress.</h2></div><div><p>{description}</p><p>Whether your goal is fat loss, strength, muscle development or simply becoming more active, the space is designed to keep your training structured, measurable and sustainable.</p></div></section>
+      <section className="gym-public-section"><div className="gym-section-heading"><div><div className="gym-section-kicker">FACILITIES</div><h2>Everything you need to train with purpose.</h2></div></div><div className="gym-facility-grid">{facilities.map((item,index)=><article className="gym-facility-card" key={`${item.name}-${index}`}><div className="gym-facility-image-wrap"><img src={item.image} alt={item.name} loading="lazy" /><div className="gym-facility-image-overlay" /><div className="gym-facility-number">{String(index + 1).padStart(2, '0')}</div></div><div className="gym-facility-card-body"><h3>{item.name}</h3><p>{item.description}</p></div></article>)}</div></section>
+      <section className="gym-public-section"><div className="gym-section-heading"><div><div className="gym-section-kicker">OUR TRAINERS</div><h2>Meet the people behind the progress.</h2></div></div>{trainers.length ? <div className="gym-trainer-list">{trainers.map((trainer,index)=><article className="public-trainer-card" key={`${trainer.name}-${index}`}>{trainer.photo ? <img src={trainer.photo} alt={trainer.name || 'Trainer'} /> : <div className="public-trainer-photo-placeholder">{initials(trainer.name || 'Trainer')}</div>}<div className="public-trainer-copy"><div className="eyebrow">{trainer.role || 'FITNESS TRAINER'}</div><h3>{trainer.name || 'Trainer'}</h3><div className="public-trainer-meta">{trainer.experience && <span>{trainer.experience} years experience</span>}{trainer.forte && <span>Forte: {trainer.forte}</span>}{trainer.specialization && <span>{trainer.specialization}</span>}{trainer.certification && <span>{trainer.certification}</span>}</div><p>{trainer.description || 'Focused on structured training, safe technique and measurable member progress.'}</p></div></article>)}</div> : <div className="public-review"><strong>Trainer profiles coming soon</strong><p>Trainer details will appear here as the administrator adds them.</p></div>}</section>
+      <section className="gym-public-section"><div className="gym-section-heading"><div><div className="gym-section-kicker">MEMBERSHIP PACKAGES</div><h2>Choose the plan that fits your routine.</h2></div></div><div className="public-package-grid">{packages.map((pkg,index)=><article className={`public-package-card ${index===packages.length-1?'featured':''}`} key={`${pkg.name}-${index}`}><div className="package-tag">MEMBERSHIP</div><h3>{pkg.name}</h3><div className="public-package-price">₹{Number(pkg.price||0).toLocaleString('en-IN')} <small>/ {Number(pkg.months||1)} month{Number(pkg.months||1)>1?'s':''}</small></div><p>{pkg.description || 'Flexible membership for your fitness goals.'}</p></article>)}</div></section>
+      <section className="gym-public-section"><div className="gym-section-heading"><div><div className="gym-section-kicker">THE SPACE</div><h2>Train in a space built around movement.</h2></div><span>Swipe / scroll through the gallery</span></div><div className="gym-gallery">{gallery.map((src,index)=><div className={`gym-gallery-item gallery-${index+1}`} key={src}><img src={src} alt={`Gym training ${index+1}`} /></div>)}</div></section>
+      <section className="gym-public-section"><div className="gym-section-heading"><div><div className="gym-section-kicker">GOOGLE BUSINESS</div><h2>Find us. See what members say.</h2></div></div><div className="public-google-card"><div><div className="google-rating">{googleRating} <span className="stars">★★★★★</span></div><div className="google-muted">{googleReviewCount} Google reviews</div><h3 style={{fontSize:'22px',margin:'25px 0 6px'}}>{googlePlaceName}</h3><div className="google-muted">{googleAddress}</div><div style={{marginTop:'10px',color:'#ffbf36',fontWeight:800}}>Hours · {hoursText}</div><div className="google-muted" style={{marginTop:'10px'}}>Google phone · {googlePhone}</div><div style={{display:'flex',gap:'12px',flexWrap:'wrap',marginTop:'18px'}}>{(mapsUrl || googleSearchUrl) && <a href={mapsUrl || googleSearchUrl} target="_blank" rel="noreferrer" style={{color:'#a991ff',textDecoration:'none',fontWeight:800}}>Open Google →</a>}<a href={googleSearchUrl} target="_blank" rel="noreferrer" style={{color:'#d9d2ff',textDecoration:'none',fontWeight:800}}>View Google listing</a></div></div><div className="google-map-box"><div><div style={{fontSize:'42px'}}>📍</div><strong>{googlePlaceName}</strong><div className="google-muted">{googleAddress || 'Google business location'}</div><div className="stars" style={{marginTop:'12px'}}>★★★★★</div><div className="google-muted">{googleRating}/5 · {googleReviewCount} reviews</div></div></div></div></section>
+      <section className="gym-public-section"><div className="gym-section-heading"><div><div className="gym-section-kicker">MEMBER REVIEWS</div><h2>What our customers say.</h2></div></div>{reviews.length ? <div className="review-grid">{reviews.map((review,index)=><article className="public-review" key={`${review.name}-${index}`}><div className="public-review-head">{review.photo ? <img className="public-review-avatar" src={review.photo} alt="" /> : <div className="public-review-avatar">{initials(review.name || 'C')}</div>}<div><strong>{review.name || 'Customer'}</strong><small>{review.date || 'Verified customer'}</small></div></div><div className="stars" style={{marginTop:'13px'}}>★★★★★</div><p>{review.text}</p></article>)}</div> : <div className="public-review"><strong>No reviews added yet.</strong><p>Customer reviews added from Administrator → Settings will appear here.</p></div>}</section>
+      <section className="gym-cta"><div className="public-contact-panel"><div><div className="gym-section-kicker">READY TO START?</div><h2>Show up. Put in the work. Track the progress.</h2><p>Contact the gym using your preferred channel.</p></div><div className="public-socials">{phone&&<a href={`tel:${phone}`}>Call {phone}</a>}{whatsapp&&<a href={`https://wa.me/${whatsapp}`} target="_blank" rel="noreferrer">WhatsApp</a>}{email&&<a href={`mailto:${email}`}>Email</a>}{instagram&&<a href={instagram} target="_blank" rel="noreferrer">Instagram</a>}{facebook&&<a href={facebook} target="_blank" rel="noreferrer">Facebook</a>}{website&&<a href={website} target="_blank" rel="noreferrer">Website</a>}</div></div></section>
+      <footer className="gym-public-footer"><div><strong>{gymName}</strong><span>{publicSettings.gymAddress || 'Fitness • Strength • Wellness'}</span></div><div>{phone}{email ? ` • ${email}` : ''}</div></footer>
+      <div className="public-developer-footer"><DeveloperContactBar /></div>
+      </>}
     </div>
   );
 }
@@ -2016,6 +3634,8 @@ function FeedbackModal({ members, onClose, onSave }) {
       <FormField label="Member"><select value={form.memberId} onChange={(e) => { const id = e.target.value; const member = members.find((m) => m.id === id); setForm((f) => ({ ...f, memberId: id, memberName: member?.name || '' })); }}><option value="">Anonymous / walk-in</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name} · {m.id}</option>)}</select></FormField>
       <FormField label="Date"><input type="date" value={form.date} onChange={(e) => update('date', e.target.value)} /></FormField>
     </div>
+
+
     <div className="form-grid three"><FormField label="Category"><select value={form.category} onChange={(e) => update('category', e.target.value)}><option>General</option><option>Service</option><option>Trainer</option><option>Facility</option><option>Cleanliness</option><option>Billing</option><option>Membership</option><option>Suggestion</option><option>Appreciation</option></select></FormField><FormField label="Urgency level"><select value={form.priority} onChange={(e) => update('priority', e.target.value)}><option value="low">Low priority</option><option value="medium">Medium priority</option><option value="high">High priority</option></select></FormField><FormField label="Status"><select value={form.status} onChange={(e) => update('status', e.target.value)}><option>Open</option><option>In progress</option><option>Resolved</option></select></FormField></div>
     <FormField label="Customer feedback"><textarea rows="6" autoFocus value={form.feedback} onChange={(e) => update('feedback', e.target.value)} placeholder="Write the customer's feedback in their own words..." /></FormField>
     <FormField label="Internal follow-up notes"><textarea rows="3" value={form.notes} onChange={(e) => update('notes', e.target.value)} placeholder="Action required, staff member responsible, follow-up date, etc." /></FormField>
@@ -3027,56 +4647,116 @@ function PTSessionModal({ trainers, members, onClose, onSave }) {
 }
 
 function Dashboard({ activeMembers, expiringMembers, overdue, revenue, data, navigate, setModal, markAttendance }) {
-  const todayAttendance = data.attendance.filter((a) => a.date === today);
-  const attention = [
-    expiringMembers ? { tone: 'amber', icon: ShieldCheck, title: `${expiringMembers} membership${expiringMembers > 1 ? 's' : ''} expiring`, sub: 'Open membership list', action: () => navigate('Memberships') } : null,
-    overdue ? { tone: 'red', icon: CreditCard, title: `₹${overdue.toLocaleString('en-IN')} pending`, sub: 'Review outstanding payments', action: () => navigate('Payments') } : null,
-    data.leads.filter((l) => l.followUp <= today).length ? { tone: 'blue', icon: Target, title: `${data.leads.filter((l) => l.followUp <= today).length} lead follow-ups due`, sub: 'Contact leads today', action: () => navigate('Leads') } : null,
-    { tone: 'purple', icon: Activity, title: `${data.members.filter((m) => m.visits < 8).length} low-attendance members`, sub: 'Potential retention risk', action: () => navigate('Members') },
-  ].filter(Boolean);
+  const [fromDate, setFromDate] = useState(today);
+  const [toDate, setToDate] = useState(today);
+
+  const safeFrom = fromDate || today;
+  const safeTo = toDate || safeFrom;
+  const rangeStart = safeFrom <= safeTo ? safeFrom : safeTo;
+  const rangeEnd = safeFrom <= safeTo ? safeTo : safeFrom;
+
+  const inRange = (value) => {
+    if (!value) return false;
+    const date = String(value).slice(0, 10);
+    return date >= rangeStart && date <= rangeEnd;
+  };
+
+  const rangeMembers = data.members.filter((member) => inRange(member.createdAt || member.start));
+  const rangePayments = data.payments.filter((payment) => inRange(payment.date));
+  const rangeAttendance = data.attendance.filter((record) => inRange(record.date));
+  const rangePTSessions = (data.ptSessions || []).filter((session) => inRange(session.date));
+  const rangeLeads = data.leads.filter((lead) => inRange(lead.followUp || lead.lastContact));
+
+  const newClients = rangeMembers.length;
+  const totalCollection = rangePayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const totalExpenses = 0;
+  const ptCollection = rangePayments
+    .filter((payment) => String(payment.type || '').toLowerCase().includes('pt'))
+    .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const profitLoss = totalCollection - totalExpenses;
+  const pendingInquiries = data.leads.filter((lead) => !['Converted', 'Closed', 'Lost'].includes(lead.stage)).length;
+  const inactiveClients = data.members.filter((member) => getMembershipStatus(member.expiry) === 'Expired').length;
+  const profileCreated = data.members.filter((member) => Boolean(member.photo)).length;
+  const bookedPT = rangePTSessions.filter((session) => !['Cancelled', 'Completed'].includes(session.status)).length;
+  const followUps = data.leads.filter((lead) => lead.followUp && lead.followUp <= rangeEnd && !['Converted', 'Closed', 'Lost'].includes(lead.stage)).length;
+  const todayPresent = new Set(rangeAttendance.map((item) => item.memberId || item.member)).size;
+  const bookedGroupClass = 0;
+
+  const totalMembers = Math.max(data.members.length, 0);
+  const totalLeads = Math.max(data.leads.length, 0);
+  const totalSessions = Math.max((data.ptSessions || []).length, 0);
+  const collectionBase = totalCollection + Math.max(Number(overdue || 0), 0);
+  const pct = (value, base) => base > 0 ? Math.max(0, Math.min(100, (Number(value || 0) / base) * 100)) : 0;
+
+  const tiles = [
+    { label: 'Memberships expiring', value: expiringMembers, progress: pct(expiringMembers, totalMembers), icon: ShieldCheck, tone: 'violet', onClick: () => navigate('Memberships') },
+    { label: 'New clients', value: newClients, progress: pct(newClients, totalMembers), icon: UserPlus, tone: 'mint', onClick: () => navigate('Members') },
+    { label: 'Total collection', value: `₹${totalCollection.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, progress: collectionBase ? pct(totalCollection, collectionBase) : 0, icon: CircleDollarSign, tone: 'violet', onClick: () => navigate('Payments') },
+    { label: 'Total expenses', value: `₹${totalExpenses.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, progress: totalCollection > 0 ? Math.max(0, 100 - pct(totalExpenses, totalCollection)) : 0, icon: CreditCard, tone: 'pink', onClick: () => navigate('Reports') },
+    { label: 'Total PT collection', value: `₹${ptCollection.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, progress: pct(ptCollection, totalCollection), icon: Dumbbell, tone: 'gold', onClick: () => navigate('Trainers & PT') },
+    { label: 'Profit / Loss', value: `₹${profitLoss.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, progress: totalCollection > 0 ? pct(Math.max(profitLoss, 0), totalCollection) : 0, icon: TrendingUp, tone: 'orange', onClick: () => navigate('Reports') },
+    { label: 'Pending inquiry(s)', value: pendingInquiries, progress: pct(pendingInquiries, totalLeads), icon: Target, tone: 'green', onClick: () => navigate('Leads') },
+    { label: 'Active clients', value: activeMembers, progress: pct(activeMembers, totalMembers), icon: Activity, tone: 'teal', onClick: () => navigate('Members') },
+    { label: 'Inactive clients', value: inactiveClients, progress: pct(inactiveClients, totalMembers), icon: UserCheck, tone: 'slate', onClick: () => navigate('Members') },
+    { label: 'Profile created clients', value: profileCreated, progress: pct(profileCreated, totalMembers), icon: Users, tone: 'blue', onClick: () => navigate('Members') },
+    { label: 'Booked PT sessions', value: bookedPT, progress: pct(bookedPT, totalSessions), icon: Dumbbell, tone: 'cyan', onClick: () => navigate('Trainers & PT') },
+    { label: 'Follow-ups', value: followUps, progress: pct(followUps, totalLeads), icon: Bell, tone: 'orange', onClick: () => navigate('Leads') },
+    { label: 'Today present clients', value: todayPresent, progress: pct(todayPresent, activeMembers), icon: CheckCircle2, tone: 'indigo', onClick: () => navigate('Attendance') },
+    { label: 'Booked group class', value: bookedGroupClass, progress: 0, icon: Users, tone: 'purple', onClick: () => navigate('Training') },
+    { label: 'Pending payments', value: `₹${Number(overdue || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, progress: collectionBase ? pct(overdue, collectionBase) : 0, icon: CreditCard, tone: 'pink', onClick: () => navigate('Payments') },
+    { label: 'Record payment', value: 'Open', progress: 100, icon: CreditCard, tone: 'teal', onClick: () => setModal('payment') },
+    { label: 'Mark attendance', value: 'Open', progress: 100, icon: CheckCircle2, tone: 'blue', onClick: () => navigate('Attendance') },
+  ];
+
+  const rangeLabel = rangeStart === rangeEnd
+    ? formatDate(rangeStart)
+    : `${formatDate(rangeStart)} – ${formatDate(rangeEnd)}`;
 
   return (
-    <>
-      <div className="page-heading">
-        <div><div className="eyebrow">Wednesday, 23 September 2026</div><h1>Good afternoon, Administrator <span>👋</span></h1><p>Here’s what needs your attention at Preface Fitness today.</p></div>
-        <div className="heading-actions"><button className="btn btn-secondary" onClick={() => setModal('lead')}><Target size={17} /> New lead</button><button className="btn btn-primary" onClick={() => setModal('member')}><Plus size={18} /> Add member</button></div>
+    <div className="vibrant-dashboard">
+      <div className="vibrant-dashboard-hero">
+        <div>
+          <div className="eyebrow">PREFACE FITNESS · COMMAND CENTER</div>
+          <h1>Good day, Administrator <span>👋</span></h1>
+          <p>Everything important about your gym, at a glance.</p>
+        </div>
+        <div className="vibrant-dashboard-actions">
+          <button className="btn btn-secondary" onClick={() => setModal('lead')}><Target size={18} /> New lead</button>
+          <button className="btn btn-primary" onClick={() => setModal('member')}><Plus size={19} /> Add member</button>
+        </div>
       </div>
 
-      <section className="stats-grid">
-        <StatCard label="Total members" value={data.members.length} change="5.8%" positive icon={Users} tone="teal" />
-        <StatCard label="Active members" value={activeMembers} change="3.2%" positive icon={Activity} tone="green" />
-        <StatCard label="Revenue recorded" value={`₹${revenue.toLocaleString('en-IN')}`} change="8.4%" positive icon={CircleDollarSign} tone="purple" />
-        <StatCard label="Pending payments" value={`₹${overdue.toLocaleString('en-IN')}`} change="Needs action" icon={CreditCard} tone="orange" />
-      </section>
-
-      <section className="dashboard-grid">
-        <div className="panel attention-panel">
-          <PanelHeader title="Needs attention" subtitle="Actions that matter today" icon={AlertCircle} />
-          <div className="attention-list">
-            {attention.map((item, i) => <button className="attention-item" key={i} onClick={item.action}><div className={`attention-icon ${item.tone}`}><item.icon size={18} /></div><div><strong>{item.title}</strong><span>{item.sub}</span></div><ArrowUpRight size={17} /></button>)}
-            {!attention.length && <EmptyState title="Everything looks good" text="No urgent actions for today." />}
-          </div>
+      <section className="dashboard-filter-card">
+        <div className="dashboard-filter-heading">
+          <div><strong>Summary statistics</strong><span>Showing live data for {rangeLabel}</span></div>
+          <div className="dashboard-filter-badge"><Activity size={16} /> Live</div>
         </div>
-
-        <div className="panel attendance-panel">
-          <PanelHeader title="Today's attendance" subtitle={`${todayAttendance.length} check-ins`} icon={CheckCircle2} />
-          <div className="attendance-number"><strong>{todayAttendance.length}</strong><span>members present</span></div>
-          <div className="mini-bars"><span style={{ height: '34%' }} /><span style={{ height: '52%' }} /><span style={{ height: '43%' }} /><span style={{ height: '76%' }} /><span style={{ height: '92%' }} /><span style={{ height: '68%' }} /><span style={{ height: '81%' }} /><span style={{ height: '59%' }} /></div>
-          <button className="link-btn" onClick={() => navigate('Attendance')}>Open attendance <ArrowUpRight size={15} /></button>
+        <div className="dashboard-date-controls">
+          <label><span>From</span><div className="date-input-wrap"><input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /><CalendarDays size={18} /></div></label>
+          <label><span>To</span><div className="date-input-wrap"><input type="date" value={toDate} min={fromDate} onChange={(e) => setToDate(e.target.value)} /><CalendarDays size={18} /></div></label>
+          <button className="dashboard-filter-btn" onClick={() => { setFromDate(today); setToDate(today); }}><CalendarDays size={18} /> Today</button>
         </div>
       </section>
 
-      <section className="dashboard-grid lower-grid">
-        <div className="panel">
-          <PanelHeader title="Expiring memberships" subtitle="Members who may need a renewal message" icon={ShieldCheck} action="View all" onAction={() => navigate('Memberships')} />
-          <div className="table-wrap compact-table"><table><thead><tr><th>Member</th><th>Plan</th><th>Expires</th><th>Status</th></tr></thead><tbody>{data.members.filter((m) => m.status === 'Expiring').map((m) => <tr key={m.id}><td><div className="member-cell"><div className="avatar soft">{initials(m.name)}</div><div><strong>{m.name}</strong><span>{m.phone}</span></div></div></td><td>{m.plan}</td><td>{formatDate(m.expiry)}</td><td><StatusBadge status={m.status} /></td></tr>)}</tbody></table></div>
-        </div>
-        <div className="panel">
-          <PanelHeader title="Quick actions" subtitle="Common front-desk tasks" icon={Sparkles} />
-          <div className="quick-grid"><QuickAction icon={UserPlus} label="Add member" onClick={() => setModal('member')} /><QuickAction icon={Target} label="New lead" onClick={() => setModal('lead')} /><QuickAction icon={CreditCard} label="Record payment" onClick={() => setModal('payment')} /><QuickAction icon={CheckCircle2} label="Mark attendance" onClick={() => data.members[0] && markAttendance(data.members[0].name)} /></div>
-        </div>
+      <section className="vibrant-tile-grid">
+        {tiles.map((tile) => {
+          const Icon = tile.icon;
+          return (
+            <button key={tile.label} className={`vibrant-stat-tile tone-${tile.tone}`} onClick={tile.onClick}>
+              <div className="vibrant-stat-icon"><Icon size={25} strokeWidth={2.2} /></div>
+              <div className="vibrant-stat-copy">
+                <span>{tile.label}</span>
+                <strong>{tile.value}</strong>
+              </div>
+              <div className="vibrant-stat-arrow"><ArrowUpRight size={17} /></div>
+              <div className="vibrant-stat-progress" aria-hidden="true"><span style={{ width: `${Math.round(tile.progress || 0)}%` }} /></div>
+            </button>
+          );
+        })}
       </section>
-    </>
+
+
+    </div>
   );
 }
 
@@ -3145,6 +4825,40 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
         @keyframes profileIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
         @media(max-width:900px){.member-profile-premium .profile-summary{grid-template-columns:repeat(2,minmax(0,1fr));}.member-profile-premium .profile-cards{grid-template-columns:1fr;}}
         @media(max-width:620px){.member-profile-premium .documents-grid{grid-template-columns:1fr}.member-profile-premium .profile-hero{padding:20px 18px}.member-profile-premium .profile-avatar{width:70px;height:70px;min-width:70px}.member-profile-premium .detail-list > div{grid-template-columns:1fr;gap:4px}.member-profile-premium .detail-list strong{text-align:left}.member-profile-premium .activity-highlight{grid-template-columns:1fr;}}
+
+        /* Member profile: readable, slightly larger typography */
+        .member-profile-premium .profile-name {
+          font-size:clamp(36px,3vw,48px) !important;
+          line-height:1.08 !important;
+        }
+        .member-profile-premium .profile-meta {
+          font-size:18px !important;
+        }
+        .member-profile-premium .summary-card span {
+          font-size:14px !important;
+        }
+        .member-profile-premium .summary-card strong {
+          font-size:20px !important;
+        }
+        .member-profile-premium .panel-title h3 {
+          font-size:22px !important;
+        }
+        .member-profile-premium .panel-title span {
+          font-size:14px !important;
+        }
+        .member-profile-premium .detail-list > div {
+          padding:15px 0 !important;
+        }
+        .member-profile-premium .detail-list span {
+          font-size:16px !important;
+        }
+        .member-profile-premium .detail-list strong {
+          font-size:18px !important;
+          line-height:1.45 !important;
+        }
+        .member-profile-premium .member-notes {
+          font-size:17px !important;
+        }
       `}</style>
 
       <div className="member-profile-premium">
@@ -5254,17 +6968,60 @@ function MembershipsPage({ members, setModal, planPrices, setData, setToast, onR
       (statusFilter === 'All' || status === statusFilter);
   });
 
-  const savePrices = () => {
+  const savePrices = async () => {
     const cleaned = {};
     MEMBERSHIP_PLANS.forEach((plan) => {
       cleaned[plan.name] = Math.max(0, Number(draftPrices[plan.name] || 0));
     });
-    setData((current) => ({
-      ...current,
-      settings: { ...(current.settings || {}), membershipPrices: cleaned },
-    }));
-    setEditingPrices(false);
-    setToast('Membership plan prices updated');
+
+    try {
+      const currentPublicPage = data.settings?.publicPage || {};
+      const currentPackages = Array.isArray(currentPublicPage.packages)
+        ? currentPublicPage.packages
+        : [];
+
+      const syncedPackages = (currentPackages.length ? currentPackages : MEMBERSHIP_PLANS.map((plan) => ({ name: plan.name, months: plan.months, price: cleaned[plan.name], description: plan.description }))).map((pkg) => {
+        const standardPlan = MEMBERSHIP_PLANS.find(
+          (plan) => String(plan.name).trim().toLowerCase() === String(pkg?.name || '').trim().toLowerCase()
+        );
+
+        return standardPlan
+          ? {
+              ...pkg,
+              months: standardPlan.months,
+              price: cleaned[standardPlan.name],
+            }
+          : pkg;
+      });
+
+      const nextPublicPage = {
+        ...currentPublicPage,
+        packages: syncedPackages,
+        updatedAt: new Date().toISOString(),
+      };
+
+      const nextSettings = {
+        ...(data.settings || {}),
+        membershipPrices: cleaned,
+        publicPage: nextPublicPage,
+      };
+
+      setData((current) => ({
+        ...current,
+        settings: nextSettings,
+      }));
+
+      await saveCloudSettings({
+        membershipPrices: cleaned,
+        publicPage: nextPublicPage,
+      });
+
+      setEditingPrices(false);
+      setToast('Membership plan prices updated and synced to the public page');
+    } catch (error) {
+      console.error('Membership price save failed:', error);
+      setToast(error?.message || 'Unable to save membership prices');
+    }
   };
 
   return <>
@@ -5333,8 +7090,8 @@ function MembershipsPage({ members, setModal, planPrices, setData, setToast, onR
         </div>
       </div>
 
-      <div className="table-wrap">
-        <table>
+      <div className="table-wrap membership-table-wrap">
+        <table className="memberships-list-table">
           <thead><tr><th>Member</th><th>Plan</th><th>Start</th><th>Expiry</th><th>Remaining</th><th>Due</th><th>Status</th><th></th></tr></thead>
           <tbody>
             {filteredMembers.map((member) => {
@@ -5630,6 +7387,74 @@ function shareBillWhatsApp(member, settings, payment = null) {
 }
 
 function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = [], members = [], trainers = [] }) {
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraError, setCameraError] = useState('');
+  const videoRef = useRef(null);
+  const cameraStreamRef = useRef(null);
+
+  const stopCamera = () => {
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+    }
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setCameraOpen(false);
+  };
+
+  useEffect(() => () => {
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+    }
+  }, []);
+
+  const openCamera = async () => {
+    setCameraError('');
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError('Camera access is not supported by this browser. Please use Chrome, Edge or another modern browser over HTTPS or localhost.');
+      setCameraOpen(true);
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+      cameraStreamRef.current = stream;
+      setCameraOpen(true);
+      requestAnimationFrame(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(() => {});
+        }
+      });
+    } catch (error) {
+      console.error('Camera access failed:', error);
+      setCameraError(error?.name === 'NotAllowedError'
+        ? 'Camera permission was blocked. Allow camera access for this site in the browser address bar and try again.'
+        : error?.name === 'NotFoundError'
+          ? 'No camera was found on this device.'
+          : 'Unable to open the camera. Make sure another application is not using it and try again.');
+      setCameraOpen(true);
+    }
+  };
+
+  const captureCameraPhoto = () => {
+    const video = videoRef.current;
+    if (!video || video.readyState < 2 || !video.videoWidth) return;
+    const canvas = document.createElement('canvas');
+    const maxSize = 900;
+    const scale = Math.min(1, maxSize / Math.max(video.videoWidth, video.videoHeight));
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const photo = canvas.toDataURL('image/jpeg', 0.84);
+    setForm((current) => ({ ...current, photo }));
+    stopCamera();
+  };
+
   const [form, setForm] = useState(() => member ? {
     ...member,
     id: member.id || '',
@@ -5675,6 +7500,45 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
   const valid = form.name.trim() && /^[0-9]{10}$/.test(form.phone.replace(/\D/g, '')) && form.expiry && !duplicateId;
 
   return <Modal title={member ? 'Edit member' : 'Add member'} onClose={onClose} wide>
+    {cameraOpen && (
+      <div
+        role="dialog"
+        aria-modal="true"
+        style={{
+          position: 'fixed', inset: 0, zIndex: 10000,
+          background: 'rgba(7, 12, 22, 0.86)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px',
+        }}
+      >
+        <div style={{ width: 'min(720px, 100%)', background: '#fff', borderRadius: '20px', overflow: 'hidden', boxShadow: '0 28px 80px rgba(0,0,0,.35)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '15px 18px', borderBottom: '1px solid #e8edf3' }}>
+            <div>
+              <div style={{ fontWeight: 800, color: '#243447', fontSize: '16px' }}>Take member photo</div>
+              <div style={{ fontSize: '12px', color: '#718096', marginTop: '2px' }}>Position the member inside the frame and click capture.</div>
+            </div>
+            <button type="button" className="icon-btn" onClick={stopCamera} aria-label="Close camera"><X size={20} /></button>
+          </div>
+          <div style={{ position: 'relative', background: '#0b1220', aspectRatio: '16 / 10', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {cameraError ? (
+              <div style={{ color: '#fff', padding: '28px', textAlign: 'center', maxWidth: '520px' }}>
+                <Camera size={34} style={{ marginBottom: '10px' }} />
+                <div style={{ fontWeight: 700, marginBottom: '8px' }}>Camera could not be opened</div>
+                <div style={{ fontSize: '13px', lineHeight: 1.6, color: '#d8e0ec' }}>{cameraError}</div>
+              </div>
+            ) : (
+              <video ref={videoRef} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(1)' }} />
+            )}
+            {!cameraError && <div style={{ position: 'absolute', inset: '10% 16%', border: '2px solid rgba(255,255,255,.82)', borderRadius: '18px', pointerEvents: 'none', boxShadow: '0 0 0 9999px rgba(0,0,0,.08)' }} />}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', padding: '16px' }}>
+            <button type="button" className="btn btn-secondary" onClick={stopCamera}>Cancel</button>
+            {!cameraError && <button type="button" className="btn btn-primary" onClick={captureCameraPhoto}><Camera size={17} /> Capture photo</button>}
+            {cameraError && <button type="button" className="btn btn-primary" onClick={openCamera}><Camera size={17} /> Try again</button>}
+          </div>
+        </div>
+      </div>
+    )}
     <div className="form-section-title">Personal details</div>
 
     <div
@@ -5725,18 +7589,30 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
         <div style={{ fontSize: '12px', color: '#718096', marginBottom: '8px' }}>
           Add a profile photo for this member.
         </div>
-        <label
-          className="btn btn-secondary btn-sm"
-          style={{ cursor: 'pointer', display: 'inline-flex' }}
-        >
-          {form.photo ? 'Change photo' : 'Choose photo'}
-          <input
-            type="file"
-            accept="image/*"
-            onChange={(e) => handlePhotoChange(e.target.files?.[0])}
-            style={{ display: 'none' }}
-          />
-        </label>
+        {!member ? (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+            onClick={openCamera}
+          >
+            <Camera size={16} />
+            {form.photo ? 'Retake photo' : 'Take photo'}
+          </button>
+        ) : (
+          <label
+            className="btn btn-secondary btn-sm"
+            style={{ cursor: 'pointer', display: 'inline-flex' }}
+          >
+            Change photo
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => handlePhotoChange(e.target.files?.[0])}
+              style={{ display: 'none' }}
+            />
+          </label>
+        )}
         {form.photo && (
           <button
             type="button"
@@ -6789,6 +8665,13 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     referralPointsPerReferral: Number(current.referralPointsPerReferral ?? 10),
     gymLatitude: current.gymLatitude || '',
     gymLongitude: current.gymLongitude || '',
+    publicPage: {
+      whatsappNumber: current.publicPage?.whatsappNumber || '', instagramUrl: current.publicPage?.instagramUrl || '', facebookUrl: current.publicPage?.facebookUrl || '', websiteUrl: current.publicPage?.websiteUrl || '',
+      googleRating: current.publicPage?.googleRating || '5.0', googleReviewCount: current.publicPage?.googleReviewCount || '95', googleMapsUrl: current.publicPage?.googleMapsUrl || '', googleSearchUrl: current.publicPage?.googleSearchUrl || 'https://www.google.com/search?q=preface+fitness', googlePlaceName: current.publicPage?.googlePlaceName || current.gymName || 'Preface Fitness', googlePhone: current.publicPage?.googlePhone || '093692 79056', googleAddress: current.publicPage?.googleAddress || current.gymAddress || 'Preface Fitness, Nadan Mahal Rd. above Hdfc Bank, Yahiyaganj, Lucknow, Uttar Pradesh 226003', hoursText: current.publicPage?.hoursText || 'Mon-Sun · 6 AM - 11 PM',
+      trainers: Array.isArray(current.publicPage?.trainers) ? current.publicPage.trainers : [],
+      packages: Array.isArray(current.publicPage?.packages) && current.publicPage.packages.length ? current.publicPage.packages : MEMBERSHIP_PLANS.map((plan) => ({ name: plan.name, months: plan.months, price: Number(current.membershipPrices?.[plan.name] || plan.price), description: plan.description })),
+      reviews: Array.isArray(current.publicPage?.reviews) ? current.publicPage.reviews : [],
+    },
   });
   const [authForm, setAuthForm] = useState({
     username: current.auth?.username || 'admin',
@@ -6797,7 +8680,15 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     confirmPassword: '',
   });
   const [authMessage, setAuthMessage] = useState('');
-  const [noticeForm, setNoticeForm] = useState({ enabled: Boolean(current.notice?.enabled), text: current.notice?.text || '', priority: current.notice?.priority || 'medium' });
+  const [noticeForm, setNoticeForm] = useState({ enabled: Boolean(current.notice?.enabled), dashboardEnabled: current.notice?.dashboardEnabled !== false, text: current.notice?.text || '', priority: current.notice?.priority || 'medium' });
+  const [activeSettingsTab, setActiveSettingsTab] = useState('general');
+  const [actionFeedback, setActionFeedback] = useState({ type: '', message: '' });
+
+  const showActionFeedback = (message, type = 'success') => {
+    setActionFeedback({ type, message });
+    window.clearTimeout(showActionFeedback._timer);
+    showActionFeedback._timer = window.setTimeout(() => setActionFeedback({ type: '', message: '' }), 3600);
+  };
 
   useEffect(() => {
     setForm({
@@ -6811,6 +8702,13 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
       referralPointsPerReferral: Number(current.referralPointsPerReferral ?? 10),
       gymLatitude: current.gymLatitude || '',
       gymLongitude: current.gymLongitude || '',
+      publicPage: {
+        whatsappNumber: current.publicPage?.whatsappNumber || '', instagramUrl: current.publicPage?.instagramUrl || '', facebookUrl: current.publicPage?.facebookUrl || '', websiteUrl: current.publicPage?.websiteUrl || '',
+        googleRating: current.publicPage?.googleRating || '5.0', googleReviewCount: current.publicPage?.googleReviewCount || '95', googleMapsUrl: current.publicPage?.googleMapsUrl || '', googleSearchUrl: current.publicPage?.googleSearchUrl || 'https://www.google.com/search?q=preface+fitness', googlePlaceName: current.publicPage?.googlePlaceName || current.gymName || 'Preface Fitness', googlePhone: current.publicPage?.googlePhone || '093692 79056', googleAddress: current.publicPage?.googleAddress || current.gymAddress || 'Preface Fitness, Nadan Mahal Rd. above Hdfc Bank, Yahiyaganj, Lucknow, Uttar Pradesh 226003', hoursText: current.publicPage?.hoursText || 'Mon-Sun · 6 AM - 11 PM',
+        trainers: Array.isArray(current.publicPage?.trainers) ? current.publicPage.trainers : [],
+        packages: Array.isArray(current.publicPage?.packages) && current.publicPage.packages.length ? current.publicPage.packages : MEMBERSHIP_PLANS.map((plan) => ({ name: plan.name, months: plan.months, price: Number(current.membershipPrices?.[plan.name] || plan.price), description: plan.description })),
+        reviews: Array.isArray(current.publicPage?.reviews) ? current.publicPage.reviews : [],
+      },
     });
     setAuthForm((form) => ({
       ...form,
@@ -6820,14 +8718,14 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
       confirmPassword: '',
     }));
     setAuthMessage('');
-    setNoticeForm({ enabled: Boolean(current.notice?.enabled), text: current.notice?.text || '', priority: current.notice?.priority || 'medium' });
-  }, [current.gymName, current.gymAddress, current.gymPhone, current.gymEmail, current.gstin, current.defaultGstRate, current.invoicePrefix, current.referralPointsPerReferral, current.gymLatitude, current.gymLongitude, current.auth?.username, current.auth?.passwordHash]);
+    setNoticeForm({ enabled: Boolean(current.notice?.enabled), dashboardEnabled: current.notice?.dashboardEnabled !== false, text: current.notice?.text || '', priority: current.notice?.priority || 'medium' });
+  }, [current.gymName, current.gymAddress, current.gymPhone, current.gymEmail, current.gstin, current.defaultGstRate, current.invoicePrefix, current.referralPointsPerReferral, current.gymLatitude, current.gymLongitude, current.publicPage, current.notice?.id, current.notice?.enabled, current.notice?.dashboardEnabled, current.notice?.text, current.notice?.priority, current.noticeHistory, current.auth?.username, current.auth?.passwordHash]);
 
   const useCurrentLocation = () => {
-    if (!navigator.geolocation) return setAuthMessage('This browser does not support location detection.');
+    if (!navigator.geolocation) { showActionFeedback('This browser does not support location detection.', 'error'); return setAuthMessage('This browser does not support location detection.'); }
     navigator.geolocation.getCurrentPosition(
-      (position) => setForm((f) => ({ ...f, gymLatitude: position.coords.latitude.toFixed(7), gymLongitude: position.coords.longitude.toFixed(7) })),
-      () => setAuthMessage('Could not read the current location. Allow location access and try again.'),
+      (position) => { setForm((f) => ({ ...f, gymLatitude: position.coords.latitude.toFixed(7), gymLongitude: position.coords.longitude.toFixed(7) })); showActionFeedback('Current gym location detected.'); },
+      () => { showActionFeedback('Could not read the current location. Allow location access and try again.', 'error'); setAuthMessage('Could not read the current location. Allow location access and try again.'); },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
   };
@@ -6837,6 +8735,7 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     const lng = Number(form.gymLongitude);
     if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
       setAuthMessage('Enter valid gym latitude and longitude first.');
+      showActionFeedback('Enter valid gym latitude and longitude first.', 'error');
       return;
     }
 
@@ -6853,6 +8752,7 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     try {
       await saveCloudSettings(locationSettings);
       setAuthMessage('Gym location saved to the cloud.');
+      showActionFeedback('Gym location saved successfully.');
     } catch (error) {
       console.error('Supabase gym location save failed:', error);
       setAuthMessage(error?.message || 'Gym location saved locally, but cloud save failed.');
@@ -6868,15 +8768,27 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
   const feedbackQrUrl = getFeedbackUrl(data.gym?.id || '', form.gymName || 'Preface Fitness');
   const feedbackQrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&data=${encodeURIComponent(feedbackQrUrl)}`;
 
-  const openQr = () => window.open(qrImageUrl, '_blank', 'noopener,noreferrer');
-  const openFeedbackQr = () => window.open(feedbackQrImageUrl, '_blank', 'noopener,noreferrer');
+  const openQr = () => { window.open(qrImageUrl, '_blank', 'noopener,noreferrer'); showActionFeedback('Attendance QR opened in a new tab.'); };
+  const openFeedbackQr = () => { window.open(feedbackQrImageUrl, '_blank', 'noopener,noreferrer'); showActionFeedback('Feedback QR opened in a new tab.'); };
   const printFeedbackQr = () => {
     const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=700,height=900');
-    if (!printWindow) return;
-    printWindow.document.write(`<!doctype html><html><head><title>${String(form.gymName || 'Preface Fitness')} - Feedback QR</title><style>body{font-family:Arial,sans-serif;text-align:center;padding:50px;color:#17263b}img{width:420px;max-width:90vw}h1{margin:0 0 8px;font-size:28px}p{color:#667788;font-size:16px}</style></head><body><h1>${String(form.gymName || 'Preface Fitness')}</h1><p>Scan to submit feedback or a complaint</p><img src="${feedbackQrImageUrl}" alt="Feedback QR"/><p>Customer Feedback • Low / Medium / High priority</p></body></html>`);
+    if (!printWindow) { showActionFeedback('Popup was blocked. Allow popups to print the feedback QR.', 'error'); return; }
+    printWindow.document.write(`<!doctype html><html><head><title>${String(form.gymName || 'Preface Fitness')} - Feedback QR</title><style>body{font-family:Arial,sans-serif;text-align:center;padding:50px;color:#17263b}img{width:420px;max-width:90vw}h1{margin:0 0 8px;font-size:28px}p{color:#667788;font-size:16px}
+  /* Final navbar alignment: lift only the second navigation row by 10px. */
+  .vibrant-app-shell .top-navigation-scroll .top-navigation-item:nth-child(n+9) {
+    transform: translateY(-10px) !important;
+  }
+  .vibrant-app-shell .top-navigation-scroll .top-navigation-item:nth-child(n+9):hover {
+    transform: translateY(-12px) !important;
+  }
+  .vibrant-app-shell .top-navigation-scroll .top-navigation-item:nth-child(n+9):active {
+    transform: translateY(-10px) scale(.992) !important;
+  }
+</style></head><body><h1>${String(form.gymName || 'Preface Fitness')}</h1><p>Scan to submit feedback or a complaint</p><img src="${feedbackQrImageUrl}" alt="Feedback QR"/><p>Customer Feedback • Low / Medium / High priority</p></body></html>`);
     printWindow.document.close();
     printWindow.focus();
     setTimeout(() => printWindow.print(), 250);
+    showActionFeedback('Feedback QR print window opened.');
   };
 
   const saveSettings = async () => {
@@ -6896,6 +8808,7 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     try {
       await saveCloudSettings(settingsPatch);
       setAuthMessage('Gym settings saved successfully to the cloud.');
+      showActionFeedback('Gym details saved successfully.');
     } catch (error) {
       console.error('Supabase settings save failed:', error);
       setAuthMessage(error?.message || 'Settings saved locally, but cloud save failed.');
@@ -6903,18 +8816,91 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
   };
 
   const saveNotice = async () => {
+    const text = String(noticeForm.text || '').trim();
+    if (!text) {
+      setAuthMessage('Please enter the notice text first.');
+      showActionFeedback('Enter notice text before publishing.', 'error');
+      return;
+    }
+
     const notice = {
-      enabled: Boolean(noticeForm.enabled),
-      text: String(noticeForm.text || '').trim(),
+      id: `NOTICE-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      text,
       priority: noticeForm.priority || 'medium',
+      enabled: Boolean(noticeForm.enabled),
+      dashboardEnabled: Boolean(noticeForm.dashboardEnabled),
+      createdAt: new Date().toISOString(),
     };
-    setData((d) => ({ ...d, settings: { ...(d.settings || {}), notice } }));
+
+    const existingHistory = Array.isArray(current.noticeHistory) ? current.noticeHistory : [];
+    const legacyCurrentNotice = current.notice?.text && !existingHistory.some((item) => item?.id && item.id === current.notice.id)
+      ? { ...current.notice, id: current.notice.id || `NOTICE-LEGACY-${Date.now()}`, createdAt: current.notice.createdAt || new Date().toISOString() }
+      : null;
+    const historyBase = legacyCurrentNotice ? [...existingHistory, legacyCurrentNotice] : existingHistory;
+    const noticeHistory = [...historyBase, notice].slice(-10);
+
+    setData((d) => ({
+      ...d,
+      settings: {
+        ...(d.settings || {}),
+        notice,
+        noticeHistory,
+      },
+    }));
+    setNoticeForm({ enabled: notice.enabled, dashboardEnabled: notice.dashboardEnabled, text: '', priority: notice.priority });
+
     try {
-      await saveCloudSettings({ notice });
-      setAuthMessage('Notice saved successfully.');
+      await saveCloudSettings({ notice, noticeHistory });
+      setAuthMessage('Notice published and added to the last 10 notices history.');
+      showActionFeedback('Notice published successfully.');
     } catch (error) {
       console.error('Supabase notice save failed:', error);
       setAuthMessage(error?.message || 'Notice saved locally, but cloud save failed.');
+    }
+  };
+
+  const hideCurrentNotice = async () => {
+    const currentNotice = current.notice || {};
+    const notice = { ...currentNotice, enabled: false, dashboardEnabled: false };
+    setData((d) => ({ ...d, settings: { ...(d.settings || {}), notice } }));
+    try {
+      await saveCloudSettings({ notice });
+      setNoticeForm((f) => ({ ...f, enabled: false, dashboardEnabled: false }));
+      setAuthMessage('Current notice removed from the public page and dashboard. It remains in history.');
+      showActionFeedback('Current notice hidden from the public page.');
+    } catch (error) {
+      console.error('Supabase notice hide failed:', error);
+      setAuthMessage(error?.message || 'Notice was hidden locally, but cloud save failed.');
+    }
+  };
+
+  const removeNoticeHistoryItem = async (noticeId) => {
+    const history = Array.isArray(current.noticeHistory) ? current.noticeHistory : [];
+    const removed = history.find((item) => item?.id === noticeId);
+    if (!removed) return;
+    if (!window.confirm('Remove this notice from the last 10 notices history? If it is active, it will also disappear from the public page.')) return;
+
+    const noticeHistory = history.filter((item) => item?.id !== noticeId);
+    const isCurrent = current.notice?.id === noticeId;
+    const notice = isCurrent ? { ...(current.notice || {}), enabled: false, dashboardEnabled: false } : current.notice;
+
+    setData((d) => ({
+      ...d,
+      settings: {
+        ...(d.settings || {}),
+        noticeHistory,
+        ...(isCurrent ? { notice } : {}),
+      },
+    }));
+
+    try {
+      await saveCloudSettings(isCurrent ? { notice, noticeHistory } : { noticeHistory });
+      if (isCurrent) setNoticeForm((f) => ({ ...f, enabled: false, dashboardEnabled: false }));
+      setAuthMessage('Notice removed from history and public display.');
+      showActionFeedback('Notice removed successfully.');
+    } catch (error) {
+      console.error('Supabase notice history delete failed:', error);
+      setAuthMessage(error?.message || 'Notice was removed locally, but cloud delete failed.');
     }
   };
 
@@ -6971,14 +8957,114 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
       confirmPassword: '',
     });
     setAuthMessage('Login credentials updated successfully.');
+    showActionFeedback('Login credentials updated successfully.');
+  };
+
+
+  const updatePublicPage = (key, value) => setForm((f) => ({ ...f, publicPage: { ...(f.publicPage || {}), [key]: value } }));
+  const addPublicTrainer = () => { updatePublicPage('trainers', [...(form.publicPage?.trainers || []), { name: '', role: 'FITNESS TRAINER', experience: '', forte: '', specialization: '', certification: '', description: '', photo: '' }]); showActionFeedback('Trainer added to the draft.'); };
+  const updatePublicTrainer = (index, key, value) => updatePublicPage('trainers', (form.publicPage?.trainers || []).map((item, i) => i === index ? { ...item, [key]: value } : item));
+
+  const handlePublicTrainerPhoto = async (index, event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const photo = await resizePublicImage(file, 900, 0.82);
+      updatePublicTrainer(index, 'photo', photo);
+      setAuthMessage('Trainer photo selected. Click “Save public page” to publish it.');
+      showActionFeedback('Trainer photo selected. Save the public page to publish it.');
+    } catch (error) {
+      console.error('Trainer photo processing failed:', error);
+      setAuthMessage(error?.message || 'Unable to use this trainer photo.');
+    } finally {
+      event.target.value = '';
+    }
+  };
+
+  const removePublicTrainerPhoto = (index) => {
+    updatePublicTrainer(index, 'photo', '');
+    showActionFeedback('Trainer photo removed from the draft.');
+  };
+
+  const removePublicTrainer = (index) => { updatePublicPage('trainers', (form.publicPage?.trainers || []).filter((_, i) => i !== index)); showActionFeedback('Trainer removed from the draft.'); };
+  const addPublicPackage = () => { updatePublicPage('packages', [...(form.publicPage?.packages || []), { name: '', months: 1, price: 0, description: '' }]); showActionFeedback('Package added to the draft.'); };
+  const updatePublicPackage = (index, key, value) => updatePublicPage('packages', (form.publicPage?.packages || []).map((item, i) => i === index ? { ...item, [key]: value } : item));
+  const removePublicPackage = (index) => { updatePublicPage('packages', (form.publicPage?.packages || []).filter((_, i) => i !== index)); showActionFeedback('Package removed from the draft.'); };
+  const addPublicReview = () => { updatePublicPage('reviews', [...(form.publicPage?.reviews || []), { name: '', date: 'Google review', text: '', photo: '' }]); showActionFeedback('Review added to the draft.'); };
+  const updatePublicReview = (index, key, value) => updatePublicPage('reviews', (form.publicPage?.reviews || []).map((item, i) => i === index ? { ...item, [key]: value } : item));
+  const removePublicReview = (index) => { updatePublicPage('reviews', (form.publicPage?.reviews || []).filter((_, i) => i !== index)); showActionFeedback('Review removed from the draft.'); };
+
+  const savePublicPageOnly = async () => {
+    const publicPage = {
+      ...(form.publicPage || {}),
+      trainers: (form.publicPage?.trainers || [])
+        .filter((t) => String(t.name || '').trim())
+        .map((t) => ({
+          ...t,
+          photo: String(t.photo || ''),
+        })),
+      packages: (form.publicPage?.packages || []).filter((p) => String(p.name || '').trim()).map((p) => {
+        const standardPlan = MEMBERSHIP_PLANS.find((plan) => String(plan.name).trim().toLowerCase() === String(p.name || '').trim().toLowerCase());
+        const currentPrice = standardPlan ? Number(data.settings?.membershipPrices?.[standardPlan.name] ?? p.price ?? standardPlan.price) : Number(p.price || 0);
+        return { ...p, months: Math.max(1, Number(p.months || standardPlan?.months || 1)), price: Math.max(0, currentPrice) };
+      }),
+      reviews: (form.publicPage?.reviews || []).filter((r) => String(r.name || r.text || '').trim()),
+    };
+    const patch = { publicPage: { ...publicPage, updatedAt: new Date().toISOString() } };
+    setForm((f) => ({ ...f, publicPage }));
+    setData((d) => ({ ...d, settings: { ...(d.settings || {}), ...patch } }));
+    try {
+      await saveCloudSettings(patch);
+      setAuthMessage('Public gym page settings saved successfully.');
+      showActionFeedback('Public gym page saved successfully.');
+    } catch (error) {
+      console.error('Public page settings save failed:', error);
+      setAuthMessage(error?.message || 'Public page saved locally, but cloud save failed.');
+    }
   };
 
 
   return (
-    <div className="page">
-      <PageTitle title="Settings" subtitle="Manage gym identity, billing details, referral rewards and local app data." />
-      <div className="grid-2">
-        <section className="card">
+    <div className="page settings-page-organized">
+      <style>{`
+        .settings-tabs-shell { display:block; width:100%; }
+        .settings-tabs-nav { position:static; display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:10px; margin:0 0 18px; padding:10px; border:1px solid #e4e9f0; border-radius:18px; background:linear-gradient(180deg,#ffffff,#f7f9fc); box-shadow:0 10px 28px rgba(31,45,61,.06); }
+        .settings-tab { appearance:none; width:100%; min-width:0; display:flex; align-items:center; gap:12px; text-align:left; border:1px solid transparent; border-radius:13px; padding:12px 13px; background:transparent; color:#526173; cursor:pointer; transition:.18s ease; }
+        .settings-tab svg { flex:0 0 auto; color:#7a63ff; }
+        .settings-tab span { min-width:0; display:grid; gap:2px; }
+        .settings-tab strong { font-size:13px; color:#26364b; }
+        .settings-tab small { font-size:11px; color:#8793a3; line-height:1.35; }
+        .settings-tab:hover { background:#f2efff; border-color:#ddd5ff; transform:translateY(-1px); }
+        .settings-tab.active { background:linear-gradient(135deg,#6d4aff,#8b65ff); border-color:#7657ff; box-shadow:0 9px 22px rgba(109,74,255,.22); color:#fff; }
+        .settings-tab.active svg,.settings-tab.active strong,.settings-tab.active small { color:#fff; }
+        .settings-tab-panel { display:grid; gap:18px; }
+        .settings-tab-panel > .card { margin:0; }
+        .settings-action-toast { position:fixed; top:22px; right:24px; z-index:5000; display:flex; align-items:center; gap:10px; max-width:min(420px,calc(100vw - 32px)); padding:13px 16px; border-radius:14px; background:#10233f; color:#fff; box-shadow:0 16px 40px rgba(15,35,60,.25); border:1px solid rgba(255,255,255,.12); animation:settingsToastIn .22s ease-out; }
+        .settings-action-toast.success { border-left:4px solid #13b89d; }
+        .settings-action-toast.error { border-left:4px solid #ef476f; background:#2a1620; }
+        .settings-action-toast strong { font-size:13px; }
+        .settings-action-toast span { font-size:12px; color:#dbe5ef; line-height:1.4; }
+        @keyframes settingsToastIn { from { opacity:0; transform:translateY(-10px) scale(.98); } to { opacity:1; transform:translateY(0) scale(1); } }
+        @media(max-width:1100px) { .settings-tabs-nav { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+        @media(max-width:700px) { .settings-tabs-nav { grid-template-columns:repeat(2,minmax(0,1fr)); } .settings-tab { min-height:66px; } }
+        @media(max-width:560px) { .settings-tabs-nav { grid-template-columns:1fr; } .settings-tab { min-height:unset; } .settings-action-toast { top:12px; right:12px; } }
+      `}</style>
+      {actionFeedback.message && <div className={`settings-action-toast ${actionFeedback.type || 'success'}`} role="status" aria-live="polite"><CheckCircle2 size={18} /><div><strong>{actionFeedback.type === 'error' ? 'Action needs attention' : 'Done'}</strong><span>{actionFeedback.message}</span></div></div>}
+      <PageTitle title="Settings" subtitle="Organized controls for gym operations, public website, notices, security and data." />
+      <div className="settings-tabs-shell">
+        <nav className="settings-tabs-nav" aria-label="Settings sections">
+          <button type="button" className={"settings-tab " + (activeSettingsTab === 'general' ? 'active' : '')} onClick={() => setActiveSettingsTab('general')}><Settings size={18} /><span><strong>General</strong><small>Gym identity, billing and referral controls</small></span></button>
+          <button type="button" className={"settings-tab " + (activeSettingsTab === 'notices' ? 'active' : '')} onClick={() => setActiveSettingsTab('notices')}><Bell size={18} /><span><strong>Notices</strong><small>Public notices and offers</small></span></button>
+          <button type="button" className={"settings-tab " + (activeSettingsTab === 'public' ? 'active' : '')} onClick={() => setActiveSettingsTab('public')}><Sparkles size={18} /><span><strong>Public Page</strong><small>Everything customers see online</small></span></button>
+          <button type="button" className={"settings-tab " + (activeSettingsTab === 'security' ? 'active' : '')} onClick={() => setActiveSettingsTab('security')}><ShieldCheck size={18} /><span><strong>Security</strong><small>Owner login and access</small></span></button>
+          <button type="button" className={"settings-tab " + (activeSettingsTab === 'qr' ? 'active' : '')} onClick={() => setActiveSettingsTab('qr')}><QrCode size={18} /><span><strong>QR & Feedback</strong><small>Attendance and customer feedback</small></span></button>
+          <button type="button" className={"settings-tab " + (activeSettingsTab === 'data' ? 'active' : '')} onClick={() => setActiveSettingsTab('data')}><FileDown size={18} /><span><strong>Data & Backup</strong><small>Cloud status and backup</small></span></button>
+        </nav>
+        <div className="settings-tab-content">
+        {activeSettingsTab === 'general' && (
+          <div className="settings-tab-panel">
+<section className="card">
           <div className="card-header"><div><h3>Gym & billing details</h3><p>These details are used on member bills and invoices.</p></div></div>
           <div className="form-grid two">
             <FormField label="Gym name"><input value={form.gymName} onChange={(e) => setForm((f) => ({...f,gymName:e.target.value}))} /></FormField>
@@ -7003,19 +9089,7 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
           <button className="btn btn-primary" onClick={saveSettings}><Save size={17}/> Save gym details</button>
         </section>
 
-        <section className="card notice-settings-card">
-          <div className="card-header">
-            <div><h3>Gym notice / announcement</h3><p>Publish an important notice that will appear prominently across the owner dashboard.</p></div>
-            <Bell size={20} />
-          </div>
-          <label className="notice-toggle"><input type="checkbox" checked={noticeForm.enabled} onChange={(e) => setNoticeForm((f) => ({ ...f, enabled: e.target.checked }))} /><span>Show notice on dashboard</span></label>
-          <FormField label="Priority"><select value={noticeForm.priority} onChange={(e) => setNoticeForm((f) => ({ ...f, priority: e.target.value }))}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High / urgent</option></select></FormField>
-          <FormField label="Notice text"><textarea rows="4" value={noticeForm.text} onChange={(e) => setNoticeForm((f) => ({ ...f, text: e.target.value }))} placeholder="Example: Gym will remain closed on Sunday from 8 AM to 12 PM." /></FormField>
-          <div className={`notice-preview priority-${noticeForm.priority}`}><Bell size={17} /><div><strong>{noticeForm.priority === 'high' ? 'Important notice' : noticeForm.priority === 'low' ? 'Gym update' : 'Gym announcement'}</strong><span>{noticeForm.text || 'Your notice preview will appear here.'}</span></div></div>
-          <button className="btn btn-primary" style={{ marginTop: '12px' }} onClick={saveNotice}><Save size={17} /> Save notice</button>
-        </section>
-
-        <section className="card">
+<section className="card">
           <div className="card-header"><div><h3>Referral rewards</h3><p>Choose how many points a member earns for each successful referral.</p></div></div>
           <FormField label="Points per successful referral"><input type="number" min="0" step="1" value={form.referralPointsPerReferral} onChange={(e) => setForm((f) => ({...f,referralPointsPerReferral:e.target.value}))} /></FormField>
           <div style={{padding:'14px 16px',borderRadius:'12px',background:'#f5fbfa',border:'1px solid #dcefeb',color:'#55706e',fontSize:'13px',lineHeight:1.6}}>
@@ -7023,8 +9097,167 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
           </div>
           <button className="btn btn-primary" style={{marginTop:'12px'}} onClick={saveSettings}><Save size={17}/> Save referral settings</button>
         </section>
+          </div>
+        )}
+        {activeSettingsTab === 'notices' && (
+          <div className="settings-tab-panel">
+<section className="card notice-settings-card">
+          <div className="card-header">
+            <div><h3>Public notice / offer</h3><p>Publish a notice, offer, holiday message or announcement on the public gym page. Every saved notice is kept in the latest 10 notices history.</p></div>
+            <Bell size={20} />
+          </div>
 
-        <section className="card">
+          <div className="notice-settings-toggles">
+            <label className="notice-toggle"><input type="checkbox" checked={noticeForm.enabled} onChange={(e) => setNoticeForm((f) => ({ ...f, enabled: e.target.checked }))} /><span>Show on public page</span></label>
+            <label className="notice-toggle"><input type="checkbox" checked={noticeForm.dashboardEnabled} onChange={(e) => setNoticeForm((f) => ({ ...f, dashboardEnabled: e.target.checked }))} /><span>Show on admin dashboard</span></label>
+          </div>
+
+          <div className="form-grid two">
+            <FormField label="Priority"><select value={noticeForm.priority} onChange={(e) => setNoticeForm((f) => ({ ...f, priority: e.target.value }))}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High / urgent</option></select></FormField>
+            <div style={{display:'flex',alignItems:'end'}}><div style={{fontSize:'12px',color:'#718096',lineHeight:1.55,paddingBottom:'10px'}}>Tip: use <strong>High</strong> for closures or urgent alerts and <strong>Medium</strong> for offers and normal announcements.</div></div>
+          </div>
+
+          <FormField label="Notice / offer text"><textarea rows="4" value={noticeForm.text} onChange={(e) => setNoticeForm((f) => ({ ...f, text: e.target.value }))} placeholder="Example: Diwali Offer — Get 20% off on 3-month memberships till 31 October." /></FormField>
+          <div className={`notice-preview priority-${noticeForm.priority}`}><Bell size={17} /><div><strong>{noticeForm.priority === 'high' ? 'Important notice' : noticeForm.priority === 'low' ? 'Gym update' : 'Gym announcement'}</strong><span>{noticeForm.text || 'Your public notice preview will appear here.'}</span></div><span className="notice-preview-pulse" /></div>
+
+          <div style={{display:'flex',gap:'10px',flexWrap:'wrap',marginTop:'12px'}}>
+            <button className="btn btn-primary" onClick={saveNotice}><Save size={17} /> Publish notice</button>
+            {current.notice?.text && <button className="btn btn-secondary" type="button" onClick={hideCurrentNotice}><X size={17} /> Hide current notice</button>}
+          </div>
+
+          <div className="notice-history">
+            <div className="notice-history-head"><div><h4>Last 10 notices</h4><p>Deleting a notice from history also removes it from the public page if it is currently active.</p></div><span>{Array.isArray(current.noticeHistory) ? current.noticeHistory.length : 0}/10</span></div>
+            {(Array.isArray(current.noticeHistory) ? [...current.noticeHistory].reverse() : []).map((item) => {
+              const active = current.notice?.id && current.notice.id === item.id;
+              const dateLabel = item.createdAt ? new Date(item.createdAt).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : 'Date unavailable';
+              return <div className={`notice-history-item ${active ? 'active' : ''}`} key={item.id || `${item.createdAt}-${item.text}`}>
+                <div className={`notice-history-dot priority-${item.priority || 'medium'}`} />
+                <div className="notice-history-copy"><div className="notice-history-meta"><span>{item.priority === 'high' ? 'HIGH' : item.priority === 'low' ? 'LOW' : 'MEDIUM'}</span><small>{dateLabel}</small>{active && <b>ACTIVE</b>}</div><strong>{item.text}</strong></div>
+                <button className="btn btn-danger btn-sm" type="button" onClick={() => removeNoticeHistoryItem(item.id)} title="Remove notice"><Trash2 size={15} /> Remove</button>
+              </div>;
+            })}
+            {!(Array.isArray(current.noticeHistory) && current.noticeHistory.length) && <div className="notice-history-empty"><Bell size={18} /><span>No saved notices yet. Your last 10 published notices will appear here.</span></div>}
+          </div>
+        </section>
+          </div>
+        )}
+        {activeSettingsTab === 'public' && (
+          <div className="settings-tab-panel">
+<section className="card public-page-admin-card" style={{ gridColumn: '1 / -1' }}>
+          <div className="card-header">
+            <div><h3>Public Gym Page</h3><p>Manage everything customers see on the public gym website: trainers, packages, contact buttons, Google business details and customer reviews.</p></div>
+            <Sparkles size={22} />
+          </div>
+
+          <div className="form-section-title">Contact & social links</div>
+          <div className="form-grid two">
+            <FormField label="WhatsApp number"><input value={form.publicPage?.whatsappNumber || ''} onChange={(e) => updatePublicPage('whatsappNumber', e.target.value)} placeholder="Gym WhatsApp number, e.g. 919876543210" /></FormField>
+            <FormField label="Instagram URL"><input value={form.publicPage?.instagramUrl || ''} onChange={(e) => updatePublicPage('instagramUrl', e.target.value)} placeholder="https://instagram.com/yourgym" /></FormField>
+            <FormField label="Facebook URL"><input value={form.publicPage?.facebookUrl || ''} onChange={(e) => updatePublicPage('facebookUrl', e.target.value)} placeholder="https://facebook.com/yourgym" /></FormField>
+            <FormField label="Website URL"><input value={form.publicPage?.websiteUrl || ''} onChange={(e) => updatePublicPage('websiteUrl', e.target.value)} placeholder="https://yourgym.com" /></FormField>
+          </div>
+          <p style={{fontSize:'12px',color:'#718096',marginTop:'-4px'}}>Call and email buttons use the Gym phone and Gym email entered in the Gym & billing section above.</p>
+
+          <div className="form-section-title">Google business display</div>
+          <div className="form-grid three">
+            <FormField label="Google rating"><input value={form.publicPage?.googleRating || ''} onChange={(e) => updatePublicPage('googleRating', e.target.value)} placeholder="5.0" /></FormField>
+            <FormField label="Google review count"><input value={form.publicPage?.googleReviewCount || ''} onChange={(e) => updatePublicPage('googleReviewCount', e.target.value)} placeholder="95" /></FormField>
+            <FormField label="Google phone"><input value={form.publicPage?.googlePhone || ''} onChange={(e) => updatePublicPage('googlePhone', e.target.value)} placeholder="Google listing phone" /></FormField>
+            <FormField label="Business name"><input value={form.publicPage?.googlePlaceName || ''} onChange={(e) => updatePublicPage('googlePlaceName', e.target.value)} placeholder="Preface Fitness" /></FormField>
+          </div>
+          <div className="form-grid two">
+            <FormField label="Google Maps URL"><input value={form.publicPage?.googleMapsUrl || ''} onChange={(e) => updatePublicPage('googleMapsUrl', e.target.value)} placeholder="https://maps.google.com/..." /></FormField>
+            <FormField label="Google Search URL"><input value={form.publicPage?.googleSearchUrl || ''} onChange={(e) => updatePublicPage('googleSearchUrl', e.target.value)} placeholder="Google business search/listing URL" /></FormField>
+            <FormField label="Google address"><input value={form.publicPage?.googleAddress || ''} onChange={(e) => updatePublicPage('googleAddress', e.target.value)} placeholder="Full Google business address" /></FormField>
+            <FormField label="Opening hours"><input value={form.publicPage?.hoursText || ''} onChange={(e) => updatePublicPage('hoursText', e.target.value)} placeholder="Mon-Sun · 6 AM - 11 PM" /></FormField>
+          </div>
+
+          <div className="form-section-title" style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:'12px'}}><span>Trainer profiles</span><button className="btn btn-secondary btn-sm" onClick={addPublicTrainer}><Plus size={15}/> Add trainer</button></div>
+          <div style={{display:'grid',gap:'14px'}}>
+            {(form.publicPage?.trainers || []).map((trainer,index)=><div key={index} style={{padding:'16px',border:'1px solid #e1e7ef',borderRadius:'14px',background:'#fafcff'}}>
+              <div className="form-grid three">
+                <FormField label="Name"><input value={trainer.name || ''} onChange={(e) => updatePublicTrainer(index,'name',e.target.value)} placeholder="Trainer name" /></FormField>
+                <FormField label="Role"><input value={trainer.role || ''} onChange={(e) => updatePublicTrainer(index,'role',e.target.value)} placeholder="FITNESS TRAINER" /></FormField>
+                <FormField label="Experience"><input value={trainer.experience || ''} onChange={(e) => updatePublicTrainer(index,'experience',e.target.value)} placeholder="8" /></FormField>
+                <FormField label="Forte"><input value={trainer.forte || ''} onChange={(e) => updatePublicTrainer(index,'forte',e.target.value)} placeholder="Strength & hypertrophy" /></FormField>
+                <FormField label="Specialization"><input value={trainer.specialization || ''} onChange={(e) => updatePublicTrainer(index,'specialization',e.target.value)} placeholder="Fat loss / strength / PT" /></FormField>
+                <FormField label="Certification"><input value={trainer.certification || ''} onChange={(e) => updatePublicTrainer(index,'certification',e.target.value)} placeholder="ACE / ISSA / etc." /></FormField>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'minmax(0,1fr) 220px',gap:'16px',alignItems:'start'}}>
+                <div>
+                  <FormField label="Trainer photo">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handlePublicTrainerPhoto(index, e)}
+                    />
+                  </FormField>
+                  <div style={{fontSize:'12px',color:'#718096',marginTop:'6px'}}>
+                    Select a photo from your computer. The app automatically resizes it for the public page.
+                  </div>
+                  {trainer.photo && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{marginTop:'10px'}}
+                      onClick={() => removePublicTrainerPhoto(index)}
+                    >
+                      <Trash2 size={15}/> Remove photo
+                    </button>
+                  )}
+                </div>
+                <div>
+                  {trainer.photo ? (
+                    <img
+                      src={trainer.photo}
+                      alt={trainer.name || 'Trainer'}
+                      style={{width:'180px',height:'180px',objectFit:'cover',borderRadius:'16px',border:'1px solid #e1e7ef',display:'block',background:'#eef2f7'}}
+                    />
+                  ) : (
+                    <div style={{width:'180px',height:'180px',borderRadius:'16px',border:'1px dashed #cbd5e1',display:'grid',placeItems:'center',background:'#f7f9fc',color:'#94a3b8',fontSize:'12px',textAlign:'center',padding:'15px'}}>
+                      No photo selected
+                    </div>
+                  )}
+                </div>
+              </div>
+              <FormField label="Trainer description"><textarea rows="3" value={trainer.description || ''} onChange={(e) => updatePublicTrainer(index,'description',e.target.value)} placeholder="Short professional introduction, coaching style, achievements, etc." /></FormField>
+              <button className="btn btn-danger btn-sm" onClick={() => removePublicTrainer(index)}><Trash2 size={15}/> Remove trainer</button>
+            </div>)}
+            {!(form.publicPage?.trainers || []).length && <div style={{padding:'15px',borderRadius:'12px',background:'#f7f9fc',color:'#718096'}}>No public trainers added yet. Click “Add trainer” to create the first profile.</div>}
+          </div>
+
+          <div className="form-section-title" style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:'12px'}}><span>Public membership packages</span><button className="btn btn-secondary btn-sm" onClick={addPublicPackage}><Plus size={15}/> Add package</button></div>
+          <div style={{display:'grid',gap:'12px'}}>
+            {(form.publicPage?.packages || []).map((pkg,index)=><div key={index} className="form-grid four" style={{padding:'13px',border:'1px solid #e1e7ef',borderRadius:'12px',background:'#fafcff',alignItems:'end'}}>
+              <FormField label="Package name"><input value={pkg.name || ''} onChange={(e) => updatePublicPackage(index,'name',e.target.value)} placeholder="Monthly" /></FormField>
+              <FormField label="Months"><input type="number" min="1" value={pkg.months ?? 1} onChange={(e) => updatePublicPackage(index,'months',e.target.value)} /></FormField>
+              <FormField label="Price"><input type="number" min="0" value={pkg.price ?? 0} onChange={(e) => updatePublicPackage(index,'price',e.target.value)} /></FormField>
+              <button className="btn btn-danger btn-sm" onClick={() => removePublicPackage(index)}><Trash2 size={15}/> Remove</button>
+              <div style={{gridColumn:'1 / -1'}}><FormField label="Description"><input value={pkg.description || ''} onChange={(e) => updatePublicPackage(index,'description',e.target.value)} placeholder="Short package description" /></FormField></div>
+            </div>)}
+            {!(form.publicPage?.packages || []).length && <div style={{padding:'15px',borderRadius:'12px',background:'#f7f9fc',color:'#718096'}}>No custom packages added. The public page will use your standard Membership plans automatically.</div>}
+          </div>
+
+          <div className="form-section-title" style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:'12px'}}><span>Customer reviews</span><button className="btn btn-secondary btn-sm" onClick={addPublicReview}><Plus size={15}/> Add review</button></div>
+          <div style={{display:'grid',gap:'12px'}}>
+            {(form.publicPage?.reviews || []).map((review,index)=><div key={index} style={{padding:'15px',border:'1px solid #e1e7ef',borderRadius:'12px',background:'#fafcff'}}>
+              <div className="form-grid three"><FormField label="Customer name"><input value={review.name || ''} onChange={(e) => updatePublicReview(index,'name',e.target.value)} /></FormField><FormField label="Date / label"><input value={review.date || ''} onChange={(e) => updatePublicReview(index,'date',e.target.value)} placeholder="Google review" /></FormField><FormField label="Customer photo URL"><input value={review.photo || ''} onChange={(e) => updatePublicReview(index,'photo',e.target.value)} /></FormField></div>
+              <FormField label="Review"><textarea rows="3" value={review.text || ''} onChange={(e) => updatePublicReview(index,'text',e.target.value)} placeholder="Customer's review" /></FormField>
+              <button className="btn btn-danger btn-sm" onClick={() => removePublicReview(index)}><Trash2 size={15}/> Remove review</button>
+            </div>)}
+            {!(form.publicPage?.reviews || []).length && <div style={{padding:'15px',borderRadius:'12px',background:'#f7f9fc',color:'#718096'}}>No manual reviews added yet.</div>}
+          </div>
+
+          <div style={{marginTop:'20px',display:'flex',justifyContent:'space-between',gap:'12px',alignItems:'center',flexWrap:'wrap'}}>
+            <p style={{margin:0,fontSize:'12px',lineHeight:1.5,color:'#718096'}}>Reviews are manually controlled here. This keeps the public site stable and avoids depending on Google's API availability.</p>
+            <button className="btn btn-primary" onClick={savePublicPageOnly}><Save size={17}/> Save public page</button>
+          </div>
+        </section>
+          </div>
+        )}
+        {activeSettingsTab === 'security' && (
+          <div className="settings-tab-panel">
+<section className="card">
           <div className="card-header">
             <div>
               <h3>Owner login</h3>
@@ -7094,8 +9327,11 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
             New installations start with <strong>admin</strong> / <strong>admin123</strong>. Change these from this section after signing in.
           </div>
         </section>
-
-        <section className="card">
+          </div>
+        )}
+        {activeSettingsTab === 'qr' && (
+          <div className="settings-tab-panel">
+<section className="card">
           <div className="card-header"><div><h3>Attendance QR code</h3><p>This QR opens the password-free member check-in page.</p></div></div>
           <div style={{padding:'12px 14px',borderRadius:'12px',background:'#f7fafc',border:'1px solid #e5ebf0',fontSize:'12px',color:'#64748b',wordBreak:'break-all',lineHeight:1.5}}>{qrUrl}</div>
           <div style={{display:'flex',gap:'10px',flexWrap:'wrap',marginTop:'12px'}}>
@@ -7105,7 +9341,8 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
           <p style={{margin:'12px 0 0',fontSize:'12px',color:'#7b8794',lineHeight:1.5}}>Print the QR and place it at the gym entrance. Members scan it with their phone camera; no owner password is required.</p>
           <div style={{marginTop:'12px',padding:'12px 14px',borderRadius:'12px',background:'#eef9f7',border:'1px solid #d3ece7',fontSize:'12px',color:'#3d6b66',lineHeight:1.5}}><strong>Cloud attendance:</strong> member check-ins are written to the shared Supabase database, so the permanent QR can be used from members' phones without requiring the owner's browser to be open.</div>
         </section>
-        <section className="card">
+
+<section className="card">
           <div className="card-header"><div><h3>Customer Feedback QR</h3><p>Place this QR at the gate, reception or workout floor so any customer can submit feedback or a complaint without logging in.</p></div><QrCode size={21} /></div>
           <div style={{display:'grid',gridTemplateColumns:'180px 1fr',gap:'22px',alignItems:'center'}}>
             <div style={{border:'1px solid #dce5eb',borderRadius:'16px',padding:'12px',background:'#fff',textAlign:'center'}}><img src={feedbackQrImageUrl} alt="Customer feedback QR" style={{width:'100%',maxWidth:'180px',display:'block',margin:'0 auto'}} /></div>
@@ -7119,23 +9356,31 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
             </div>
           </div>
         </section>
-        <section className="card">
-          <div className="card-header"><div><h3>Cloud database</h3><p>Business data is connected to the shared Supabase database.</p></div></div>
-          <div className="report-list">
-            <div><span>Database status</span><strong>{dbReady ? 'Ready' : 'Loading'}</strong></div>
-            <div><span>Members</span><strong>{(data.members || []).length}</strong></div>
-            <div><span>Payments</span><strong>{(data.payments || []).length}</strong></div>
-            <div><span>Attendance records</span><strong>{(data.attendance || []).length}</strong></div>
           </div>
-        </section>
-        <section className="card">
-          <div className="card-header"><div><h3>Backup & restore</h3><p>Download a JSON backup or restore one later.</p></div></div>
-          <div style={{display:'flex',gap:'10px',flexWrap:'wrap'}}>
-            <button className="btn btn-primary" onClick={exportBackup}><FileDown size={17}/> Export backup</button>
-            <label className="btn btn-secondary" style={{cursor:'pointer'}}><FileUp size={17}/> Import backup<input type="file" accept=".json,application/json" onChange={importBackup} style={{display:'none'}} /></label>
-            <button className="btn btn-danger" onClick={resetData}>Reset demo data</button>
+        )}
+        {activeSettingsTab === 'data' && (
+          <div className="settings-tab-panel">
+            <section className="card">
+              <div className="card-header"><div><h3>Cloud database</h3><p>Business data is connected to the shared Supabase database.</p></div></div>
+              <div className="report-list">
+                <div><span>Database status</span><strong>{dbReady ? 'Ready' : 'Loading'}</strong></div>
+                <div><span>Members</span><strong>{(data.members || []).length}</strong></div>
+                <div><span>Payments</span><strong>{(data.payments || []).length}</strong></div>
+                <div><span>Attendance records</span><strong>{(data.attendance || []).length}</strong></div>
+              </div>
+            </section>
+
+            <section className="card">
+              <div className="card-header"><div><h3>Backup & restore</h3><p>Download a JSON backup or restore one later.</p></div></div>
+              <div style={{display:'flex',gap:'10px',flexWrap:'wrap'}}>
+                <button className="btn btn-primary" onClick={() => { exportBackup(); showActionFeedback('Backup export started.'); }}><FileDown size={17}/> Export backup</button>
+                <label className="btn btn-secondary" style={{cursor:'pointer'}}><FileUp size={17}/> Import backup<input type="file" accept=".json,application/json" onChange={(event) => { importBackup(event); showActionFeedback('Backup import started.'); }} style={{display:'none'}} /></label>
+                <button className="btn btn-danger" onClick={() => { resetData(); showActionFeedback('Demo data reset action completed.'); }}>Reset demo data</button>
+              </div>
+            </section>
           </div>
-        </section>
+        )}
+        </div>
       </div>
     </div>
   );
@@ -7143,3 +9388,294 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
 
 const initialRoute = window.location.hash;
 createRoot(document.getElementById('root')).render(initialRoute === '#feedback' ? <PublicFeedbackPage /> : <App />);
+
+/* =========================================================
+   FINAL NAV SPLIT: sidebar-only items stay out of top navbar
+   ========================================================= */
+const SIDEBAR_ONLY_NAV_CSS = `
+
+  /* MEMBER PROFILE TEXT SCALE - keep readable without oversized contact/email text */
+  .vibrant-app-shell .member-profile-header h1 {
+    font-size: 38px !important;
+    line-height: 1.1 !important;
+  }
+  .vibrant-app-shell .member-profile-header p {
+    font-size: 17px !important;
+    line-height: 1.45 !important;
+  }
+  .vibrant-app-shell .profile-stat span {
+    font-size: 13px !important;
+  }
+  .vibrant-app-shell .profile-stat strong {
+    font-size: 18px !important;
+    line-height: 1.35 !important;
+  }
+  .vibrant-app-shell .detail-list > div > span {
+    font-size: 14px !important;
+    line-height: 1.4 !important;
+  }
+  .vibrant-app-shell .detail-list > div > strong {
+    font-size: 15px !important;
+    line-height: 1.45 !important;
+  }
+  .vibrant-app-shell .member-notes {
+    font-size: 15px !important;
+    line-height: 1.6 !important;
+  }
+
+  .vibrant-app-shell .top-navigation-scroll {
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+    grid-auto-rows: minmax(42px, auto) !important;
+    gap: 6px !important;
+  }
+  .vibrant-app-shell .top-navigation-item {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+  .vibrant-app-shell .top-navigation-item span {
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: nowrap !important;
+  }
+  /* Keep the second navigation row slightly above the navbar bottom boundary. */
+  .vibrant-app-shell .top-navigation-scroll .top-navigation-item:nth-child(n+6) {
+    transform: translateY(-10px) !important;
+  }
+  .vibrant-app-shell .top-navigation-scroll .top-navigation-item:nth-child(n+6):hover {
+    transform: translateY(-11px) !important;
+  }
+  .vibrant-app-shell .top-navigation-scroll .top-navigation-item:nth-child(n+6):active {
+    transform: translateY(-9px) scale(.992) !important;
+  }
+  @media (max-width: 1100px) {
+    .vibrant-app-shell .top-navigation-scroll {
+      grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+    }
+  }
+  @media (max-width: 800px) {
+    .vibrant-app-shell .top-navigation-scroll {
+      grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    }
+  }
+  @media (max-width: 560px) {
+    .vibrant-app-shell .top-navigation-scroll {
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+  }
+
+  /* FINAL MEMBER PROFILE TYPOGRAPHY OVERRIDE
+     Higher specificity than the global inner-page rules. */
+  .vibrant-app-shell .member-profile-premium .profile-name {
+    font-size: 46px !important;
+    line-height: 1.08 !important;
+  }
+  .vibrant-app-shell .member-profile-premium .profile-meta {
+    font-size: 19px !important;
+  }
+  .vibrant-app-shell .member-profile-premium .summary-card span {
+    font-size: 14px !important;
+  }
+  .vibrant-app-shell .member-profile-premium .summary-card strong {
+    font-size: 21px !important;
+  }
+  .vibrant-app-shell .member-profile-premium .panel-title h3 {
+    font-size: 23px !important;
+  }
+  .vibrant-app-shell .member-profile-premium .panel-title span {
+    font-size: 14px !important;
+  }
+  .vibrant-app-shell .member-profile-premium .detail-list > div {
+    padding: 15px 0 !important;
+  }
+  .vibrant-app-shell .member-profile-premium .detail-list > div > span {
+    font-size: 16px !important;
+    line-height: 1.4 !important;
+  }
+  .vibrant-app-shell .member-profile-premium .detail-list > div > strong {
+    font-size: 18px !important;
+    line-height: 1.45 !important;
+  }
+  .vibrant-app-shell .member-profile-premium .member-notes {
+    font-size: 17px !important;
+    line-height: 1.65 !important;
+  }
+
+
+  /* Members list/table - slightly larger readable typography */
+  .vibrant-app-shell .inner-page-content table th {
+    font-size: 17px !important;
+    line-height: 1.35 !important;
+  }
+
+  .vibrant-app-shell .inner-page-content table td {
+    font-size: 16px !important;
+    line-height: 1.4 !important;
+  }
+
+  .vibrant-app-shell .inner-page-content table td strong {
+    font-size: 17px !important;
+    line-height: 1.35 !important;
+  }
+
+  .vibrant-app-shell .inner-page-content table td .member-name,
+  .vibrant-app-shell .inner-page-content table td .contact,
+  .vibrant-app-shell .inner-page-content table td .phone {
+    font-size: 17px !important;
+  }
+
+  .vibrant-app-shell .inner-page-content table td .member-id,
+  .vibrant-app-shell .inner-page-content table td .secondary,
+  .vibrant-app-shell .inner-page-content table td .muted,
+  .vibrant-app-shell .inner-page-content table td .subtle,
+  .vibrant-app-shell .inner-page-content table td .email {
+    font-size: 14px !important;
+  }
+
+  .vibrant-app-shell .inner-page-content table td .badge,
+  .vibrant-app-shell .inner-page-content table td .status-badge,
+  .vibrant-app-shell .inner-page-content table td .pill,
+  .vibrant-app-shell .inner-page-content table td .tag {
+    font-size: 14px !important;
+  }
+
+
+  /* =========================================================
+     MEMBERS TABLE — FINAL READABLE SIZE
+     Directly targets the actual members-list-table markup.
+     ========================================================= */
+  .vibrant-app-shell .members-list-table th {
+    font-size: 17px !important;
+    line-height: 1.35 !important;
+    font-weight: 800 !important;
+  }
+
+  .vibrant-app-shell .members-list-table td {
+    font-size: 16px !important;
+    line-height: 1.4 !important;
+  }
+
+  .vibrant-app-shell .members-list-table .member-cell strong,
+  .vibrant-app-shell .members-list-table .contact-cell strong {
+    font-size: 17px !important;
+    line-height: 1.35 !important;
+    font-weight: 750 !important;
+  }
+
+  .vibrant-app-shell .members-list-table .member-cell span,
+  .vibrant-app-shell .members-list-table .contact-cell span {
+    font-size: 13px !important;
+    line-height: 1.3 !important;
+  }
+
+  .vibrant-app-shell .members-list-table .data-pill {
+    font-size: 14px !important;
+  }
+
+  .vibrant-app-shell .members-list-table .row-actions .table-action {
+    font-size: 14px !important;
+  }
+
+  .vibrant-app-shell .members-list-table .danger-text,
+  .vibrant-app-shell .members-list-table .paid-text {
+    font-size: 16px !important;
+  }
+
+
+  /* =========================================================
+     ATTENDANCE TABLE — FINAL READABLE SIZE
+     Same practical typography scale as the corrected Members page.
+     ========================================================= */
+  .vibrant-app-shell .page .panel table th {
+    font-size: 17px !important;
+    line-height: 1.35 !important;
+    font-weight: 800 !important;
+  }
+
+  .vibrant-app-shell .page .panel table td {
+    font-size: 16px !important;
+    line-height: 1.4 !important;
+  }
+
+  .vibrant-app-shell .page .panel table td .member-cell strong {
+    font-size: 17px !important;
+    line-height: 1.35 !important;
+    font-weight: 750 !important;
+  }
+
+  .vibrant-app-shell .page .panel table td .member-cell span {
+    font-size: 13px !important;
+    line-height: 1.3 !important;
+  }
+
+  .vibrant-app-shell .page .panel table td .data-pill {
+    font-size: 14px !important;
+  }
+
+  .vibrant-app-shell .page .panel table td .status-badge,
+  .vibrant-app-shell .page .panel table td .badge {
+    font-size: 14px !important;
+  }
+
+  .vibrant-app-shell .page .panel table td .btn-sm {
+    font-size: 15px !important;
+    line-height: 1.3 !important;
+  }
+
+  .vibrant-app-shell .page .panel .panel-title h3 {
+    font-size: 23px !important;
+    line-height: 1.2 !important;
+  }
+
+  .vibrant-app-shell .page .panel .panel-title span {
+    font-size: 14px !important;
+  }
+
+
+  /* =========================================================
+     MEMBERSHIP LIST — DIRECT FINAL FONT SIZE FIX
+     Targets only the Memberships page list. Theme/colors/layout
+     remain unchanged.
+     ========================================================= */
+  .vibrant-app-shell .memberships-list-table {
+    font-size:16px !important;
+  }
+
+  .vibrant-app-shell .memberships-list-table thead th {
+    font-size:17px !important;
+    line-height:1.35 !important;
+    font-weight:800 !important;
+  }
+
+  .vibrant-app-shell .memberships-list-table tbody td {
+    font-size:16px !important;
+    line-height:1.45 !important;
+    font-weight:500 !important;
+  }
+
+  .vibrant-app-shell .memberships-list-table tbody td .member-cell strong {
+    font-size:17px !important;
+    line-height:1.35 !important;
+    font-weight:750 !important;
+  }
+
+  .vibrant-app-shell .memberships-list-table tbody td .member-cell span {
+    font-size:13px !important;
+    line-height:1.3 !important;
+  }
+
+  .vibrant-app-shell .memberships-list-table tbody td .danger-text,
+  .vibrant-app-shell .memberships-list-table tbody td .paid-text {
+    font-size:16px !important;
+    font-weight:750 !important;
+  }
+
+  .vibrant-app-shell .memberships-list-table tbody td .status {
+    font-size:14px !important;
+  }
+
+  .vibrant-app-shell .memberships-list-table tbody td .btn-sm {
+    font-size:15px !important;
+    min-height:44px !important;
+  }
+
+`;

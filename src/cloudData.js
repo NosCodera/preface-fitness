@@ -17,9 +17,7 @@ const TABLES = {
 };
 
 function throwIfError(error, context) {
-  if (error) {
-    throw new Error(`${context}: ${error.message}`);
-  }
+  if (error) throw new Error(`${context}: ${error.message}`);
 }
 
 async function getAuthenticatedUser() {
@@ -54,10 +52,7 @@ export async function getCurrentGym() {
     .limit(1)
     .maybeSingle();
 
-  throwIfError(
-    membershipError,
-    'Unable to read gym membership'
-  );
+  throwIfError(membershipError, 'Unable to read gym membership');
 
   if (!membership) {
     throw new Error(
@@ -74,10 +69,7 @@ export async function getCurrentGym() {
     .eq('id', membership.gym_id)
     .single();
 
-  throwIfError(
-    gymError,
-    'Unable to read gym'
-  );
+  throwIfError(gymError, 'Unable to read gym');
 
   return gym;
 }
@@ -95,14 +87,9 @@ async function selectTable(tableName, gymId) {
     .from(tableName)
     .select('*')
     .eq('gym_id', gymId)
-    .order('created_at', {
-      ascending: false,
-    });
+    .order('created_at', { ascending: false });
 
-  throwIfError(
-    error,
-    `Unable to load ${tableName}`
-  );
+  throwIfError(error, `Unable to load ${tableName}`);
 
   return data || [];
 }
@@ -210,6 +197,7 @@ function mapLead(row) {
 
     followUp: row.follow_up_date || '',
     interestedPlan: row.interested_plan || '',
+
     notes: row.notes || '',
     lastContact: row.last_contact || '',
 
@@ -234,29 +222,18 @@ function mapPayment(row, members) {
     memberId: member?.id || '',
     member: member?.name || '',
 
-    amount: Number(
-      row.amount || 0
-    ),
+    amount: Number(row.amount || 0),
 
     type:
       row.payment_type ||
       'Membership',
 
-    mode:
-      row.payment_mode ||
-      '',
-
-    date:
-      row.payment_date ||
-      '',
-
-    notes:
-      row.notes ||
-      '',
+    mode: row.payment_mode || '',
+    date: row.payment_date || '',
+    notes: row.notes || '',
 
     invoiceNumber:
-      row.invoice_number ||
-      '',
+      row.invoice_number || '',
 
     gstApplicable:
       Boolean(row.gst_applicable),
@@ -277,18 +254,13 @@ function mapPayment(row, members) {
       Number(row.invoice_amount || 0),
 
     paidAmountAtInvoice:
-      Number(
-        row.paid_amount_at_invoice || 0
-      ),
+      Number(row.paid_amount_at_invoice || 0),
 
     balanceAtInvoice:
-      Number(
-        row.balance_at_invoice || 0
-      ),
+      Number(row.balance_at_invoice || 0),
 
     description:
-      row.description ||
-      '',
+      row.description || '',
   };
 }
 
@@ -302,11 +274,8 @@ function mapAttendance(row, members) {
     id: row.legacy_id || row.id,
     cloudId: row.id,
 
-    memberId:
-      member?.id || '',
-
-    member:
-      member?.name || '',
+    memberId: member?.id || '',
+    member: member?.name || '',
 
     date:
       row.attendance_date || '',
@@ -333,11 +302,8 @@ function mapTrainer(row) {
     id: row.legacy_id || row.id,
     cloudId: row.id,
 
-    name:
-      row.name || '',
-
-    phone:
-      row.phone || '',
+    name: row.name || '',
+    phone: row.phone || '',
 
     specialization:
       row.specialization || '',
@@ -356,11 +322,7 @@ function mapTrainer(row) {
   };
 }
 
-function mapPTSession(
-  row,
-  members,
-  trainers
-) {
+function mapPTSession(row, members, trainers) {
   const member = memberByCloudId(
     members,
     row.member_id
@@ -421,10 +383,7 @@ function mapPTSession(
   };
 }
 
-function mapProgressRecord(
-  row,
-  members
-) {
+function mapProgressRecord(row, members) {
   const member = memberByCloudId(
     members,
     row.member_id
@@ -476,10 +435,7 @@ function mapProgressRecord(
   };
 }
 
-function mapWorkoutPlan(
-  row,
-  members
-) {
+function mapWorkoutPlan(row, members) {
   const ids = Array.isArray(
     row.assigned_member_ids
   )
@@ -510,12 +466,11 @@ function mapWorkoutPlan(
 
     assignedMemberIds:
       ids
-        .map(
-          (x) =>
-            memberByCloudId(
-              members,
-              x
-            )?.id
+        .map((x) =>
+          memberByCloudId(
+            members,
+            x
+          )?.id
         )
         .filter(Boolean),
 
@@ -527,10 +482,7 @@ function mapWorkoutPlan(
   };
 }
 
-function mapDietPlan(
-  row,
-  members
-) {
+function mapDietPlan(row, members) {
   const ids = Array.isArray(
     row.assigned_member_ids
   )
@@ -564,12 +516,11 @@ function mapDietPlan(
 
     assignedMemberIds:
       ids
-        .map(
-          (x) =>
-            memberByCloudId(
-              members,
-              x
-            )?.id
+        .map((x) =>
+          memberByCloudId(
+            members,
+            x
+          )?.id
         )
         .filter(Boolean),
 
@@ -581,10 +532,7 @@ function mapDietPlan(
   };
 }
 
-function mapCommunicationLog(
-  row,
-  members
-) {
+function mapCommunicationLog(row, members) {
   const member = memberByCloudId(
     members,
     row.member_id
@@ -628,15 +576,11 @@ function mapCommunicationLog(
       '',
 
     createdAt:
-      row.created_at ||
-      '',
+      row.created_at || '',
   };
 }
 
-function mapFeedback(
-  row,
-  members
-) {
+function mapFeedback(row, members) {
   const member = memberByCloudId(
     members,
     row.member_id
@@ -720,17 +664,9 @@ function buildSettings(rows) {
   return out;
 }
 
-
-/* =========================================================
-   LOAD COMPLETE CLOUD STATE
-   ========================================================= */
-
 export async function loadCloudState() {
-  const gym =
-    await getCurrentGym();
-
-  const gymId =
-    gym.id;
+  const gym = await getCurrentGym();
+  const gymId = gym.id;
 
   const [
     membershipPlans,
@@ -744,7 +680,7 @@ export async function loadCloudState() {
     workoutRows,
     dietRows,
     communicationRows,
-    feedbackRows,
+    feedbacksRows,
     settingsRows,
   ] = await Promise.all([
     selectTable(
@@ -814,14 +750,10 @@ export async function loadCloudState() {
   ]);
 
   const members =
-    membersRows.map(
-      mapMember
-    );
+    membersRows.map(mapMember);
 
   const trainers =
-    trainersRows.map(
-      mapTrainer
-    );
+    trainersRows.map(mapTrainer);
 
   return {
     gym,
@@ -834,9 +766,7 @@ export async function loadCloudState() {
     members,
 
     leads:
-      leads.map(
-        mapLead
-      ),
+      leads.map(mapLead),
 
     payments:
       paymentsRows.map(
@@ -905,7 +835,7 @@ export async function loadCloudState() {
       ),
 
     feedbacks:
-      feedbackRows.map(
+      feedbacksRows.map(
         (r) =>
           mapFeedback(
             r,
@@ -919,11 +849,6 @@ export async function loadCloudState() {
       ),
   };
 }
-
-
-/* =========================================================
-   GENERIC DATABASE OPERATIONS
-   ========================================================= */
 
 export async function insertRecord(
   tableName,
@@ -1002,11 +927,22 @@ export async function deleteRecord(
   return true;
 }
 
-
-/* =========================================================
-   SETTINGS
-   ========================================================= */
-
+/*
+ * FIX:
+ * app_settings.setting_value is JSONB.
+ *
+ * We now store the value directly instead of
+ * JSON.stringify(value).
+ *
+ * This is important for:
+ *   publicPage
+ *   publicPage.trainers
+ *   publicPage.packages
+ *   membershipPrices
+ *
+ * It also uses an atomic UPSERT against:
+ *   gym_id + setting_key
+ */
 export async function saveSettings(
   settings
 ) {
@@ -1018,87 +954,47 @@ export async function saveSettings(
       settings || {}
     );
 
-  for (
-    const [key, value]
-    of entries
-  ) {
-    const {
-      data: existing,
-      error: findError,
-    } = await supabase
-      .from(
-        TABLES.appSettings
-      )
-      .select('id')
-      .eq(
-        'gym_id',
-        gymId
-      )
-      .eq(
-        'setting_key',
-        key
-      )
-      .maybeSingle();
+  if (!entries.length) {
+    return settings;
+  }
 
-    throwIfError(
-      findError,
-      `Unable to read setting ${key}`
+  const rows =
+    entries.map(
+      ([key, value]) => ({
+        gym_id: gymId,
+
+        setting_key:
+          key,
+
+        /*
+         * IMPORTANT:
+         * Do NOT JSON.stringify here.
+         * Supabase column is JSONB.
+         */
+        setting_value:
+          value,
+      })
     );
 
-    const row = {
-      gym_id: gymId,
-      setting_key: key,
-      setting_value:
-        JSON.stringify(value),
-    };
+  const {
+    error,
+  } = await supabase
+    .from(TABLES.appSettings)
+    .upsert(
+      rows,
+      {
+        onConflict:
+          'gym_id,setting_key',
+      }
+    );
 
-    if (existing?.id) {
-      const {
-        error,
-      } = await supabase
-        .from(
-          TABLES.appSettings
-        )
-        .update({
-          setting_value:
-            row.setting_value,
-        })
-        .eq(
-          'id',
-          existing.id
-        )
-        .eq(
-          'gym_id',
-          gymId
-        );
-
-      throwIfError(
-        error,
-        `Unable to update setting ${key}`
-      );
-    } else {
-      const {
-        error,
-      } = await supabase
-        .from(
-          TABLES.appSettings
-        )
-        .insert(row);
-
-      throwIfError(
-        error,
-        `Unable to insert setting ${key}`
-      );
-    }
-  }
+  throwIfError(
+    error,
+    'Unable to save gym settings'
+  );
 
   return settings;
 }
-
-
-/* =========================================================
-   PUBLIC ATTENDANCE
-   ========================================================= */
 
 export async function publicCheckIn({
   gymId,
@@ -1150,11 +1046,6 @@ export async function publicCheckIn({
   );
 }
 
-
-/* =========================================================
-   PUBLIC FEEDBACK
-   ========================================================= */
-
 export async function publicSubmitFeedback({
   gymId,
   memberName,
@@ -1178,12 +1069,14 @@ export async function publicSubmitFeedback({
 
       p_category:
         String(
-          category || 'General'
+          category ||
+          'General'
         ).trim(),
 
       p_priority:
         String(
-          priority || 'medium'
+          priority ||
+          'medium'
         )
           .trim()
           .toLowerCase(),
@@ -1207,25 +1100,6 @@ export async function publicSubmitFeedback({
   );
 }
 
-
-/* =========================================================
-   STAFF / ROLE / PERMISSIONS
-   ========================================================= */
-
-/*
- * Gets the currently logged-in user's role
- * and permissions.
- *
- * Owner:
- *   role = owner
- *   permissions can be ignored because owner
- *   automatically has complete access.
- *
- * Staff:
- *   role = staff
- *   permissions are read from gym_users.permissions.
- */
-
 export async function getMyAccess() {
   const {
     data,
@@ -1247,12 +1121,6 @@ export async function getMyAccess() {
   );
 }
 
-
-/*
- * Gets all staff accounts belonging
- * to the currently logged-in owner's gym.
- */
-
 export async function getGymStaff() {
   const {
     data,
@@ -1268,14 +1136,6 @@ export async function getGymStaff() {
 
   return data || [];
 }
-
-
-/*
- * Updates permissions for one staff member.
- *
- * Only the owner can successfully
- * execute the Supabase RPC.
- */
 
 export async function updateStaffPermissions(
   userId,
@@ -1302,14 +1162,6 @@ export async function updateStaffPermissions(
 
   return data;
 }
-
-
-/*
- * Enables or disables a staff account.
- *
- * Only the owner can successfully
- * execute the Supabase RPC.
- */
 
 export async function setStaffActive(
   userId,
