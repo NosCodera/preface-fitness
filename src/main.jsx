@@ -730,6 +730,21 @@ const PRODUCTION_APP_URL = 'https://noscodera.github.io/preface-fitness/';
 const PRODUCTION_GYM_ID = 'd702119b-3205-46a2-9ee0-294d682ddf14';
 const PUBLIC_GYM_ID_STORAGE_KEY = 'preface-fitness-public-gym-id';
 
+function getWhatsAppNumberFromGymPhone(value) {
+  const digits = String(value || '').replace(/\\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('91') && digits.length >= 12) return digits;
+  if (digits.length === 10) return `91${digits}`;
+  return digits;
+}
+
+function normalizeExternalUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^(https?:|mailto:|tel:|javascript:)/i.test(raw)) return raw;
+  return `https://${raw.replace(/^\/+/, '')}`;
+}
+
 function getCheckInPath() {
   return `${PRODUCTION_APP_URL.replace(/\/$/, '')}/#check-in`;
 }
@@ -3432,7 +3447,7 @@ function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
     'personal training': 'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?auto=format&fit=crop&w=1000&q=85',
     'functional training': 'https://images.unsplash.com/photo-1579758629938-03607ccdbaba?auto=format&fit=crop&w=1000&q=85',
     'locker & changing facilities': 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=1000&q=85',
-    'member progress tracking': 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?auto=format&fit=crop&w=1000&q=85',
+    'member progress tracking': 'https://images.unsplash.com/photo-1599058917212-d750089860fc?auto=format&fit=crop&w=1000&q=85',
     'diet & nutrition guidance': 'https://images.unsplash.com/photo-1490645935967-10de6ba17061?auto=format&fit=crop&w=1000&q=85',
   };
 
@@ -3498,8 +3513,10 @@ function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
   const reviews = Array.isArray(publicPage.reviews) ? publicPage.reviews.filter((r) => r && (r.name || r.text)) : [];
   const configuredGymPhone = String(publicSettings.gymPhone || '').trim();
   const phone = configuredGymPhone === '7905572486' ? '' : configuredGymPhone;
-  const configuredWhatsapp = String(publicPage.whatsappNumber || '').trim();
-  const whatsapp = (configuredWhatsapp === '7905572486' || configuredWhatsapp === '917905572486') ? '' : configuredWhatsapp.replace(/\D/g, '');
+  const gymPhoneDigits = phone.replace(/\D/g, '');
+  const whatsapp = gymPhoneDigits
+    ? (gymPhoneDigits.length === 10 ? `91${gymPhoneDigits}` : gymPhoneDigits)
+    : '';
   const email = String(publicSettings.gymEmail || '').trim();
   const instagram = String(publicPage.instagramUrl || '').trim();
   const facebook = String(publicPage.facebookUrl || '').trim();
@@ -3536,7 +3553,7 @@ function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
         .gym-public-dark-v2 .gym-gallery{display:grid;grid-template-columns:1.25fr .75fr;grid-template-rows:245px 245px;gap:12px}.gym-public-dark-v2 .gym-gallery-item{overflow:hidden;border-radius:18px}.gym-public-dark-v2 .gym-gallery-item img{width:100%;height:100%;object-fit:cover;transition:transform .5s}.gym-public-dark-v2 .gym-gallery-item:hover img{transform:scale(1.04)}.gym-public-dark-v2 .gallery-1{grid-row:1/3}.gym-public-dark-v2 .gym-gallery-item img{filter:saturate(.88) contrast(1.05)}
         .gym-public-dark-v2 .public-google-card{display:grid;grid-template-columns:1.15fr .85fr;gap:20px;background:#10151f;border:1px solid rgba(255,255,255,.09);border-radius:24px;padding:28px}.gym-public-dark-v2 .google-rating{font-size:38px;font-weight:900}.gym-public-dark-v2 .stars{color:#ffc533;letter-spacing:2px;font-size:19px}.gym-public-dark-v2 .google-muted{color:#7f8a9d;font-size:13px}.gym-public-dark-v2 .google-map-box{min-height:180px;border-radius:17px;background:linear-gradient(135deg,#162133,#0c121c);display:flex;align-items:center;justify-content:center;text-align:center;padding:20px}.gym-public-dark-v2 .google-map-box a{color:#b9aaff;text-decoration:none;font-weight:800}
         .gym-public-dark-v2 .review-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:22px}.gym-public-dark-v2 .public-review{background:#10151f;border:1px solid rgba(255,255,255,.08);border-radius:18px;padding:21px}.gym-public-dark-v2 .public-review-head{display:flex;gap:11px;align-items:center}.gym-public-dark-v2 .public-review-avatar{width:42px;height:42px;border-radius:50%;object-fit:cover;background:#27203f;display:grid;place-items:center;color:#b6a5ff;font-weight:900}.gym-public-dark-v2 .public-review strong{display:block}.gym-public-dark-v2 .public-review small{color:#758196}.gym-public-dark-v2 .public-review p{color:#a6afbf;line-height:1.6;font-size:13px}
-        .gym-public-dark-v2 .gym-cta{padding:75px clamp(20px,7vw,110px);background:linear-gradient(110deg,#211348,#0c1020);border-top:1px solid rgba(255,255,255,.08);border-bottom:1px solid rgba(255,255,255,.08)}.gym-public-dark-v2 .public-contact-panel{display:flex;justify-content:space-between;gap:30px;align-items:center}.gym-public-dark-v2 .public-contact-panel p{color:#8d98ab}.gym-public-dark-v2 .public-socials{display:flex;flex-wrap:wrap;gap:10px}.gym-public-dark-v2 .public-socials a{color:#fff;text-decoration:none;padding:12px 15px;border-radius:12px;background:#151b29;border:1px solid rgba(255,255,255,.09);font-weight:800;font-size:13px}
+        .gym-public-dark-v2 .gym-cta{padding:75px clamp(20px,7vw,110px);background:linear-gradient(110deg,#211348,#0c1020);border-top:1px solid rgba(255,255,255,.08);border-bottom:1px solid rgba(255,255,255,.08)}.gym-public-dark-v2 .public-contact-panel{display:flex;justify-content:space-between;gap:30px;align-items:center}.gym-public-dark-v2 .public-contact-panel p{color:#8d98ab}.gym-public-dark-v2 .public-socials{display:flex;flex-wrap:wrap;gap:10px}.gym-public-dark-v2 .public-socials a{color:#fff;text-decoration:none;padding:12px 15px;border-radius:12px;background:#151b29;border:1px solid rgba(255,255,255,.09);font-weight:800;font-size:13px}.gym-public-dark-v2 .public-socials .social-icon-btn{width:52px;height:52px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:14px;font-size:0}.gym-public-dark-v2 .public-socials .social-icon-btn svg{width:23px;height:23px;display:block}.gym-public-dark-v2 .public-socials .social-icon-btn:hover{transform:translateY(-2px);border-color:rgba(255,255,255,.24);background:#1c2435}
         /* Public page readability upgrade */
         .gym-public-dark-v2 h2{color:#ffffff;text-shadow:0 2px 18px rgba(0,0,0,.18)}
         .gym-public-dark-v2 .gym-section-kicker,.gym-public-dark-v2 .gym-kicker{color:#b9a7ff;text-shadow:0 0 18px rgba(112,71,255,.18)}
@@ -3606,7 +3623,13 @@ function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
       <section className="gym-public-section"><div className="gym-section-heading"><div><div className="gym-section-kicker">THE SPACE</div><h2>Train in a space built around movement.</h2></div><span>Swipe / scroll through the gallery</span></div><div className="gym-gallery">{gallery.map((src,index)=><div className={`gym-gallery-item gallery-${index+1}`} key={src}><img src={src} alt={`Gym training ${index+1}`} /></div>)}</div></section>
       <section className="gym-public-section"><div className="gym-section-heading"><div><div className="gym-section-kicker">GOOGLE BUSINESS</div><h2>Find us. See what members say.</h2></div></div><div className="public-google-card"><div><div className="google-rating">{googleRating} <span className="stars">★★★★★</span></div><div className="google-muted">{googleReviewCount} Google reviews</div><h3 style={{fontSize:'22px',margin:'25px 0 6px'}}>{googlePlaceName}</h3><div className="google-muted">{googleAddress}</div><div style={{marginTop:'10px',color:'#ffbf36',fontWeight:800}}>Hours · {hoursText}</div><div className="google-muted" style={{marginTop:'10px'}}>Google phone · {googlePhone}</div><div style={{display:'flex',gap:'12px',flexWrap:'wrap',marginTop:'18px'}}>{(mapsUrl || googleSearchUrl) && <a href={mapsUrl || googleSearchUrl} target="_blank" rel="noreferrer" style={{color:'#a991ff',textDecoration:'none',fontWeight:800}}>Open Google →</a>}<a href={googleSearchUrl} target="_blank" rel="noreferrer" style={{color:'#d9d2ff',textDecoration:'none',fontWeight:800}}>View Google listing</a></div></div><div className="google-map-box"><div><div style={{fontSize:'42px'}}>📍</div><strong>{googlePlaceName}</strong><div className="google-muted">{googleAddress || 'Google business location'}</div><div className="stars" style={{marginTop:'12px'}}>★★★★★</div><div className="google-muted">{googleRating}/5 · {googleReviewCount} reviews</div></div></div></div></section>
       <section className="gym-public-section"><div className="gym-section-heading"><div><div className="gym-section-kicker">MEMBER REVIEWS</div><h2>What our customers say.</h2></div></div>{reviews.length ? <div className="review-grid">{reviews.map((review,index)=><article className="public-review" key={`${review.name}-${index}`}><div className="public-review-head">{review.photo ? <img className="public-review-avatar" src={review.photo} alt="" /> : <div className="public-review-avatar">{initials(review.name || 'C')}</div>}<div><strong>{review.name || 'Customer'}</strong><small>{review.date || 'Verified customer'}</small></div></div><div className="stars" style={{marginTop:'13px'}}>★★★★★</div><p>{review.text}</p></article>)}</div> : <div className="public-review"><strong>No reviews added yet.</strong><p>Customer reviews added from Administrator → Settings will appear here.</p></div>}</section>
-      <section className="gym-cta"><div className="public-contact-panel"><div><div className="gym-section-kicker">READY TO START?</div><h2>Show up. Put in the work. Track the progress.</h2><p>Contact the gym using your preferred channel.</p></div><div className="public-socials">{phone&&<a href={`tel:${phone}`}>Call {phone}</a>}{whatsapp&&<a href={`https://wa.me/${whatsapp}`} target="_blank" rel="noreferrer">WhatsApp</a>}{email&&<a href={`mailto:${email}`}>Email</a>}{instagram&&<a href={instagram} target="_blank" rel="noreferrer">Instagram</a>}{facebook&&<a href={facebook} target="_blank" rel="noreferrer">Facebook</a>}{website&&<a href={website} target="_blank" rel="noreferrer">Website</a>}</div></div></section>
+      <section className="gym-cta"><div className="public-contact-panel"><div><div className="gym-section-kicker">READY TO START?</div><h2>Show up. Put in the work. Track the progress.</h2><p>Contact the gym using your preferred channel.</p></div><div className="public-socials">
+        {phone&&<a className="social-icon-btn" href={`tel:${phone}`} aria-label="Call gym" title="Call gym"><Phone size={23} /></a>}
+        {getWhatsAppNumberFromGymPhone(phone)&&<a className="social-icon-btn" href={`https://wa.me/${getWhatsAppNumberFromGymPhone(phone)}`} target="_blank" rel="noreferrer" aria-label="WhatsApp gym" title="WhatsApp gym"><MessageCircle size={23} /></a>}
+        {instagram&&<a className="social-icon-btn" href={normalizeExternalUrl(instagram)} target="_blank" rel="noreferrer" aria-label="Instagram" title="Instagram"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5" stroke="currentColor" strokeWidth="2"/><circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="2"/><circle cx="17.5" cy="6.5" r="1.2" fill="currentColor"/></svg></a>}
+        {facebook&&<a className="social-icon-btn" href={normalizeExternalUrl(facebook)} target="_blank" rel="noreferrer" aria-label="Facebook" title="Facebook"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13.4 21v-8h2.7l.4-3h-3.1V8.1c0-.9.3-1.5 1.6-1.5h1.7V4a22 22 0 0 0-2.5-.1c-2.5 0-4.2 1.5-4.2 4.3V10H7.3v3h2.7v8h3.4Z"/></svg></a>}
+        {website&&<a className="social-icon-btn" href={normalizeExternalUrl(website)} target="_blank" rel="noreferrer" aria-label="Website" title="Website"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2"/><path d="M3 12h18M12 3c2.3 2.5 3.5 5.5 3.5 9S14.3 18.5 12 21c-2.3-2.5-3.5-5.5-3.5-9S9.7 5.5 12 3Z" stroke="currentColor" strokeWidth="2"/></svg></a>}
+      </div></div></section>
       <footer className="gym-public-footer"><div><strong>{gymName}</strong><span>{publicSettings.gymAddress || 'Fitness • Strength • Wellness'}</span></div><div>{phone}{email ? ` • ${email}` : ''}</div></footer>
       <div className="public-developer-footer"><DeveloperContactBar /></div>
       </>}
