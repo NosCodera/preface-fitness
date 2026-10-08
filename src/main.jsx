@@ -20,6 +20,8 @@ import {
   LogOut,
   Menu,
   MessageCircle,
+  Mail,
+  Instagram,
   MoreHorizontal,
   Plus,
   Phone,
@@ -249,6 +251,21 @@ const VIBRANT_THEME_CSS = `
   /* Keep the dashboard inside the viewport instead of forcing horizontal zoom-out. */
   .vibrant-app-shell .content { width:100% !important; max-width:none !important; padding:26px 28px 48px !important; box-sizing:border-box !important; }
   .vibrant-dashboard { width:100% !important; max-width:none !important; min-width:0 !important; }
+
+
+  .renewal-date-grid { margin-top: 12px; }
+  .renewal-date-grid input[type="date"] { width: 100%; min-height: 42px; }
+  @media(max-width:700px){ .renewal-date-grid { grid-template-columns: 1fr; } }
+
+  .membership-activity-panel{margin-top:24px;padding:24px;border:1px solid rgba(106,76,255,.15);border-radius:24px;background:linear-gradient(135deg,rgba(255,255,255,.96),rgba(247,244,255,.94));box-shadow:0 16px 38px rgba(52,43,116,.08)}
+  .membership-activity-head{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;padding-bottom:20px;border-bottom:1px solid #ece8f8}
+  .membership-activity-head h2{margin:5px 0;color:#18253e;font-size:24px;font-weight:900}.membership-activity-head p{margin:0;color:#77849a;font-size:13px}
+  .membership-activity-range{display:flex;align-items:flex-end;gap:10px}.membership-activity-range label{display:grid;gap:6px}.membership-activity-range label>span{color:#68758b;font-size:11px;font-weight:850}
+  .membership-date-input{position:relative;display:flex;align-items:center}.membership-date-input input{width:155px;height:42px;padding:0 38px 0 12px;border:1px solid #dfe4ef;border-radius:11px;background:#fff;color:#26344c;font-weight:750;outline:none}.membership-date-input svg{position:absolute;right:11px;pointer-events:none;color:#6950e9}.membership-range-arrow{padding-bottom:11px;color:#8b78dd;font-weight:900}
+  .membership-activity-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:18px}.membership-activity-stat{padding:15px;border-radius:16px;border:1px solid rgba(130,140,160,.12);background:#fff}.membership-activity-stat span,.membership-activity-stat small{display:block;color:#718096;font-size:11px;font-weight:700}.membership-activity-stat strong{display:block;margin:5px 0 2px;color:#1b2942;font-size:22px;font-weight:950}.membership-activity-stat small{color:#9aa5b5;font-size:10px}
+  .stat-purple{box-shadow:inset 0 3px #7652f6}.stat-orange{box-shadow:inset 0 3px #f59e0b}.stat-red{box-shadow:inset 0 3px #ef476f}.stat-green{box-shadow:inset 0 3px #11a887}.stat-blue{box-shadow:inset 0 3px #3988ff}.stat-cyan{box-shadow:inset 0 3px #16b9d4}.stat-pink{box-shadow:inset 0 3px #e95acb}.stat-indigo{box-shadow:inset 0 3px #5966d8}
+  .membership-activity-columns{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}.membership-activity-list-card{padding:16px;border:1px solid #e9e7f2;border-radius:18px;background:rgba(255,255,255,.78)}.membership-activity-list-head{display:flex;justify-content:space-between;align-items:center;gap:10px}.membership-activity-list-head strong{display:block;color:#26344c;font-size:14px;font-weight:900}.membership-activity-list-head span{display:block;margin-top:3px;color:#8994a5;font-size:10px}.membership-activity-list{display:grid;gap:8px;margin-top:12px}.membership-activity-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 12px;border:1px solid #edf0f5;border-radius:12px;background:#fff}.membership-activity-row strong{display:block;color:#293750;font-size:12px}.membership-activity-row span{display:block;margin-top:3px;color:#8994a5;font-size:10px}.membership-activity-row b{padding:5px 8px;border-radius:999px;font-size:10px}.membership-activity-row b.expired{background:#ffe4e8;color:#bd314d}.membership-activity-row b.soon{background:#fff1c7;color:#986b00}.membership-activity-row b.upcoming{background:#e5f8ef;color:#11815f}.membership-activity-row b.enrolled{background:#e8e4ff;color:#6248db}.membership-activity-empty{margin-top:12px;padding:16px;border-radius:12px;background:#f8fafc;color:#8994a5;font-size:12px;text-align:center}
+  @media(max-width:1100px){.membership-activity-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.membership-activity-head{align-items:flex-start;flex-direction:column}.membership-activity-range{width:100%}}@media(max-width:700px){.membership-activity-columns{grid-template-columns:1fr}.membership-activity-range{flex-wrap:wrap}.membership-date-input input{width:140px}.membership-range-arrow{display:none}}
   .vibrant-tile-grid { width:100% !important; min-width:0 !important; grid-template-columns:repeat(4,minmax(0,1fr)) !important; }
   .vibrant-stat-tile { min-width:0 !important; }
   .dashboard-filter-card { min-width:0 !important; }
@@ -366,6 +383,74 @@ const VIBRANT_THEME_CSS = `
   .vibrant-app-shell table { font-size:16px !important; }
   .vibrant-app-shell th { font-size:13px !important; }
   .vibrant-app-shell .btn { font-size:15px !important; min-height:44px; border-radius:11px !important; }
+
+  /* Global action-modal positioning:
+     Keep every app modal below the fixed top navigation and make the
+     backdrop itself scrollable so tall forms never hide behind the navbar. */
+  .vibrant-app-shell .modal-backdrop {
+    position: fixed !important;
+    top: 132px !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 18px 24px 28px !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    overscroll-behavior: contain !important;
+    -webkit-overflow-scrolling: touch !important;
+    z-index: 1200 !important;
+  }
+
+  .vibrant-app-shell .modal-backdrop > .modal {
+    width: min(960px, 100%) !important;
+    max-height: calc(100vh - 178px) !important;
+    margin: 0 auto !important;
+    flex: 0 1 auto !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    overscroll-behavior: contain !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  .vibrant-app-shell .modal-backdrop > .modal.modal-wide {
+    width: min(1120px, 100%) !important;
+  }
+
+  /* Member/photo, diet, workout and other tall forms */
+  .vibrant-app-shell .modal-backdrop > .modal::-webkit-scrollbar,
+  .vibrant-app-shell .modal-backdrop::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  @media (max-width: 900px) {
+    .vibrant-app-shell .modal-backdrop {
+      top: 108px !important;
+      padding: 14px 14px 24px !important;
+    }
+
+    .vibrant-app-shell .modal-backdrop > .modal {
+      max-height: calc(100vh - 136px) !important;
+    }
+  }
+
+  @media (max-width: 600px) {
+    .vibrant-app-shell .modal-backdrop {
+      top: 98px !important;
+      padding: 10px 8px 20px !important;
+    }
+
+    .vibrant-app-shell .modal-backdrop > .modal {
+      max-height: calc(100vh - 116px) !important;
+      border-radius: 18px !important;
+    }
+  }
+
   .vibrant-app-shell .modal { border-radius:22px !important; }
   .vibrant-app-shell .modal-header h2 { font-size:24px !important; }
   @keyframes pfFadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
@@ -1015,7 +1100,7 @@ const seed = {
     gymIntro: { description: 'A modern fitness destination focused on strength, conditioning, personal training and sustainable results.', facilities: ['Strength & cardio zone', 'Personal training', 'Functional training', 'Locker & changing facilities', 'Member progress tracking', 'Diet & nutrition guidance'] },
     publicPage: {
       whatsappNumber: '', instagramUrl: '', facebookUrl: '', websiteUrl: '',
-      googleRating: '5.0', googleReviewCount: '95', googleMapsUrl: '', googleSearchUrl: 'https://www.google.com/search?q=preface+fitness', googlePlaceName: 'Preface Fitness', googlePhone: '093692 79056', googleAddress: 'Preface Fitness, Nadan Mahal Rd. above Hdfc Bank, Yahiyaganj, Lucknow, Uttar Pradesh 226003', hoursText: 'Mon-Sun · 6 AM - 11 PM',
+      googleRating: '5.0', googleReviewCount: '94', googleMapsUrl: '', googleSearchUrl: 'https://www.google.com/search?q=preface+fitness', googlePlaceName: 'Preface Fitness', googlePhone: '093692 79056', googleAddress: 'Preface Fitness, Nadan Mahal Rd. above Hdfc Bank, Yahiyaganj, Lucknow, Uttar Pradesh 226003', hoursText: 'Mon-Sun · 6 AM - 11 PM',
       trainers: [],
       packages: [],
       reviews: []
@@ -2122,7 +2207,7 @@ function App() {
           payment_type: 'Membership',
           payment_mode: clean.paymentMode || 'Cash',
           payment_date: today,
-          notes: 'Initial membership payment',
+          notes: `Initial membership payment | Plan: ${clean.plan || 'Membership'} | Start: ${clean.start || ''} | Expiry: ${clean.expiry || ''}`,
           invoice_number: invoiceNumber,
           gst_applicable: clean.gstMode === 'gst',
           gst_rate: gst.rate,
@@ -2143,7 +2228,7 @@ function App() {
           type: 'Membership',
           mode: clean.paymentMode || 'Cash',
           date: today,
-          notes: 'Initial membership payment',
+          notes: `Initial membership payment | Plan: ${clean.plan || 'Membership'} | Start: ${clean.start || ''} | Expiry: ${clean.expiry || ''}`,
           invoiceNumber,
           gstApplicable: clean.gstMode === 'gst',
           gstRate: gst.rate,
@@ -2278,8 +2363,8 @@ function App() {
           amount: renewalPaid,
           payment_type: 'Membership',
           payment_mode: renewal.mode || 'Cash',
-          payment_date: today,
-          notes: `Membership renewal - ${plan.name}`,
+          payment_date: renewal.paymentDate || today,
+          notes: `Membership renewal - ${plan.name} | Payment date: ${renewal.paymentDate || today} | Previous expiry: ${member.expiry || ''} | New plan start: ${renewalStart} | New expiry: ${newExpiry}`,
         });
       }
 
@@ -2298,8 +2383,8 @@ function App() {
                   amount: renewalPaid,
                   type: 'Membership',
                   mode: renewal.mode || 'Cash',
-                  date: today,
-                  notes: `Membership renewal - ${plan.name}`,
+                  date: renewal.paymentDate || today,
+                  notes: `Membership renewal - ${plan.name} | Payment date: ${renewal.paymentDate || today} | Previous expiry: ${member.expiry || ''} | New plan start: ${renewalStart} | New expiry: ${newExpiry}`,
                 },
                 ...d.payments,
               ]
@@ -3523,7 +3608,7 @@ function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
   const website = String(publicPage.websiteUrl || '').trim();
   const mapsUrl = String(publicPage.googleMapsUrl || '').trim();
   const googleRating = publicPage.googleRating || '5.0';
-  const googleReviewCount = publicPage.googleReviewCount || '95';
+  const googleReviewCount = String(publicPage.googleReviewCount || '').trim() === '2' ? '94' : (publicPage.googleReviewCount || '94');
   const googlePlaceName = publicPage.googlePlaceName || gymName;
   const googleAddress = publicPage.googleAddress || publicSettings.gymAddress || 'Preface Fitness, Nadan Mahal Rd. above Hdfc Bank, Yahiyaganj, Lucknow, Uttar Pradesh 226003';
   const googlePhone = publicPage.googlePhone || '093692 79056';
@@ -3543,7 +3628,11 @@ function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
         .gym-public-dark-v2 *{box-sizing:border-box}
         .gym-public-dark-v2 .gym-public-nav{position:sticky;top:0;z-index:20;background:rgba(8,11,18,.84);backdrop-filter:blur(18px);border-bottom:1px solid rgba(255,255,255,.08);padding:18px clamp(20px,5vw,76px);display:flex;align-items:center;justify-content:space-between;gap:20px}
         .gym-public-dark-v2 .gym-public-brand{display:flex;align-items:center;gap:14px}.gym-public-dark-v2 .gym-public-brand img{width:58px;height:58px;object-fit:contain;border-radius:14px}.gym-public-dark-v2 .gym-public-brand strong{display:block;font-size:28px;line-height:1.05;font-weight:900;letter-spacing:-.6px;color:#ffffff;text-shadow:0 2px 18px rgba(112,71,255,.18)}.gym-public-dark-v2 .gym-public-brand span{display:block;color:#8e98ab;font-size:11px;letter-spacing:2px;margin-top:4px}
-        .gym-public-dark-v2 .public-contact-actions{display:flex;gap:9px;flex-wrap:wrap;justify-content:flex-end}.gym-public-dark-v2 .public-contact-actions a{color:#fff;text-decoration:none;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);border-radius:999px;padding:10px 14px;font-size:13px;font-weight:800}.gym-public-dark-v2 .public-contact-actions a.primary{background:#7047ff;border-color:#7047ff}
+        
+        .gym-public-dark-v2 .public-contact-icon{width:58px;height:48px;display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,.12);border-radius:16px;background:rgba(255,255,255,.035);color:#f2f4ff;transition:transform .2s ease,background .2s ease,border-color .2s ease,box-shadow .2s ease}
+        .gym-public-dark-v2 .public-contact-icon:hover{transform:translateY(-2px);background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.25);box-shadow:0 10px 24px rgba(0,0,0,.22)}
+        .gym-public-dark-v2 .public-contact-actions .public-contact-icon.primary{background:linear-gradient(135deg,#7650ff,#6541e9);border-color:transparent;color:#fff}
+.gym-public-dark-v2 .public-contact-actions{display:flex;gap:9px;flex-wrap:wrap;justify-content:flex-end}.gym-public-dark-v2 .public-contact-actions a{color:#fff;text-decoration:none;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);border-radius:999px;padding:10px 14px;font-size:13px;font-weight:800}.gym-public-dark-v2 .public-contact-actions a.primary{background:#7047ff;border-color:#7047ff}
         .gym-public-dark-v2 .gym-hero{min-height:640px;padding:80px clamp(20px,7vw,110px);display:grid;grid-template-columns:1fr .92fr;gap:60px;align-items:center;background:radial-gradient(circle at 15% 20%,rgba(112,71,255,.22),transparent 38%),radial-gradient(circle at 90% 30%,rgba(16,185,129,.13),transparent 35%)}
         .gym-public-dark-v2 .gym-kicker,.gym-public-dark-v2 .gym-section-kicker{font-size:12px;font-weight:900;letter-spacing:2.2px;background:linear-gradient(90deg,#c78cff 0%,#7ea7ff 52%,#32e6d0 100%);-webkit-background-clip:text;background-clip:text;color:transparent;text-shadow:0 0 24px rgba(112,71,255,.12)}.gym-public-dark-v2 .gym-hero-rule{width:170px;height:4px;border-radius:999px;margin:14px 0 21px;background:linear-gradient(90deg,#8d4dff 0%,#b95cff 42%,#22d9c0 100%);box-shadow:0 0 24px rgba(139,77,255,.48),0 0 34px rgba(34,217,192,.18)}.gym-public-dark-v2 .gym-hero h1{font-size:clamp(48px,7vw,86px);line-height:1.10;margin:0 0 26px;letter-spacing:-4.5px;font-weight:950;overflow:visible;padding-bottom:.18em}.gym-public-dark-v2 .gym-hero h1 .hero-line{display:inline-block;line-height:1.10;padding-bottom:.18em;overflow:visible}.gym-public-dark-v2 .gym-hero h1 .hero-line{display:inline-block}.gym-public-dark-v2 .gym-hero h1 .hero-line-1{color:#f5f2ff;text-shadow:0 0 28px rgba(190,170,255,.16)}.gym-public-dark-v2 .gym-hero h1 .hero-line-2{background:linear-gradient(100deg,#ff6de7 0%,#bd68ff 48%,#8f7bff 100%);-webkit-background-clip:text;background-clip:text;color:transparent}.gym-public-dark-v2 .gym-hero h1 .hero-line-3{background:linear-gradient(100deg,#69ddff 0%,#53cfff 38%,#52e5b0 100%);-webkit-background-clip:text;background-clip:text;color:transparent}.gym-public-dark-v2 .gym-hero p{max-width:650px;color:#d3d8e7;font-size:18px;line-height:1.72;text-shadow:0 2px 18px rgba(0,0,0,.22)}.gym-public-dark-v2 .gym-trust-row{display:flex;flex-wrap:wrap;gap:18px;margin-top:30px;color:#e9edf7;font-size:13px}.gym-public-dark-v2 .gym-trust-row span{display:flex;align-items:center;gap:8px;font-weight:700}.gym-public-dark-v2 .gym-trust-row b{color:#ffffff}.gym-public-dark-v2 .trust-icon{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-style:normal;background:#0d1420;border:1px solid rgba(255,255,255,.14);box-shadow:0 0 24px rgba(112,71,255,.10)}.gym-public-dark-v2 .trust-icon-1{color:#d26cff;border-color:rgba(210,108,255,.65);box-shadow:0 0 22px rgba(210,108,255,.18)}.gym-public-dark-v2 .trust-icon-2{color:#55aaff;border-color:rgba(85,170,255,.65);box-shadow:0 0 22px rgba(85,170,255,.16)}.gym-public-dark-v2 .trust-icon-3{color:#37e0bd;border-color:rgba(55,224,189,.65);box-shadow:0 0 22px rgba(55,224,189,.16)}.gym-public-dark-v2 .gym-hero-visual{position:relative}.gym-public-dark-v2 .gym-hero-visual img{width:100%;height:500px;object-fit:cover;border-radius:28px;border:1px solid rgba(255,255,255,.1);box-shadow:0 30px 90px rgba(0,0,0,.42)}.gym-public-dark-v2 .gym-hero-float{position:absolute;left:-24px;bottom:26px;background:rgba(13,17,27,.9);border:1px solid rgba(255,255,255,.1);padding:16px 19px;border-radius:15px;box-shadow:0 15px 40px rgba(0,0,0,.35)}.gym-public-dark-v2 .gym-hero-float strong,.gym-public-dark-v2 .gym-hero-float span{display:block}.gym-public-dark-v2 .gym-hero-float span{color:#929db0;font-size:12px;margin-top:5px}
         .gym-public-dark-v2 .gym-public-section{padding:78px clamp(20px,7vw,110px)}.gym-public-dark-v2 .gym-about-grid{display:grid;grid-template-columns:1fr 1fr;gap:70px;border-top:1px solid rgba(255,255,255,.07);border-bottom:1px solid rgba(255,255,255,.07)}.gym-public-dark-v2 h2{font-size:clamp(30px,4vw,48px);line-height:1.05;margin:12px 0 0;letter-spacing:-1.5px}.gym-public-dark-v2 .gym-about-grid p{color:#9da8bb;font-size:16px;line-height:1.8;margin:0 0 15px}
@@ -3607,11 +3696,30 @@ function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
       </div>}
       <header className="gym-public-nav">
         <div className="gym-public-brand"><img src={LOGO_URL} alt={gymName} /><div><strong>{gymName}</strong><span>FITNESS • STRENGTH • WELLNESS</span></div></div>
-        <div className="public-contact-actions">
-          {phone && <a className="primary" href={`tel:${phone}`}>Call</a>}
-          {whatsapp && <a href={`https://wa.me/${whatsapp}`} target="_blank" rel="noreferrer">WhatsApp</a>}
-          {email && <a href={`mailto:${email}`}>Email</a>}
-          {instagram && <a href={instagram} target="_blank" rel="noreferrer">Instagram</a>}
+        <div className="public-contact-actions" aria-label="Gym contact links">
+          {phone && (
+            <a className="primary public-contact-icon" href={`tel:${phone}`} aria-label="Call gym" title="Call gym">
+              <Phone size={21} strokeWidth={2.2} />
+            </a>
+          )}
+          {whatsapp && (
+            <a className="public-contact-icon" href={`https://wa.me/${whatsapp}`} target="_blank" rel="noreferrer" aria-label="WhatsApp gym" title="WhatsApp gym">
+              <svg viewBox="0 0 24 24" width="21" height="21" fill="none" aria-hidden="true">
+                <path d="M20.5 11.5a8.45 8.45 0 0 1-12.6 7.36L4 20l1.18-3.78A8.45 8.45 0 1 1 20.5 11.5Z" stroke="currentColor" strokeWidth="1.9"/>
+                <path d="M8.5 8.2c.22-.5.45-.51.82-.51h.38c.18 0 .31.04.4.27l.55 1.35c.08.2.06.35-.06.51l-.42.53c-.11.14-.12.27-.04.42.3.57.77 1.12 1.28 1.53.44.35.96.66 1.56.89.17.07.3.05.41-.08l.57-.68c.13-.15.27-.18.46-.1l1.3.62c.2.1.3.2.29.39-.03.62-.29 1.1-.78 1.32-.4.18-.9.21-1.39.09-1.05-.25-2.35-1.04-3.44-2.02-1.1-.99-1.91-2.18-2.08-3.2-.08-.48-.04-.95.19-1.32Z" fill="currentColor"/>
+              </svg>
+            </a>
+          )}
+          {email && (
+            <a className="public-contact-icon" href={`mailto:${email}`} aria-label="Email gym" title="Email gym">
+              <Mail size={21} strokeWidth={2.2} />
+            </a>
+          )}
+          {instagram && (
+            <a className="public-contact-icon" href={normalizeExternalUrl(instagram)} target="_blank" rel="noreferrer" aria-label="Instagram" title="Instagram">
+              <Instagram size={21} strokeWidth={2.1} />
+            </a>
+          )}
         </div>
       </header>
       {loading && !publicSettings.publicPage ? <div className="public-loading">Loading gym profile…</div> : <>
@@ -4672,6 +4780,8 @@ function PTSessionModal({ trainers, members, onClose, onSave }) {
 function Dashboard({ activeMembers, expiringMembers, overdue, revenue, data, navigate, setModal, markAttendance }) {
   const [fromDate, setFromDate] = useState(today);
   const [toDate, setToDate] = useState(today);
+  const [activityFrom, setActivityFrom] = useState(today);
+  const [activityTo, setActivityTo] = useState(today);
 
   const safeFrom = fromDate || today;
   const safeTo = toDate || safeFrom;
@@ -4735,6 +4845,29 @@ function Dashboard({ activeMembers, expiringMembers, overdue, revenue, data, nav
     ? formatDate(rangeStart)
     : `${formatDate(rangeStart)} – ${formatDate(rangeEnd)}`;
 
+
+  const activityStart = activityFrom <= activityTo ? activityFrom : activityTo;
+  const activityEnd = activityFrom <= activityTo ? activityTo : activityFrom;
+  const activityInRange = (value) => {
+    if (!value) return false;
+    const d = String(value).slice(0, 10);
+    return d >= activityStart && d <= activityEnd;
+  };
+  const activityMembersEnrolled = data.members.filter(m => activityInRange(m.createdAt || m.start || m.joinDate));
+  const activityExpiring = data.members.filter(m => m.expiry && activityInRange(m.expiry))
+    .sort((a,b) => String(a.expiry).localeCompare(String(b.expiry)));
+  const activityExpired = activityExpiring.filter(m => String(m.expiry) < today);
+  const activityPayments = data.payments.filter(p => activityInRange(p.date));
+  const activityCollection = activityPayments.reduce((sum,p) => sum + Number(p.amount || 0), 0);
+  const activityAttendance = data.attendance.filter(a => activityInRange(a.date));
+  const activityLeads = data.leads.filter(l => activityInRange(l.createdAt || l.date || l.followUp || l.lastContact));
+  const activityPT = (data.ptSessions || []).filter(p => activityInRange(p.date));
+  const activityActive = data.members.filter(m => {
+    const joined=String(m.createdAt || m.start || m.joinDate || '').slice(0,10);
+    const expiry=String(m.expiry || '').slice(0,10);
+    return (!joined || joined <= activityEnd) && (!expiry || expiry >= activityEnd);
+  });
+
   return (
     <div className="vibrant-dashboard">
       <div className="vibrant-dashboard-hero">
@@ -4778,11 +4911,48 @@ function Dashboard({ activeMembers, expiringMembers, overdue, revenue, data, nav
         })}
       </section>
 
+      <section className="membership-activity-panel">
+        <div className="membership-activity-head">
+          <div>
+            <div className="eyebrow">MEMBERSHIP CENTER</div>
+            <h2>Membership Activity & Timeline</h2>
+            <p>Track enrollment, expiry, payments, attendance and other activity for any selected period.</p>
+          </div>
+          <div className="membership-activity-range">
+            <label><span>From</span><div className="membership-date-input"><input type="date" value={activityFrom} onChange={e=>setActivityFrom(e.target.value)} /><CalendarDays size={18}/></div></label>
+            <span className="membership-range-arrow">→</span>
+            <label><span>To</span><div className="membership-date-input"><input type="date" value={activityTo} min={activityFrom} onChange={e=>setActivityTo(e.target.value)} /><CalendarDays size={18}/></div></label>
+          </div>
+        </div>
+        <div className="membership-activity-stats">
+          <div className="membership-activity-stat stat-purple"><span>Members enrolled</span><strong>{activityMembersEnrolled.length}</strong><small>Joined in selected period</small></div>
+          <div className="membership-activity-stat stat-orange"><span>Memberships expiring</span><strong>{activityExpiring.length}</strong><small>Expiry falls in period</small></div>
+          <div className="membership-activity-stat stat-red"><span>Expired in period</span><strong>{activityExpired.length}</strong><small>Already crossed expiry</small></div>
+          <div className="membership-activity-stat stat-green"><span>Collection</span><strong>₹{activityCollection.toLocaleString('en-IN',{maximumFractionDigits:2})}</strong><small>Payments in period</small></div>
+          <div className="membership-activity-stat stat-blue"><span>Attendance visits</span><strong>{activityAttendance.length}</strong><small>Check-ins in period</small></div>
+          <div className="membership-activity-stat stat-cyan"><span>Lead activity</span><strong>{activityLeads.length}</strong><small>Lead records in period</small></div>
+          <div className="membership-activity-stat stat-pink"><span>PT sessions</span><strong>{activityPT.length}</strong><small>Sessions in period</small></div>
+          <div className="membership-activity-stat stat-indigo"><span>Active at period end</span><strong>{activityActive.length}</strong><small>Active on {formatDate(activityEnd)}</small></div>
+        </div>
+        <div className="membership-activity-columns">
+          <div className="membership-activity-list-card">
+            <div className="membership-activity-list-head"><div><strong>Expiring memberships</strong><span>{activityExpiring.length} member(s)</span></div><button className="btn btn-secondary btn-sm" onClick={()=>navigate('Members')}>View members</button></div>
+            {activityExpiring.length ? <div className="membership-activity-list">{activityExpiring.slice(0,6).map(member=>{
+              const expiry=String(member.expiry).slice(0,10);
+              const days=Math.ceil((new Date(`${expiry}T00:00:00`)-new Date(`${today}T00:00:00`))/86400000);
+              return <div className="membership-activity-row" key={member.id}><div><strong>{member.name||'Member'}</strong><span>{member.plan||'Membership'} · Expires {formatDate(expiry)}</span></div><b className={days<0?'expired':days<=7?'soon':'upcoming'}>{days<0?'Expired':days===0?'Today':`${days}d left`}</b></div>;
+            })}</div> : <div className="membership-activity-empty">No memberships expire in this period.</div>}
+          </div>
+          <div className="membership-activity-list-card">
+            <div className="membership-activity-list-head"><div><strong>Members enrolled</strong><span>{activityMembersEnrolled.length} new member(s)</span></div><button className="btn btn-secondary btn-sm" onClick={()=>setModal('member')}>Add member</button></div>
+            {activityMembersEnrolled.length ? <div className="membership-activity-list">{activityMembersEnrolled.slice(0,6).map(member=><div className="membership-activity-row" key={member.id}><div><strong>{member.name||'Member'}</strong><span>{member.plan||'Membership'} · Joined {formatDate(member.createdAt||member.start||member.joinDate)}</span></div><b className="enrolled">New</b></div>)}</div> : <div className="membership-activity-empty">No members were enrolled in this period.</div>}
+          </div>
+        </div>
+      </section>
 
     </div>
   );
 }
-
 function MembersPage({ members, query, setQuery, setModal, markAttendance, deleteMember, settings, payments = [] }) {
   const [statusFilter, setStatusFilter] = useState('All');
   const [selectedMember, setSelectedMember] = useState(null);
@@ -4804,6 +4974,56 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
     const referralCount = members.filter((item) => item.referredBy === member.id).length;
     const referralPointsPerClient = Number(settings?.referralPointsPerReferral || 0);
     const referralPoints = referralCount * referralPointsPerClient;
+    const memberMembershipPayments = payments
+      .filter((payment) =>
+        (payment.memberId === member.id || payment.member === member.name) &&
+        String(payment.type || '').toLowerCase() === 'membership'
+      )
+      .sort((a, b) =>
+        String(a.date || '').localeCompare(String(b.date || '')) ||
+        String(a.id || '').localeCompare(String(b.id || ''))
+      );
+
+    const historyValue = (text, key) => {
+      const match = String(text || '').match(new RegExp(`${key}:\\s*([^|]+)`, 'i'));
+      return match ? String(match[1]).trim() : '';
+    };
+
+    const historyPlan = (payment) => {
+      const notes = String(payment.notes || '');
+      const description = String(payment.description || '');
+      const renewal = notes.match(/Membership renewal - ([^|]+)/i);
+      if (renewal?.[1]) return renewal[1].trim();
+      const described = description.match(/^(.+?)\\s+membership$/i);
+      return described?.[1]?.trim() || member.plan || 'Membership';
+    };
+
+    const membershipHistory = memberMembershipPayments.map((payment, index, all) => {
+      const notes = String(payment.notes || '');
+      const nextPayment = all[index + 1] || null;
+      const previousPayment = all[index - 1] || null;
+      const start = historyValue(notes, 'New plan start') || historyValue(notes, 'Start');
+      const expiry = historyValue(notes, 'New expiry') || historyValue(notes, 'Expiry');
+      const previousExpiry = historyValue(notes, 'Previous expiry');
+
+      return {
+        ...payment,
+        historyPlan: historyPlan(payment),
+        historyStart: start,
+        historyExpiry: expiry,
+        previousPlan: previousPayment ? historyPlan(previousPayment) : '',
+        previousExpiry,
+        nextPaymentDate: nextPayment?.date || '',
+        isRenewal: /membership renewal/i.test(notes),
+      };
+    });
+
+    if (membershipHistory.length) {
+      const last = membershipHistory[membershipHistory.length - 1];
+      if (!last.historyStart && last.historyPlan === member.plan) last.historyStart = member.start || '';
+      if (!last.historyExpiry && last.historyPlan === member.plan) last.historyExpiry = member.expiry || '';
+    }
+
 
     const cardStyle = {
       background: 'linear-gradient(180deg,#ffffff 0%,#fbfdff 100%)',
@@ -4841,6 +5061,145 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
         .member-profile-premium .profile-actions .quick-action { min-height:52px;border:1px solid #e7edf2;border-radius:14px;background:#fff;transition:all .2s ease; }
         .member-profile-premium .profile-actions .quick-action:hover { transform:translateX(4px);border-color:#bfe7e2;background:#f7fffd;box-shadow:0 8px 18px rgba(15,118,110,.08); }
         .member-profile-premium .member-notes { margin:0;color:#63748a;font-size:14px;line-height:1.75; }
+
+        /* Package & Membership History — contained, full-width profile section */
+        .member-profile-premium .membership-history-card {
+          grid-column: 1 / -1;
+          width: 100%;
+          min-width: 0;
+          overflow: hidden;
+        }
+        .member-profile-premium .membership-history-summary {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 12px;
+          margin-bottom: 18px;
+        }
+        .member-profile-premium .membership-history-summary > div {
+          min-width: 0;
+          padding: 14px 16px;
+          border: 1px solid #e7edf2;
+          border-radius: 15px;
+          background: #f9fbfc;
+        }
+        .member-profile-premium .membership-history-summary span {
+          display: block;
+          color: #8794a6;
+          font-size: 11px;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: .06em;
+          margin-bottom: 6px;
+        }
+        .member-profile-premium .membership-history-summary strong {
+          display: block;
+          color: #172b46;
+          font-size: 17px;
+          font-weight: 850;
+          overflow-wrap: anywhere;
+        }
+        .member-profile-premium .membership-history-table {
+          width: 100%;
+          max-width: 100%;
+          overflow-x: auto;
+          overflow-y: hidden;
+          border: 1px solid #e7edf2;
+          border-radius: 16px;
+          background: #fff;
+          -webkit-overflow-scrolling: touch;
+        }
+        .member-profile-premium .membership-history-table table {
+          width: 100%;
+          min-width: 920px;
+          border-collapse: separate;
+          border-spacing: 0;
+          table-layout: fixed;
+        }
+        .member-profile-premium .membership-history-table th,
+        .member-profile-premium .membership-history-table td {
+          box-sizing: border-box;
+          overflow-wrap: anywhere;
+        }
+        .member-profile-premium .membership-history-table th {
+          padding: 13px 12px;
+          text-align: left;
+          background: #f7fafc;
+          color: #718096;
+          font-size: 11px;
+          line-height: 1.25;
+          font-weight: 850;
+          text-transform: uppercase;
+          letter-spacing: .055em;
+          border-bottom: 1px solid #e7edf2;
+          vertical-align: middle;
+        }
+        .member-profile-premium .membership-history-table td {
+          padding: 14px 12px;
+          color: #334155;
+          font-size: 13px;
+          line-height: 1.35;
+          vertical-align: middle;
+          border-bottom: 1px solid #edf2f6;
+        }
+        .member-profile-premium .membership-history-table tr:last-child td {
+          border-bottom: 0;
+        }
+        .member-profile-premium .membership-history-table th:nth-child(1),
+        .member-profile-premium .membership-history-table td:nth-child(1) { width: 12%; }
+        .member-profile-premium .membership-history-table th:nth-child(2),
+        .member-profile-premium .membership-history-table td:nth-child(2) { width: 14%; }
+        .member-profile-premium .membership-history-table th:nth-child(3),
+        .member-profile-premium .membership-history-table td:nth-child(3) { width: 13%; }
+        .member-profile-premium .membership-history-table th:nth-child(4),
+        .member-profile-premium .membership-history-table td:nth-child(4) { width: 13%; }
+        .member-profile-premium .membership-history-table th:nth-child(5),
+        .member-profile-premium .membership-history-table td:nth-child(5) { width: 12%; }
+        .member-profile-premium .membership-history-table th:nth-child(6),
+        .member-profile-premium .membership-history-table td:nth-child(6) { width: 12%; }
+        .member-profile-premium .membership-history-table th:nth-child(7),
+        .member-profile-premium .membership-history-table td:nth-child(7) { width: 11%; }
+        .member-profile-premium .membership-history-table th:nth-child(8),
+        .member-profile-premium .membership-history-table td:nth-child(8) { width: 13%; }
+        .member-profile-premium .history-plan {
+          display: block;
+          font-weight: 850;
+          color: #172b46;
+        }
+        .member-profile-premium .history-sub {
+          display: block;
+          margin-top: 4px;
+          color: #8a96a7;
+          font-size: 10px;
+        }
+        .member-profile-premium .history-pill {
+          display: inline-flex;
+          align-items: center;
+          padding: 5px 9px;
+          border-radius: 999px;
+          background: #e9f8f4;
+          color: #10836f;
+          font-size: 10px;
+          font-weight: 850;
+          white-space: nowrap;
+        }
+        .member-profile-premium .history-pill.initial {
+          background: #ece9ff;
+          color: #6048d8;
+        }
+        @media (max-width: 900px) {
+          .member-profile-premium .membership-history-summary {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+        }
+        @media (max-width: 620px) {
+          .member-profile-premium .membership-history-summary {
+            grid-template-columns: 1fr;
+          }
+          .member-profile-premium .membership-history-table table {
+            min-width: 820px;
+          }
+        }
+
         .member-profile-premium .activity-highlight { display:grid;grid-template-columns:1fr 1fr;gap:12px; }
         .member-profile-premium .activity-highlight > div { padding:14px;border-radius:15px;background:#f7fafc;border:1px solid #edf2f6; }
         .member-profile-premium .activity-highlight span { display:block;color:#8996a7;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px; }
@@ -4942,6 +5301,48 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
               <div><span>Paid</span><strong>₹{Number(member.paid || 0).toLocaleString('en-IN')}</strong></div>
               <div><span>Due</span><strong>₹{Number(member.due || 0).toLocaleString('en-IN')}</strong></div>
             </div>
+          </div>
+
+          <div className="profile-card membership-history-card" style={cardStyle}>
+            <PanelHeader title="Package & Membership History" subtitle="Complete recorded membership journey" icon={CalendarDays} />
+
+            <div className="membership-history-summary">
+              <div><span>Current package</span><strong>{member.plan || '—'}</strong></div>
+              <div><span>Current start</span><strong>{formatDate(member.start)}</strong></div>
+              <div><span>Current expiry</span><strong>{formatDate(member.expiry)}</strong></div>
+              <div><span>Recorded payments</span><strong>{memberMembershipPayments.length}</strong></div>
+            </div>
+
+            {membershipHistory.length ? (
+              <div className="membership-history-table">
+                <table>
+                  <thead><tr>
+                    <th>Event</th><th>Package</th><th>Previous plan</th><th>Previous expiry</th>
+                    <th>Plan started</th><th>Plan expires</th><th>Payment</th><th>Next recorded payment</th>
+                  </tr></thead>
+                  <tbody>
+                    {membershipHistory.map((item, index) => (
+                      <tr key={item.id || `${item.date}-${index}`}>
+                        <td>
+                          <span className={`history-pill ${item.isRenewal ? '' : 'initial'}`}>{item.isRenewal ? 'Renewal' : 'Joined'}</span>
+                          <span className="history-sub">{formatDate(item.date)}</span>
+                        </td>
+                        <td><strong className="history-plan">{item.historyPlan}</strong></td>
+                        <td>{item.previousPlan || '—'}</td>
+                        <td>{item.previousExpiry ? formatDate(item.previousExpiry) : '—'}</td>
+                        <td>{item.historyStart ? formatDate(item.historyStart) : 'Not recorded'}</td>
+                        <td>{item.historyExpiry ? formatDate(item.historyExpiry) : 'Not recorded'}</td>
+                        <td><strong>₹{Number(item.amount || 0).toLocaleString('en-IN')}</strong><span className="history-sub">{item.mode || 'Payment'}</span></td>
+                        <td>{item.nextPaymentDate ? formatDate(item.nextPaymentDate) : 'No later payment recorded'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="membership-activity-empty">No membership payment history has been recorded for this member yet.</div>
+            )}
+
           </div>
 
           <div className="profile-card" style={cardStyle}>
@@ -7161,15 +7562,19 @@ function RenewalModal({ member, onClose, onRenew, planPrices }) {
   if (!member) return null;
 
   const defaultPlan = MEMBERSHIP_PLANS.some((p) => p.name === member.plan) ? member.plan : 'Monthly';
+  const currentDays = getDaysRemaining(member.expiry);
+  const defaultPackageStart = currentDays >= 0 && member.expiry ? member.expiry : today;
+
   const [form, setForm] = useState({
     plan: defaultPlan,
     amount: Number(member.amount || planPrices[defaultPlan] || 0),
     paid: 0,
+    paymentDate: today,
+    packageStartDate: defaultPackageStart,
   });
 
   const selectedPlan = MEMBERSHIP_PLANS.find((plan) => plan.name === form.plan);
-  const currentDays = getDaysRemaining(member.expiry);
-  const renewalStart = currentDays >= 0 && member.expiry ? member.expiry : today;
+  const renewalStart = form.packageStartDate || defaultPackageStart;
   const previewExpiry = selectedPlan ? addMonthsToDate(renewalStart, selectedPlan.months) : '';
   const newDue = Math.max(0, Number(form.amount || 0) - Number(form.paid || 0));
 
@@ -7192,13 +7597,22 @@ function RenewalModal({ member, onClose, onRenew, planPrices }) {
       <FormField label="Amount paid"><input type="number" min="0" value={form.paid} onChange={(e) => setForm({ ...form, paid:e.target.value })} /></FormField>
     </div>
 
+    <div className="form-grid two renewal-date-grid">
+      <FormField label="Date of payment">
+        <input type="date" value={form.paymentDate} onChange={(e) => setForm({ ...form, paymentDate:e.target.value })} />
+      </FormField>
+      <FormField label="Date of package start">
+        <input type="date" value={form.packageStartDate} onChange={(e) => setForm({ ...form, packageStartDate:e.target.value })} />
+      </FormField>
+    </div>
+
     <div className="renewal-preview">
       <div><span>Renewal starts</span><strong>{formatDate(renewalStart)}</strong></div>
       <div><span>New expiry</span><strong>{formatDate(previewExpiry)}</strong></div>
       <div><span>New amount due</span><strong>₹{newDue.toLocaleString('en-IN')}</strong></div>
     </div>
 
-    <ModalActions onClose={onClose} disabled={!form.plan} onSave={() => onRenew({ ...form, amount: Number(form.amount || 0), paid: Number(form.paid || 0) })} saveLabel="Renew membership" />
+    <ModalActions onClose={onClose} disabled={!form.plan || !form.paymentDate || !form.packageStartDate} onSave={() => onRenew({ ...form, amount: Number(form.amount || 0), paid: Number(form.paid || 0) })} saveLabel="Renew membership" />
   </Modal>;
 }
 
@@ -8690,7 +9104,7 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     gymLongitude: current.gymLongitude || '',
     publicPage: {
       whatsappNumber: current.publicPage?.whatsappNumber || '', instagramUrl: current.publicPage?.instagramUrl || '', facebookUrl: current.publicPage?.facebookUrl || '', websiteUrl: current.publicPage?.websiteUrl || '',
-      googleRating: current.publicPage?.googleRating || '5.0', googleReviewCount: current.publicPage?.googleReviewCount || '95', googleMapsUrl: current.publicPage?.googleMapsUrl || '', googleSearchUrl: current.publicPage?.googleSearchUrl || 'https://www.google.com/search?q=preface+fitness', googlePlaceName: current.publicPage?.googlePlaceName || current.gymName || 'Preface Fitness', googlePhone: current.publicPage?.googlePhone || '093692 79056', googleAddress: current.publicPage?.googleAddress || current.gymAddress || 'Preface Fitness, Nadan Mahal Rd. above Hdfc Bank, Yahiyaganj, Lucknow, Uttar Pradesh 226003', hoursText: current.publicPage?.hoursText || 'Mon-Sun · 6 AM - 11 PM',
+      googleRating: current.publicPage?.googleRating || '5.0', googleReviewCount: (current.publicPage?.googleReviewCount && String(current.publicPage.googleReviewCount) !== '2') ? current.publicPage.googleReviewCount : '94', googleMapsUrl: current.publicPage?.googleMapsUrl || '', googleSearchUrl: current.publicPage?.googleSearchUrl || 'https://www.google.com/search?q=preface+fitness', googlePlaceName: current.publicPage?.googlePlaceName || current.gymName || 'Preface Fitness', googlePhone: current.publicPage?.googlePhone || '093692 79056', googleAddress: current.publicPage?.googleAddress || current.gymAddress || 'Preface Fitness, Nadan Mahal Rd. above Hdfc Bank, Yahiyaganj, Lucknow, Uttar Pradesh 226003', hoursText: current.publicPage?.hoursText || 'Mon-Sun · 6 AM - 11 PM',
       trainers: Array.isArray(current.publicPage?.trainers) ? current.publicPage.trainers : [],
       packages: Array.isArray(current.publicPage?.packages) && current.publicPage.packages.length ? current.publicPage.packages : MEMBERSHIP_PLANS.map((plan) => ({ name: plan.name, months: plan.months, price: Number(current.membershipPrices?.[plan.name] || plan.price), description: plan.description })),
       reviews: Array.isArray(current.publicPage?.reviews) ? current.publicPage.reviews : [],
@@ -8727,7 +9141,7 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
       gymLongitude: current.gymLongitude || '',
       publicPage: {
         whatsappNumber: current.publicPage?.whatsappNumber || '', instagramUrl: current.publicPage?.instagramUrl || '', facebookUrl: current.publicPage?.facebookUrl || '', websiteUrl: current.publicPage?.websiteUrl || '',
-        googleRating: current.publicPage?.googleRating || '5.0', googleReviewCount: current.publicPage?.googleReviewCount || '95', googleMapsUrl: current.publicPage?.googleMapsUrl || '', googleSearchUrl: current.publicPage?.googleSearchUrl || 'https://www.google.com/search?q=preface+fitness', googlePlaceName: current.publicPage?.googlePlaceName || current.gymName || 'Preface Fitness', googlePhone: current.publicPage?.googlePhone || '093692 79056', googleAddress: current.publicPage?.googleAddress || current.gymAddress || 'Preface Fitness, Nadan Mahal Rd. above Hdfc Bank, Yahiyaganj, Lucknow, Uttar Pradesh 226003', hoursText: current.publicPage?.hoursText || 'Mon-Sun · 6 AM - 11 PM',
+        googleRating: current.publicPage?.googleRating || '5.0', googleReviewCount: (current.publicPage?.googleReviewCount && String(current.publicPage.googleReviewCount) !== '2') ? current.publicPage.googleReviewCount : '94', googleMapsUrl: current.publicPage?.googleMapsUrl || '', googleSearchUrl: current.publicPage?.googleSearchUrl || 'https://www.google.com/search?q=preface+fitness', googlePlaceName: current.publicPage?.googlePlaceName || current.gymName || 'Preface Fitness', googlePhone: current.publicPage?.googlePhone || '093692 79056', googleAddress: current.publicPage?.googleAddress || current.gymAddress || 'Preface Fitness, Nadan Mahal Rd. above Hdfc Bank, Yahiyaganj, Lucknow, Uttar Pradesh 226003', hoursText: current.publicPage?.hoursText || 'Mon-Sun · 6 AM - 11 PM',
         trainers: Array.isArray(current.publicPage?.trainers) ? current.publicPage.trainers : [],
         packages: Array.isArray(current.publicPage?.packages) && current.publicPage.packages.length ? current.publicPage.packages : MEMBERSHIP_PLANS.map((plan) => ({ name: plan.name, months: plan.months, price: Number(current.membershipPrices?.[plan.name] || plan.price), description: plan.description })),
         reviews: Array.isArray(current.publicPage?.reviews) ? current.publicPage.reviews : [],
@@ -9184,7 +9598,7 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
           <div className="form-section-title">Google business display</div>
           <div className="form-grid three">
             <FormField label="Google rating"><input value={form.publicPage?.googleRating || ''} onChange={(e) => updatePublicPage('googleRating', e.target.value)} placeholder="5.0" /></FormField>
-            <FormField label="Google review count"><input value={form.publicPage?.googleReviewCount || ''} onChange={(e) => updatePublicPage('googleReviewCount', e.target.value)} placeholder="95" /></FormField>
+            <FormField label="Google review count"><input value={form.publicPage?.googleReviewCount || ''} onChange={(e) => updatePublicPage('googleReviewCount', e.target.value)} placeholder="94" /></FormField>
             <FormField label="Google phone"><input value={form.publicPage?.googlePhone || ''} onChange={(e) => updatePublicPage('googlePhone', e.target.value)} placeholder="Google listing phone" /></FormField>
             <FormField label="Business name"><input value={form.publicPage?.googlePlaceName || ''} onChange={(e) => updatePublicPage('googlePlaceName', e.target.value)} placeholder="Preface Fitness" /></FormField>
           </div>
