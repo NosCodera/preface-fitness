@@ -3432,7 +3432,7 @@ function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
     'personal training': 'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?auto=format&fit=crop&w=1000&q=85',
     'functional training': 'https://images.unsplash.com/photo-1579758629938-03607ccdbaba?auto=format&fit=crop&w=1000&q=85',
     'locker & changing facilities': 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=1000&q=85',
-    'member progress tracking': 'https://images.unsplash.com/photo-1599058917212-d750089860fc?auto=format&fit=crop&w=1000&q=85',
+    'member progress tracking': 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?auto=format&fit=crop&w=1000&q=85',
     'diet & nutrition guidance': 'https://images.unsplash.com/photo-1490645935967-10de6ba17061?auto=format&fit=crop&w=1000&q=85',
   };
 
