@@ -105,7 +105,22 @@ function cleanMemberNotes(notes) {
 }
 function encodeMemberNotes(notes, meta = {}) {
   const clean = String(notes || '').trim();
-  const payload = JSON.stringify({ medicalConditions: Array.isArray(meta.medicalConditions) ? meta.medicalConditions : [], medicalOther: String(meta.medicalOther || ''), surgeryDetails: String(meta.surgeryDetails || ''), additionalMedicalNotes: String(meta.additionalMedicalNotes || ''), referralOther: String(meta.referralOther || '') });
+  const payload = JSON.stringify({
+    medicalConditions: Array.isArray(meta.medicalConditions) ? meta.medicalConditions : [],
+    medicalOther: String(meta.medicalOther || ''),
+    surgeryDetails: String(meta.surgeryDetails || ''),
+    additionalMedicalNotes: String(meta.additionalMedicalNotes || ''),
+    referralOther: String(meta.referralOther || ''),
+    chest: String(meta.chest ?? ''),
+    shoulder: String(meta.shoulder ?? ''),
+    biceps: String(meta.biceps ?? ''),
+    forearms: String(meta.forearms ?? ''),
+    waist: String(meta.waist ?? ''),
+    hips: String(meta.hips ?? ''),
+    thighs: String(meta.thighs ?? ''),
+    calves: String(meta.calves ?? ''),
+    neck: String(meta.neck ?? '')
+  });
   return `${clean}${clean ? '\n\n' : ''}${MEMBER_META_MARKER}${payload}-->`;
 }
 
@@ -484,6 +499,16 @@ const VIBRANT_THEME_CSS = `
   @keyframes pfFadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
   @media (max-width:1200px) { .vibrant-tile-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important}.dashboard-filter-card{align-items:flex-start;flex-direction:column}.vibrant-dashboard-lower{grid-template-columns:1fr}.vibrant-app-shell .content{padding:24px 20px 40px!important} }
   .vibrant-app-shell .backdrop { display:none !important; }
+
+  .trainer-profile-modal { width:min(1120px,100%) !important; }
+  @media(max-width:760px) {
+    .trainer-profile-modal > div { padding:20px 16px !important; }
+    .trainer-profile-modal > div > div:nth-child(2) { grid-template-columns:1fr !important; gap:16px !important; }
+    .trainer-profile-modal > div > div:nth-child(2) > div:first-child { width:190px !important; height:190px !important; }
+    .trainer-profile-modal > div > div:nth-child(3) { grid-template-columns:1fr !important; gap:18px !important; }
+    .trainer-profile-modal > div > div:nth-child(5) { grid-template-columns:1fr !important; }
+  }
+
   @media (max-width:1100px) { .vibrant-app-shell .top-navigation-scroll{grid-template-columns:repeat(5,minmax(120px,1fr))!important}.vibrant-app-shell .sidebar-compact{position:fixed!important;left:0!important;top:0;transition:transform .25s ease,opacity .25s ease;width:205px!important;min-width:205px!important}.vibrant-app-shell .sidebar-compact.collapsed{left:0!important;transform:translateX(-225px);width:205px!important;min-width:205px!important;opacity:1!important;padding:18px 12px!important;pointer-events:none!important}.vibrant-app-shell .sidebar-compact.collapsed > *{visibility:visible!important}.vibrant-app-shell .sidebar-compact.open{left:0!important;transform:translateX(0)}.vibrant-app-shell .main{width:100%!important}.vibrant-app-shell .backdrop{display:block!important;position:fixed!important;inset:0!important;z-index:79!important;background:rgba(11,15,38,.38)!important;border:0!important}.top-navigation-scroll{margin-left:-4px;margin-right:-4px}.vibrant-dashboard-hero{align-items:flex-start;flex-direction:column}.vibrant-dashboard-hero h1{font-size:31px!important}.vibrant-tile-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.vibrant-stat-tile{min-height:135px}.topbar-primary-row{min-height:64px!important}.vibrant-app-shell .content{padding:20px 14px 34px!important} }
   @media (max-width:560px) { .vibrant-app-shell .top-navigation-scroll{grid-template-columns:repeat(2,minmax(0,1fr))!important}.vibrant-app-shell .vibrant-collapsed-brand span{display:none!important}.vibrant-app-shell .menu-btn{width:42px!important;height:42px!important;flex-basis:42px!important} body{font-size:16px!important}.topbar{padding:0 12px!important}.top-navigation-item{font-size:13px!important;padding:0 11px!important}.vibrant-tile-grid{grid-template-columns:1fr!important}.vibrant-stat-copy strong{font-size:28px!important}.vibrant-dashboard-hero h1{font-size:28px!important}.dashboard-date-controls{width:100%}.date-input-wrap input{width:100%}.dashboard-date-controls label{flex:1;min-width:0}.dashboard-filter-btn{width:100%;justify-content:center}.vibrant-quick-grid{grid-template-columns:1fr 1fr}.vibrant-admin-chip>div:not(.avatar){display:none} }
 
@@ -2130,42 +2155,42 @@ function App() {
         setData((current) => ({
           ...current,
           gym: cloud.gym || current.gym,
-          // Only replace a local collection when the cloud actually has
-          // records. This prevents a newly-created/empty cloud database
-          // from wiping the existing local browser data.
-          membershipPlans: cloud.membershipPlans?.length
+          // Supabase is the source of truth. An empty cloud table must stay
+          // empty in the UI; do not resurrect stale browser-only records.
+          // Missing properties still fall back for compatibility, but [] is authoritative.
+          membershipPlans: Array.isArray(cloud.membershipPlans)
             ? cloud.membershipPlans
-            : current.membershipPlans,
-          members: cloud.members?.length
+            : (current.membershipPlans || []),
+          members: Array.isArray(cloud.members)
             ? cloud.members
-            : current.members,
-          leads: cloud.leads?.length
+            : (current.members || []),
+          leads: Array.isArray(cloud.leads)
             ? cloud.leads
-            : current.leads,
-          payments: cloud.payments?.length
+            : (current.leads || []),
+          payments: Array.isArray(cloud.payments)
             ? cloud.payments
-            : current.payments,
-          attendance: cloud.attendance?.length
+            : (current.payments || []),
+          attendance: Array.isArray(cloud.attendance)
             ? cloud.attendance
-            : current.attendance,
-          trainers: cloud.trainers?.length
+            : (current.attendance || []),
+          trainers: Array.isArray(cloud.trainers)
             ? cloud.trainers
-            : current.trainers,
-          ptSessions: cloud.ptSessions?.length
+            : (current.trainers || []),
+          ptSessions: Array.isArray(cloud.ptSessions)
             ? cloud.ptSessions
-            : current.ptSessions,
-          progressRecords: cloud.progressRecords?.length
+            : (current.ptSessions || []),
+          progressRecords: Array.isArray(cloud.progressRecords)
             ? cloud.progressRecords
-            : current.progressRecords,
-          workoutPlans: cloud.workoutPlans?.length
+            : (current.progressRecords || []),
+          workoutPlans: Array.isArray(cloud.workoutPlans)
             ? cloud.workoutPlans
-            : current.workoutPlans,
-          dietPlans: cloud.dietPlans?.length
+            : (current.workoutPlans || []),
+          dietPlans: Array.isArray(cloud.dietPlans)
             ? cloud.dietPlans
-            : current.dietPlans,
-          communicationLogs: cloud.communicationLogs?.length
+            : (current.dietPlans || []),
+          communicationLogs: Array.isArray(cloud.communicationLogs)
             ? cloud.communicationLogs
-            : current.communicationLogs,
+            : (current.communicationLogs || []),
           // Website enquiries are maintained separately from Customer Feedback.
           feedbacks: Array.isArray(cloud.feedbacks)
             ? cloud.feedbacks
@@ -2506,13 +2531,56 @@ function App() {
     const nextDue = Math.max(0, currentDue - paidAgainstDue);
 
     try {
+      // Resolve the authoritative Supabase member UUID before inserting a payment.
+      // UI IDs/cloudIds may be stale for legacy or imported members, so verify by
+      // UUID first, then member code, then exact phone + name within visible RLS rows.
+      let dbMemberId = null;
+      const { data: memberByUuid, error: memberUuidError } = await supabase
+        .from('members')
+        .select('id')
+        .eq('id', member.cloudId)
+        .maybeSingle();
+
+      if (!memberUuidError && memberByUuid?.id) {
+        dbMemberId = memberByUuid.id;
+      }
+
+      if (!dbMemberId) {
+        const { data: memberByCode, error: memberCodeError } = await supabase
+          .from('members')
+          .select('id, member_code, name, phone')
+          .eq('member_code', String(member.id))
+          .maybeSingle();
+
+        if (memberCodeError) throw memberCodeError;
+        dbMemberId = memberByCode?.id || null;
+      }
+
+      if (!dbMemberId && member.phone) {
+        const { data: matchingMembers, error: phoneLookupError } = await supabase
+          .from('members')
+          .select('id, member_code, name, phone')
+          .eq('phone', String(member.phone).trim());
+
+        if (phoneLookupError) throw phoneLookupError;
+
+        const exactMatch = (matchingMembers || []).find((row) =>
+          String(row.name || '').trim().toLowerCase() === String(member.name || '').trim().toLowerCase()
+        );
+        dbMemberId = exactMatch?.id || null;
+      }
+
+      if (!dbMemberId) {
+        throw new Error(`Could not match ${member.name} (${member.id}) to a saved Supabase member. Refresh the app data; if the member is missing from Supabase, add/import the member first.`);
+      }
+
       const gstApplicable = payment.gstMode === 'gst';
-      const invoiceAmount = payment.type === 'Membership' ? Number(member.amount || amount) : amount;
+      const invoiceAmount = amount; // Invoice only the amount actually received in this transaction.
       const gst = calculateGstBreakdown(invoiceAmount, gstApplicable ? Number(payment.gstRate || data.settings?.defaultGstRate || 5) : 0);
       const invoiceNumber = `${data.settings?.invoicePrefix || 'PF-INV'}-${paymentId}`;
 
       await insertRecord('payments', {
-        member_id: member.cloudId,
+        member_id: dbMemberId,
         legacy_id: paymentId,
         amount,
         payment_type: payment.type || 'Membership',
@@ -2532,7 +2600,7 @@ function App() {
       });
 
       if (payment.type === 'Membership') {
-        await updateRecord('members', member.cloudId, {
+        await updateRecord('members', dbMemberId, {
           paid_amount: nextPaid,
           due_amount: nextDue,
         });
@@ -2859,6 +2927,8 @@ function App() {
         status: clean.status || 'Active',
         monthly_salary: Number(clean.monthlySalary || 0),
         notes: clean.notes || '',
+        tier: clean.tier || 'Silver',
+        pt_pricing: clean.ptPricing || {},
       });
 
       const saved = { ...clean, cloudId: row.id };
@@ -2896,6 +2966,8 @@ function App() {
         status: clean.status || 'Active',
         monthly_salary: Number(clean.monthlySalary || 0),
         notes: clean.notes || '',
+        tier: clean.tier || 'Silver',
+        pt_pricing: clean.ptPricing || {},
       });
 
       setData((d) => ({
@@ -2933,96 +3005,40 @@ function App() {
   const addPTSession = async (session) => {
     const member = (data.members || []).find((item) => item.id === session.memberId);
     let trainer = (data.trainers || []).find((item) => item.id === session.trainerId);
-
-    if (!member?.cloudId) {
-      setToast('Please select a Supabase-linked member');
-      return;
-    }
-    if (!trainer) {
-      setToast('Please select a trainer');
-      return;
-    }
-
-    const clean = {
-      ...session,
-      id: `PT-${Date.now()}`,
-      duration: Number(session.duration || 60),
-      fee: Number(session.fee || 0),
-      status: session.status || 'Scheduled',
-      date: session.date || today,
-    };
-
-    const startTime = timeTo24Hour(clean.time) || '19:00';
-    const endTime = addMinutesToTime(clean.time, clean.duration) || startTime;
-
+    if (!member?.cloudId) { setToast('Please select a Supabase-linked member'); return; }
+    if (!trainer) { setToast('Please select a trainer'); return; }
+    const planName = session.planName || 'Monthly';
+    const plan = session.planConfig || {};
+    const totalSessions = Math.max(1, Number(plan.sessions || 22));
+    const validityDays = Math.max(1, Number(plan.validityDays || 30));
+    const startDate = session.date || today;
+    const expiry = new Date(`${startDate}T12:00:00`);
+    expiry.setDate(expiry.getDate() + validityDays - 1);
+    const expiryDate = expiry.toISOString().slice(0, 10);
+    const clean = { ...session, id: `PT-${Date.now()}`, planName, sessionsTotal: totalSessions, sessionsCompleted: 0, validityDays, expiryDate, fee: Number(session.fee || 0), status: 'Scheduled', date: startDate, type: 'Personal Training' };
     try {
-      // Older locally-created trainers may not have a cloudId yet.
-      // Promote that trainer to Supabase automatically before creating the PT session.
       if (!trainer.cloudId) {
-        const trainerRow = await insertRecord('trainers', {
-          legacy_id: trainer.id || `TR-${Date.now()}`,
-          name: trainer.name || '',
-          phone: trainer.phone || '',
-          specialization: trainer.specialization || '',
-          experience: Number(trainer.experience || 0),
-          status: trainer.status || 'Active',
-          monthly_salary: Number(trainer.monthlySalary || 0),
-          notes: trainer.notes || '',
-        });
+        const trainerRow = await insertRecord('trainers', { legacy_id: trainer.id || `TR-${Date.now()}`, name: trainer.name || '', phone: trainer.phone || '', specialization: trainer.specialization || '', experience: Number(trainer.experience || 0), status: trainer.status || 'Active', monthly_salary: Number(trainer.monthlySalary || 0), notes: trainer.notes || '', tier: trainer.tier || 'Silver', pt_pricing: trainer.ptPricing || {} });
         trainer = { ...trainer, cloudId: trainerRow.id };
-        setData((d) => ({
-          ...d,
-          trainers: (d.trainers || []).map((item) => item.id === trainer.id ? trainer : item),
-        }));
+        setData((d) => ({ ...d, trainers: (d.trainers || []).map((item) => item.id === trainer.id ? trainer : item) }));
       }
-
-      const row = await insertRecord('pt_sessions', {
-        legacy_id: clean.id,
-        member_id: member.cloudId,
-        trainer_id: trainer.cloudId,
-        session_date: clean.date,
-        start_time: startTime,
-        end_time: endTime,
-        duration_minutes: clean.duration,
-        session_type: clean.type || 'Personal Training',
-        status: clean.status || 'Scheduled',
-        amount: Number(clean.fee || 0),
-        notes: clean.notes || '',
-      });
-
-      const saved = { ...clean, cloudId: row.id, endTime };
-      setData((d) => ({
-        ...d,
-        ptSessions: [saved, ...(d.ptSessions || [])],
-      }));
-      setModal(null);
-      setToast('PT session scheduled successfully');
-    } catch (error) {
-      console.error('Supabase PT session insert failed:', error);
-      setToast(error?.message || 'Unable to schedule PT session');
-    }
+      const row = await insertRecord('pt_sessions', { legacy_id: clean.id, member_id: member.cloudId, trainer_id: trainer.cloudId, session_date: clean.date, start_time: null, end_time: null, duration_minutes: null, session_type: planName, status: clean.status, amount: clean.fee, notes: clean.notes || '', plan_name: planName, sessions_total: totalSessions, sessions_completed: 0, validity_days: validityDays, expiry_date: expiryDate });
+      const saved = { ...clean, cloudId: row.id, trainer: trainer.name, member: member.name };
+      setData((d) => ({ ...d, ptSessions: [saved, ...(d.ptSessions || [])] }));
+      setModal(null); setToast('PT package assigned successfully');
+    } catch (error) { console.error('Supabase PT package insert failed:', error); setToast(error?.message || 'Unable to assign PT package'); }
   };
 
   const updatePTSessionStatus = async (id, status) => {
     const session = (data.ptSessions || []).find((item) => item.id === id);
-    if (!session?.cloudId) {
-      setToast('This PT session is not linked to Supabase yet');
-      return;
-    }
-
+    if (!session?.cloudId) { setToast('This PT package is not linked to Supabase yet'); return; }
+    const nextCount = status === 'Completed' ? Math.min(Number(session.sessionsTotal || 1), Number(session.sessionsCompleted || 0) + 1) : Number(session.sessionsCompleted || 0);
+    const nextStatus = status === 'Completed' && nextCount >= Number(session.sessionsTotal || 1) ? 'Completed' : status === 'Completed' ? 'Scheduled' : status;
     try {
-      await updateRecord('pt_sessions', session.cloudId, { status });
-      setData((d) => ({
-        ...d,
-        ptSessions: (d.ptSessions || []).map((item) =>
-          item.id === id ? { ...item, status } : item
-        ),
-      }));
-      setToast(`Session marked ${status.toLowerCase()}`);
-    } catch (error) {
-      console.error('Supabase PT status update failed:', error);
-      setToast(error?.message || 'Unable to update PT session');
-    }
+      await updateRecord('pt_sessions', session.cloudId, { status: nextStatus, sessions_completed: nextCount });
+      setData((d) => ({ ...d, ptSessions: (d.ptSessions || []).map((item) => item.id === id ? { ...item, status: nextStatus, sessionsCompleted: nextCount } : item) }));
+      setToast(status === 'Completed' ? `Session recorded · ${nextCount}/${session.sessionsTotal || 1} used` : `Package marked ${status.toLowerCase()}`);
+    } catch (error) { console.error('Supabase PT package update failed:', error); setToast(error?.message || 'Unable to update PT package'); }
   };
 
   const deletePTSession = async (id) => {
@@ -3923,7 +3939,17 @@ function App() {
       {(modal === 'workoutPlan' || modal?.type === 'editWorkoutPlan') && <WorkoutPlanModal members={data.members} plan={modal?.type === 'editWorkoutPlan' ? modal.plan : null} onClose={() => setModal(null)} onSave={modal?.type === 'editWorkoutPlan' ? updateWorkoutPlan : createWorkoutPlan} />}
       {(modal === 'dietPlan' || modal?.type === 'editDietPlan') && <DietPlanModal members={data.members} plan={modal?.type === 'editDietPlan' ? modal.plan : null} onClose={() => setModal(null)} onSave={modal?.type === 'editDietPlan' ? updateDietPlan : createDietPlan} />}
       {modal === 'feedback' && <FeedbackModal members={data.members || []} onClose={() => setModal(null)} onSave={addFeedback} />}
-      {modal?.type === 'invoiceOptions' && <InvoiceOptionsModal member={modal.member} payment={modal.payment} settings={data.settings || {}} onClose={() => setModal(null)} onPrint={(mode, rate) => { const selectedPayment = { ...(modal.payment || {}), gstApplicable: mode === 'gst', gstRate: Number(rate || 0) }; printPaymentInvoice(modal.member, selectedPayment, data.settings || {}, mode); setModal(null); }} />}
+      {modal?.type === 'invoiceOptions' && <InvoiceOptionsModal member={modal.member} payment={modal.payment} payments={data.payments || []} mode={modal.source === 'member' ? 'member' : 'single'} settings={data.settings || {}} onClose={() => setModal(null)} onPrint={(mode, rate, selected) => {
+        try {
+          const selectedPayment = { ...(selected || modal.payment || {}), gstApplicable: mode === 'gst', gstRate: Number(rate || 0) };
+          const result = printPaymentInvoice(modal.member, selectedPayment, data.settings || {}, mode);
+          if (result === false) throw new Error('The browser could not open the invoice print view.');
+          setModal(null);
+        } catch (error) {
+          console.error('Invoice generation failed:', error);
+          window.alert(`Invoice could not be generated: ${error?.message || 'Unknown error'}. Please check the browser Console.`);
+        }
+      }} />}
       {modal === 'excelImportPreview' && excelImportPreview && (
         <div className="modal-backdrop" onClick={() => !excelImportBusy && (setModal(null), setExcelImportPreview(null))}>
           <div className="modal-card" onClick={(event) => event.stopPropagation()} style={{width:'min(1100px,96vw)',maxHeight:'88vh',overflow:'auto'}}>
@@ -4975,6 +5001,24 @@ function TrainersPTPage({
   const [tab, setTab] = useState('sessions');
   const [search, setSearch] = useState('');
   const [trainerFilter, setTrainerFilter] = useState('All');
+  const [profileTrainer, setProfileTrainer] = useState(null);
+  const tierStyle = (tier) => {
+    const styles = {
+      Silver: { background: 'linear-gradient(135deg,#f8fafc,#cbd5e1)', color: '#334155', border: '#94a3b8' },
+      Gold: { background: 'linear-gradient(135deg,#fff4bf,#e9b949)', color: '#754c00', border: '#d4a72c' },
+      Platinum: { background: 'linear-gradient(135deg,#effcff,#8ed0dc)', color: '#155e75', border: '#67b9c9' },
+    };
+    const selected = styles[tier] || styles.Silver;
+    return {
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+      padding: '8px 13px', minHeight: 36, borderRadius: '10px 10px 14px 14px',
+      fontWeight: 900, fontSize: 13, letterSpacing: '.2px',
+      background: selected.background, color: selected.color,
+      border: `1px solid ${selected.border}`,
+      boxShadow: '0 4px 10px rgba(31,41,55,.15)',
+      textShadow: '0 1px 0 rgba(255,255,255,.55)',
+    };
+  };
 
   const todaySessions = sessions.filter((session) => session.date === today);
   const completed = sessions.filter((session) => session.status === 'Completed').length;
@@ -5089,11 +5133,11 @@ function TrainersPTPage({
               <table>
                 <thead>
                   <tr>
-                    <th>Date / Time</th>
+                    <th>Package start</th>
                     <th>Member</th>
                     <th>Trainer</th>
-                    <th>Type</th>
-                    <th>Duration</th>
+                    <th>Plan</th>
+                    <th>Sessions</th>
                     <th>Fee</th>
                     <th>Status</th>
                     <th>Actions</th>
@@ -5108,7 +5152,7 @@ function TrainersPTPage({
                       <tr key={session.id}>
                         <td>
                           <strong>{formatDate(session.date)}</strong>
-                          <div style={{ color: '#8a959f', fontSize: '12px' }}>{session.time}</div>
+                          <div style={{ color: '#8a959f', fontSize: '12px' }}>Expires {formatDate(session.expiryDate || session.date)}</div>
                         </td>
                         <td>
                           <div className="member-cell">
@@ -5120,8 +5164,8 @@ function TrainersPTPage({
                           </div>
                         </td>
                         <td>{trainer?.name || '—'}</td>
-                        <td>{session.type}</td>
-                        <td>{session.duration} min</td>
+                        <td>{session.planName || session.type || 'Monthly'}</td>
+                        <td>{Number(session.sessionsCompleted || 0)} / {Number(session.sessionsTotal || 1)} used <div style={{fontSize:12,color:"#8792a2"}}>{Math.max(0,Number(session.sessionsTotal || 1)-Number(session.sessionsCompleted || 0))} remaining</div></td>
                         <td>₹{Number(session.fee || 0).toLocaleString('en-IN')}</td>
                         <td><StatusBadge status={session.status} /></td>
                         <td>
@@ -5190,10 +5234,14 @@ function TrainersPTPage({
                     <tr key={trainer.id}>
                       <td>
                         <div className="member-cell">
-                          <div className="avatar soft">{initials(trainer.name)}</div>
+                          <div className="avatar soft" style={{ width: 46, height: 46, minWidth: 46, overflow: 'hidden', padding: 0, borderRadius: 14 }}>
+                            {(trainer.photo || trainer.ptPricing?._trainerPhoto) ? (
+                              <img src={trainer.photo || trainer.ptPricing?._trainerPhoto} alt={trainer.name || 'Trainer'} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                            ) : initials(trainer.name)}
+                          </div>
                           <div>
-                            <strong>{trainer.name}</strong>
-                            <span>{trainer.phone || 'No phone'}</span>
+                            <button type="button" onClick={() => setProfileTrainer(trainer)} style={{border:0,background:"transparent",padding:0,fontWeight:800,color:"#18243b",cursor:"pointer",textAlign:"left"}}>{trainer.name}</button>
+                            <span>{trainer.phone || 'No phone'} · <span style={tierStyle(trainer.tier || 'Silver')}>{trainer.tier || 'Silver'} ✦</span></span>
                           </div>
                         </div>
                       </td>
@@ -5232,6 +5280,76 @@ function TrainersPTPage({
           </div>
         )}
       </section>
+      {profileTrainer && <div className="modal-backdrop" onClick={() => setProfileTrainer(null)}>
+        <div className="modal modal-wide trainer-profile-modal" onClick={(e) => e.stopPropagation()} style={{ width: 'min(1120px, 100%)', maxWidth: 1120, borderRadius: 26, overflow: 'hidden', background: 'linear-gradient(145deg,#ffffff 0%,#fcfdff 72%,#f8f7ff 100%)', boxShadow: '0 28px 90px rgba(17,24,39,.25)' }}>
+          <div style={{ padding: '28px 32px 24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: -6 }}>
+              <button className="icon-btn" aria-label="Close trainer profile" onClick={() => setProfileTrainer(null)}><X size={21}/></button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '232px minmax(0,1fr)', gap: 30, alignItems: 'center', paddingBottom: 28, borderBottom: '1px solid #e2e8f0' }}>
+              <div style={{ width: 232, height: 232, borderRadius: 28, overflow: 'hidden', background: 'linear-gradient(135deg,#eeecff,#dbeafe)', border: '1px solid #e4e7f3', boxShadow: '0 12px 30px rgba(52,64,120,.17)', display: 'grid', placeItems: 'center', color: '#6553d9', fontSize: 48, fontWeight: 900 }}>
+                {(profileTrainer.photo || profileTrainer.ptPricing?._trainerPhoto) ?
+                  <img src={profileTrainer.photo || profileTrainer.ptPricing?._trainerPhoto} alt={profileTrainer.name || 'Trainer'} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} /> :
+                  initials(profileTrainer.name)}
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, padding: '9px 15px', marginBottom: 12, borderRadius: 999, background: profileTrainer.tier === 'Platinum' ? 'linear-gradient(110deg,#f4e8ff,#e0f2fe)' : profileTrainer.tier === 'Gold' ? 'linear-gradient(110deg,#fff4cf,#ffebaa)' : 'linear-gradient(110deg,#f1f5f9,#e2e8f0)', color: profileTrainer.tier === 'Platinum' ? '#6741c8' : profileTrainer.tier === 'Gold' ? '#946200' : '#475569', border: `1px solid ${profileTrainer.tier === 'Platinum' ? '#d8c1ff' : profileTrainer.tier === 'Gold' ? '#f1d27a' : '#cbd5e1'}`, boxShadow: '0 5px 14px rgba(91,72,180,.13)', fontWeight: 900, fontSize: 15 }}>
+                  <span aria-hidden="true" style={{ fontSize: 21, lineHeight: 1 }}>{profileTrainer.tier === 'Platinum' ? '♛' : profileTrainer.tier === 'Gold' ? '♛' : '✥'}</span>
+                  {['Silver','Gold','Platinum'].includes(profileTrainer.tier) ? profileTrainer.tier : 'Silver'}
+                  <span aria-hidden="true" style={{ letterSpacing: 2, fontSize: 16 }}>{profileTrainer.tier === 'Platinum' ? '✦✦✦' : profileTrainer.tier === 'Gold' ? '✦✦' : '✦'}</span>
+                </div>
+                <h2 style={{ margin: '0 0 5px', color: '#14213d', fontSize: 'clamp(30px,3vw,42px)', lineHeight: 1.12, fontWeight: 950, letterSpacing: '-.8px' }}>{profileTrainer.name}</h2>
+                <p style={{ margin: '0 0 17px', color: '#64748b', fontSize: 19, fontWeight: 550 }}>{profileTrainer.specialization || 'Fitness Trainer'}</p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, borderRadius: 13, padding: '10px 14px', background: '#f1eaff', color: '#6438d7', fontWeight: 850 }}><Dumbbell size={19}/> Strength Training</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, borderRadius: 13, padding: '10px 14px', background: '#e8fbf2', color: '#07825f', fontWeight: 850 }}><Activity size={19}/> Muscle Building</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, borderRadius: 13, padding: '10px 14px', background: '#ffe9ed', color: '#c52248', fontWeight: 850 }}><Target size={19}/> Fat Loss</span>
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: '24px 34px', padding: '28px 0 24px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+                <span style={{ width: 66, height: 66, flex: '0 0 66px', borderRadius: '50%', background: '#f0eaff', color: '#7046e8', display: 'grid', placeItems: 'center' }}><Phone size={29}/></span>
+                <div><strong style={{ display: 'block', color: '#182640', fontSize: 20, marginBottom: 5 }}>Phone</strong><span style={{ color: '#334155', fontSize: 18 }}>{profileTrainer.phone || '—'}</span></div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+                <span style={{ width: 66, height: 66, flex: '0 0 66px', borderRadius: '50%', background: '#fff3e5', color: '#b96a0b', display: 'grid', placeItems: 'center' }}><CalendarDays size={29}/></span>
+                <div><strong style={{ display: 'block', color: '#182640', fontSize: 20, marginBottom: 5 }}>Experience</strong><span style={{ color: '#334155', fontSize: 18 }}>{profileTrainer.experience || 0} years</span></div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+                <span style={{ width: 66, height: 66, flex: '0 0 66px', borderRadius: '50%', background: '#e7fbf1', color: '#11945c', display: 'grid', placeItems: 'center' }}><ShieldCheck size={29}/></span>
+                <div><strong style={{ display: 'block', color: '#182640', fontSize: 20, marginBottom: 7 }}>Status</strong><span style={{ display: 'inline-block', padding: '7px 17px', borderRadius: 999, background: (profileTrainer.status || 'Active') === 'Active' ? '#d7fae8' : '#f1f5f9', color: (profileTrainer.status || 'Active') === 'Active' ? '#08784d' : '#475569', fontWeight: 850 }}>{profileTrainer.status || 'Active'}</span></div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '2px 0 15px' }}>
+              <span style={{ width: 46, height: 46, borderRadius: '50%', background: '#f0eaff', color: '#7046e8', display: 'grid', placeItems: 'center' }}><Dumbbell size={25}/></span>
+              <h3 style={{ margin: 0, fontSize: 22, color: '#182640', fontWeight: 950 }}>PT plan pricing</h3>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(230px,1fr))', gap: 16 }}>
+              {[
+                { label: 'Monthly', key: 'Monthly', color: '#7543df', bg: 'linear-gradient(135deg,#faf5ff,#f7f3ff)', border: '#e5d5ff', iconBg: '#eee5ff', days: 30, sessions: 22 },
+                { label: 'Quarterly', key: 'Quarterly', color: '#1671d9', bg: 'linear-gradient(135deg,#f2f8ff,#f5faff)', border: '#cfe4ff', iconBg: '#e0efff', days: 90, sessions: 66 },
+                { label: 'Half-yearly', key: 'Half-yearly', color: '#07856f', bg: 'linear-gradient(135deg,#f0fdf8,#f3fcf9)', border: '#b9f1e3', iconBg: '#d9f9eb', days: 180, sessions: 132 },
+                { label: 'Annual', key: 'Annual', color: '#b45309', bg: 'linear-gradient(135deg,#fff8eb,#fffbf2)', border: '#f4d6a2', iconBg: '#ffedc7', days: 365, sessions: 264 }
+              ].map((plan) => {
+                const entry = profileTrainer.ptPricing?.[plan.key] || {};
+                const fee = Number(entry.fee || 0);
+                const sessions = Number(entry.sessions || plan.sessions);
+                const days = Number(entry.validityDays || plan.days);
+                return <div key={plan.key} style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 14, padding: '17px 16px', borderRadius: 17, border: `1px solid ${plan.border}`, background: plan.bg }}>
+                  <span style={{ width: 68, height: 68, flex: '0 0 68px', borderRadius: 20, background: plan.iconBg, color: plan.color, display: 'grid', placeItems: 'center' }}><CalendarDays size={32}/></span>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <strong style={{ display: 'block', color: plan.color, fontSize: 17, marginBottom: 6 }}>{plan.label}</strong>
+                    <span style={{ display: 'block', color: '#17243b', fontSize: 21, fontWeight: 950 }}>₹{fee.toLocaleString('en-IN')}</span>
+                    <div style={{ borderTop: '1px solid #dfe5ee', marginTop: 9, paddingTop: 8, color: '#64748b', fontSize: 13 }}>{sessions} sessions / {days} days</div>
+                  </div>
+                </div>;
+              })}
+            </div>
+            {profileTrainer.notes && <div style={{ marginTop: 18, padding: 14, borderRadius: 14, background: '#f8fafc', border: '1px solid #e2e8f0' }}><strong style={{ display: 'block', marginBottom: 5, color: '#334155' }}>Notes</strong><p style={{ margin: 0, color: '#64748b' }}>{profileTrainer.notes}</p></div>}
+          </div>
+        </div>
+      </div>}
     </div>
   );
 }
@@ -5244,7 +5362,16 @@ function TrainerModal({ onClose, onSave, trainer }) {
     experience: trainer.experience || 0,
     monthlySalary: trainer.monthlySalary || 0,
     status: trainer.status || 'Active',
+    tier: trainer.tier || 'Silver',
+    ptPricing: {
+      Monthly: { fee: 10000, sessions: 22, validityDays: 30 },
+      Quarterly: { fee: 27000, sessions: 66, validityDays: 90 },
+      'Half-yearly': { fee: 50000, sessions: 132, validityDays: 180 },
+      Annual: { fee: 100000, sessions: 264, validityDays: 365 },
+      ...(trainer.ptPricing || {}),
+    },
     notes: trainer.notes || '',
+    photo: trainer.photo || trainer.ptPricing?._trainerPhoto || '',
   } : {
     name: '',
     phone: '',
@@ -5252,7 +5379,15 @@ function TrainerModal({ onClose, onSave, trainer }) {
     experience: 1,
     monthlySalary: 0,
     status: 'Active',
+    tier: 'Silver',
+    ptPricing: {
+      Monthly: { fee: 10000, sessions: 22, validityDays: 30 },
+      Quarterly: { fee: 27000, sessions: 66, validityDays: 90 },
+      'Half-yearly': { fee: 50000, sessions: 132, validityDays: 180 },
+      Annual: { fee: 100000, sessions: 264, validityDays: 365 },
+    },
     notes: '',
+    photo: '',
   });
 
   const update = (key, value) =>
@@ -5264,6 +5399,7 @@ function TrainerModal({ onClose, onSave, trainer }) {
       ...form,
       name: form.name.trim(),
       specialization: form.specialization.trim(),
+      ptPricing: { ...(form.ptPricing || {}), _trainerPhoto: form.photo || '' },
     });
   };
 
@@ -5299,6 +5435,28 @@ function TrainerModal({ onClose, onSave, trainer }) {
               />
             </label>
 
+            <div className="professional-field" style={{ gridColumn: '1 / -1', border: '1px solid #e4e8f0', borderRadius: 12, padding: 14 }}>
+              <div style={{ fontWeight: 800, marginBottom: 8 }}>Trainer photo</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+                {form.photo ? <img src={form.photo} alt="Trainer preview" style={{ width: 92, height: 92, objectFit: 'cover', borderRadius: 12, border: '1px solid #dbe3ef' }} /> : <div style={{ width: 92, height: 92, borderRadius: 12, background: '#f1f5f9', color: '#64748b', display: 'grid', placeItems: 'center' }}><Users size={28} /></div>}
+                <div style={{ display: 'grid', gap: 8 }}>
+                  <input type="file" accept="image/*" onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    try {
+                      if (file.size > 12 * 1024 * 1024) throw new Error('Please choose an image smaller than 12 MB.');
+                      const photo = await resizePublicImage(file, 520, 0.68);
+                      update('photo', photo);
+                    } catch (error) {
+                      window.alert(error?.message || 'Unable to use this trainer photo.');
+                    } finally { e.target.value = ''; }
+                  }} />
+                  <span style={{ color: '#718096', fontSize: 12 }}>JPG, PNG or WebP. Image is resized before saving.</span>
+                  {form.photo && <button type="button" className="btn btn-secondary" style={{ width: 'fit-content' }} onClick={() => update('photo', '')}>Remove photo</button>}
+                </div>
+              </div>
+            </div>
+
             <label className="professional-field">
               Experience (years)
               <input
@@ -5330,6 +5488,10 @@ function TrainerModal({ onClose, onSave, trainer }) {
               </select>
             </label>
 
+            <label className="professional-field">Trainer tier / badge
+              <select value={form.tier || 'Silver'} onChange={(e) => update('tier', e.target.value)}><option>Silver</option><option>Gold</option><option>Platinum</option></select>
+            </label>
+            <div style={{gridColumn:'1 / -1',border:'1px solid #e4e8f0',borderRadius:12,padding:14}}><strong>PT plan pricing & limits</strong><p style={{color:'#718096',fontSize:12,marginTop:4}}>Administrator can set individual trainer fees, session count and validity.</p>{['Monthly','Quarterly','Half-yearly','Annual'].map((plan) => { const defaults = { Monthly:{fee:10000,sessions:22,validityDays:30}, Quarterly:{fee:27000,sessions:66,validityDays:90}, 'Half-yearly':{fee:50000,sessions:132,validityDays:180}, Annual:{fee:100000,sessions:264,validityDays:365} }; const cfg={...defaults[plan],...(form.ptPricing?.[plan] || {})}; return <div key={plan} style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:8,alignItems:'end',marginTop:10}}><strong>{plan}</strong><label className="professional-field">Fee (₹)<input type="number" min="0" value={cfg.fee ?? 0} onChange={(e)=>update('ptPricing',{...(form.ptPricing||{}),[plan]:{...cfg,fee:e.target.value}})}/></label><label className="professional-field">Sessions<input type="number" min="1" value={cfg.sessions ?? defaults[plan].sessions} onChange={(e)=>update('ptPricing',{...(form.ptPricing||{}),[plan]:{...cfg,sessions:e.target.value}})}/></label><label className="professional-field">Validity days<input type="number" min="1" value={cfg.validityDays ?? defaults[plan].validityDays} onChange={(e)=>update('ptPricing',{...(form.ptPricing||{}),[plan]:{...cfg,validityDays:e.target.value}})}/></label></div>})}</div>
             <label style={{ gridColumn: '1 / -1' }}>
               Notes
               <textarea
@@ -5358,116 +5520,12 @@ function TrainerModal({ onClose, onSave, trainer }) {
 }
 
 function PTSessionModal({ trainers, members, onClose, onSave }) {
-  const [form, setForm] = useState({
-    trainerId: trainers[0]?.id || '',
-    memberId: members[0]?.id || '',
-    date: today,
-    time: '07:00 PM',
-    duration: 60,
-    type: 'Personal Training',
-    status: 'Scheduled',
-    fee: 1000,
-    notes: '',
-  });
-
-  const update = (key, value) =>
-    setForm((current) => ({ ...current, [key]: value }));
-
-  const save = () => {
-    if (!form.trainerId || !form.memberId || !form.date) return;
-    onSave(form);
-  };
-
-  return (
-    <div className="modal-backdrop">
-      <div className="modal">
-        <div className="modal-header">
-          <div>
-            <h3>Schedule PT session</h3>
-            <span>Assign a trainer and member to a personal training session.</span>
-          </div>
-          <button className="icon-btn" onClick={onClose}><X size={18} /></button>
-        </div>
-
-        <div className="modal-body">
-          <div className="form-grid professional-form-grid">
-            <label className="professional-field">
-              Trainer
-              <select value={form.trainerId} onChange={(e) => update('trainerId', e.target.value)}>
-                {trainers.map((trainer) => (
-                  <option key={trainer.id} value={trainer.id}>{trainer.name}</option>
-                ))}
-              </select>
-            </label>
-
-            <label className="professional-field">
-              Member
-              <select value={form.memberId} onChange={(e) => update('memberId', e.target.value)}>
-                {members.map((member) => (
-                  <option key={member.id} value={member.id}>{member.name}</option>
-                ))}
-              </select>
-            </label>
-
-            <label className="professional-field">
-              Date
-              <input type="date" value={form.date} onChange={(e) => update('date', e.target.value)} />
-            </label>
-
-            <label className="professional-field">
-              Time
-              <input value={form.time} onChange={(e) => update('time', e.target.value)} placeholder="07:00 PM" />
-            </label>
-
-            <label className="professional-field">
-              Duration (minutes)
-              <input type="number" min="15" step="15" value={form.duration} onChange={(e) => update('duration', e.target.value)} />
-            </label>
-
-            <label className="professional-field">
-              Session fee
-              <input type="number" min="0" value={form.fee} onChange={(e) => update('fee', e.target.value)} />
-            </label>
-
-            <label className="professional-field">
-              Session type
-              <select value={form.type} onChange={(e) => update('type', e.target.value)}>
-                <option>Personal Training</option>
-                <option>Assessment</option>
-                <option>Trial PT</option>
-                <option>Consultation</option>
-              </select>
-            </label>
-
-            <label className="professional-field">
-              Status
-              <select value={form.status} onChange={(e) => update('status', e.target.value)}>
-                <option>Scheduled</option>
-                <option>Completed</option>
-                <option>Cancelled</option>
-              </select>
-            </label>
-
-            <label style={{ gridColumn: '1 / -1' }}>
-              Notes
-              <textarea rows="3" value={form.notes} onChange={(e) => update('notes', e.target.value)} />
-            </label>
-          </div>
-        </div>
-
-        <div className="modal-footer">
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button
-            className="btn btn-primary"
-            onClick={save}
-            disabled={!form.trainerId || !form.memberId || !form.date}
-          >
-            Schedule session
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+  const [form, setForm] = useState({ trainerId: trainers[0]?.id || '', memberId: members[0]?.id || '', date: today, planName: 'Monthly', notes: '' });
+  const trainer = trainers.find((t) => t.id === form.trainerId);
+  const cfg = trainer?.ptPricing?.[form.planName] || { fee: 0, sessions: 22, validityDays: 30 };
+  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const save = () => { if (!form.trainerId || !form.memberId || !form.date) return; onSave({ ...form, fee: Number(cfg.fee || 0), planConfig: { sessions: Number(cfg.sessions || 22), validityDays: Number(cfg.validityDays || 30) } }); };
+  return <div className="modal-backdrop"><div className="modal"><div className="modal-header"><div><h3>Assign PT package</h3><span>Select trainer, member and a configured PT plan.</span></div><button className="icon-btn" onClick={onClose}><X size={18}/></button></div><div className="modal-body"><div className="form-grid professional-form-grid"><label className="professional-field">Trainer<select value={form.trainerId} onChange={(e)=>update('trainerId',e.target.value)}>{trainers.map((t)=><option key={t.id} value={t.id}>{t.name} — {t.tier || 'Silver'}</option>)}</select></label><label className="professional-field">Member<select value={form.memberId} onChange={(e)=>update('memberId',e.target.value)}>{members.map((m)=><option key={m.id} value={m.id}>{m.name} ({m.id})</option>)}</select></label><label className="professional-field">Package start date<input type="date" value={form.date} onChange={(e)=>update('date',e.target.value)}/></label><label className="professional-field">PT plan<select value={form.planName} onChange={(e)=>update('planName',e.target.value)}><option>Monthly</option><option>Half-yearly</option><option>Annual</option></select></label><div style={{gridColumn:'1 / -1',background:'#f5f7ff',padding:14,borderRadius:12}}><div style={{fontWeight:800,fontSize:20}}>₹{Number(cfg.fee || 0).toLocaleString('en-IN')}</div><div>{Number(cfg.sessions || 22)} sessions · valid for {Number(cfg.validityDays || 30)} days · {trainer?.tier || 'Silver'} tier</div><small style={{color:'#68758a'}}>Plan price and limits are configured in the trainer profile.</small></div><label style={{gridColumn:'1 / -1'}}>Notes<textarea rows="3" value={form.notes} onChange={(e)=>update('notes',e.target.value)}/></label></div></div><div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Cancel</button><button className="btn btn-primary" onClick={save} disabled={!form.trainerId || !form.memberId || !form.date}>Assign package</button></div></div></div>;
 }
 
 function Dashboard({ activeMembers, expiringMembers, overdue, revenue, data, navigate, setModal, markAttendance }) {
@@ -5525,6 +5583,7 @@ function Dashboard({ activeMembers, expiringMembers, overdue, revenue, data, nav
     { label: 'Active clients', value: activeMembers, progress: pct(activeMembers, totalMembers), icon: Activity, tone: 'teal', onClick: () => navigate('Members') },
     { label: 'Inactive clients', value: inactiveClients, progress: pct(inactiveClients, totalMembers), icon: UserCheck, tone: 'slate', onClick: () => navigate('Members') },
     { label: 'Profile created clients', value: profileCreated, progress: pct(profileCreated, totalMembers), icon: Users, tone: 'blue', onClick: () => navigate('Members') },
+    { label: 'PT expiring soon', value: (data.ptSessions || []).filter((p) => !['Cancelled','Completed','Expired'].includes(p.status) && p.expiryDate && p.expiryDate >= today && p.expiryDate <= new Date(Date.now() + 7 * 86400000).toISOString().slice(0,10)).length, progress: 0, icon: CalendarDays, tone: 'orange', onClick: () => navigate('Trainers & PT') },
     { label: 'Booked PT sessions', value: bookedPT, progress: pct(bookedPT, totalSessions), icon: Dumbbell, tone: 'cyan', onClick: () => navigate('Trainers & PT') },
     { label: 'Follow-ups', value: followUps, progress: pct(followUps, totalLeads), icon: Bell, tone: 'orange', onClick: () => navigate('Leads') },
     { label: 'Today present clients', value: todayPresent, progress: pct(todayPresent, activeMembers), icon: CheckCircle2, tone: 'indigo', onClick: () => navigate('Attendance') },
@@ -6039,20 +6098,47 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
           </div>
 
           <div className="profile-card" style={cardStyle}>
-            <PanelHeader title="Fitness profile" subtitle="Baseline information for training" icon={Activity} />
-            <div className="detail-list">
-              <div><span>Height</span><strong>{member.height ? `${member.height} cm` : 'Not provided'}</strong></div>
-              <div><span>Weight</span><strong>{member.weight ? `${member.weight} kg` : 'Not provided'}</strong></div>
-              <div><span>Body fat</span><strong>{member.bodyFat ? `${member.bodyFat}%` : 'Not provided'}</strong></div>
-              <div><span>Trainer</span><strong>{member.trainer || 'Not assigned'}</strong></div>
-              <div><span>Referral type</span><strong>{String(member.referral || 'None / Walk-In').startsWith('Others:') ? 'Others' : (member.referredBy ? 'Customer' : (member.referral || 'None / Walk-In'))}</strong></div>
-              {String(member.referral || '').startsWith('Others:') && <div><span>Referral details</span><strong>{String(member.referral).slice(7).trim()}</strong></div>}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' }}>
+              <PanelHeader title="Fitness, measurements & medical history" subtitle="Training baseline and health information reported by the member" icon={Activity} />
+              <button type="button" className="btn btn-secondary" onClick={() => printMemberFitnessMedical(member, settings)} style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', flexShrink: 0 }}>
+                <FileDown size={17} /> Print profile
+              </button>
             </div>
-          </div>
-
-          <div className="profile-card" style={cardStyle}>
-            <PanelHeader title="Medical conditions & injuries" subtitle="Health information reported by the member" icon={Activity} />
-            {(() => { const meta = readMemberMeta(member.notes); const conditions = Array.isArray(meta.medicalConditions) ? meta.medicalConditions : (Array.isArray(member.medicalConditions) ? member.medicalConditions : []); return conditions.length ? <><div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: meta.medicalOther ? '12px' : 0 }}>{conditions.map((condition) => <span key={condition} style={{ background: '#fff1f2', color: '#be123c', border: '1px solid #fecdd3', borderRadius: '999px', padding: '6px 10px', fontSize: '12px', fontWeight: 700 }}>{condition}</span>)}</div>{conditions.includes('Other') && meta.medicalOther && <p style={{ margin: '0 0 10px', color: '#475569', lineHeight: 1.6 }}><strong>Other condition:</strong> {meta.medicalOther}</p>}{meta.surgeryDetails && <p style={{ margin: '8px 0 0', color: '#475569', lineHeight: 1.6 }}><strong>Surgery (last 5 years):</strong> {meta.surgeryDetails}</p>}{meta.additionalMedicalNotes && <p style={{ margin: '8px 0 0', color: '#475569', lineHeight: 1.6 }}><strong>Additional details:</strong> {meta.additionalMedicalNotes}</p>}</> : <p style={{ margin: 0, color: '#718096' }}>No medical conditions or injuries recorded.</p>; })()}
+            {(() => {
+              const meta = readMemberMeta(member.notes);
+              const conditions = Array.isArray(meta.medicalConditions) ? meta.medicalConditions : (Array.isArray(member.medicalConditions) ? member.medicalConditions : []);
+              const measurements = [
+                ['Chest', meta.chest ?? member.chest], ['Shoulder', meta.shoulder ?? member.shoulder],
+                ['Biceps', meta.biceps ?? member.biceps], ['Forearms', meta.forearms ?? member.forearms],
+                ['Waist', meta.waist ?? member.waist], ['Hips', meta.hips ?? member.hips],
+                ['Thighs', meta.thighs ?? member.thighs], ['Calves', meta.calves ?? member.calves],
+                ['Neck', meta.neck ?? member.neck]
+              ];
+              return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: '18px', marginTop: '8px' }}>
+                <section>
+                  <h4 style={{ margin: '0 0 8px', fontSize: '14px', color: '#64748b' }}>Fitness profile</h4>
+                  <div className="detail-list">
+                    <div><span>Height</span><strong>{member.height ? `${member.height} cm` : 'Not provided'}</strong></div>
+                    <div><span>Weight</span><strong>{member.weight ? `${member.weight} kg` : 'Not provided'}</strong></div>
+                    <div><span>Body fat</span><strong>{member.bodyFat ? `${member.bodyFat}%` : 'Not provided'}</strong></div>
+                    <div><span>Trainer</span><strong>{member.trainer || 'Not assigned'}</strong></div>
+                    <div><span>Referral type</span><strong>{String(member.referral || 'None / Walk-In').startsWith('Others:') ? 'Others' : (member.referredBy ? 'Customer' : (member.referral || 'None / Walk-In'))}</strong></div>
+                    {String(member.referral || '').startsWith('Others:') && <div><span>Referral details</span><strong>{String(member.referral).slice(7).trim()}</strong></div>}
+                  </div>
+                  <h4 style={{ margin: '18px 0 8px', fontSize: '14px', color: '#64748b' }}>Body measurements (cm)</h4>
+                  {measurements.some(([, value]) => value !== undefined && value !== null && String(value).trim() !== '') ?
+                    <div className="detail-list">{measurements.filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== '').map(([label, value]) => <div key={label}><span>{label}</span><strong>{value} cm</strong></div>)}</div> :
+                    <p style={{ margin: 0, color: '#718096' }}>No body measurements recorded.</p>}
+                </section>
+                <section>
+                  <h4 style={{ margin: '0 0 8px', fontSize: '14px', color: '#64748b' }}>Medical conditions & injuries</h4>
+                  {conditions.length ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>{conditions.map((condition) => <span key={condition} style={{ background: '#fff1f2', color: '#be123c', border: '1px solid #fecdd3', borderRadius: '999px', padding: '6px 10px', fontSize: '12px', fontWeight: 700 }}>{condition}</span>)}</div> : <p style={{ margin: '0 0 10px', color: '#718096' }}>No medical conditions or injuries recorded.</p>}
+                  {conditions.includes('Other') && meta.medicalOther && <p style={{ margin: '8px 0 0', color: '#475569', lineHeight: 1.6 }}><strong>Other condition:</strong> {meta.medicalOther}</p>}
+                  {meta.surgeryDetails && <p style={{ margin: '8px 0 0', color: '#475569', lineHeight: 1.6 }}><strong>Surgery (last 5 years):</strong> {meta.surgeryDetails}</p>}
+                  {meta.additionalMedicalNotes && <p style={{ margin: '8px 0 0', color: '#475569', lineHeight: 1.6 }}><strong>Additional details:</strong> {meta.additionalMedicalNotes}</p>}
+                </section>
+              </div>;
+            })()}
           </div>
 
           <div className="profile-card" style={cardStyle}>
@@ -6070,7 +6156,7 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
             <div className="documents-grid">
               <button className="quick-action" onClick={() => printMemberIdCard(member, settings)}><span><FileDown size={18} /></span><strong>ID card / PDF</strong><ArrowUpRight size={15} /></button>
               <button className="quick-action" onClick={() => shareMemberWhatsApp(member)}><span><MessageCircle size={18} /></span><strong>Share ID on WhatsApp</strong><ArrowUpRight size={15} /></button>
-              <button className="quick-action" onClick={() => { const payment = getInvoicePaymentForMember(member, payments); setModal({ type:'invoiceOptions', member, payment }); }}><span><CreditCard size={18} /></span><strong>Bill / PDF</strong><ArrowUpRight size={15} /></button>
+              <button className="quick-action" onClick={() => { const payment = getInvoicePaymentForMember(member, payments); setModal({ type:'invoiceOptions', source:'member', member, payment }); }}><span><CreditCard size={18} /></span><strong>Bill / PDF</strong><ArrowUpRight size={15} /></button>
               <button className="quick-action" onClick={() => { const payment = getInvoicePaymentForMember(member, payments); shareBillWhatsApp(member, settings, payment); }}><span><MessageCircle size={18} /></span><strong>Share bill on WhatsApp</strong><ArrowUpRight size={15} /></button>
             </div>
           </div>
@@ -8405,17 +8491,119 @@ function getInvoicePaymentForMember(member, payments = []) {
   return matching[0] || null;
 }
 
+// Build subscription groups for the member-profile invoice. Legacy payment rows
+// are grouped using plan description + the plan total implied by paid-to-date and balance.
+function getMemberSubscriptionGroups(member, payments = []) {
+  const rows = payments.filter((p) => (p.memberId === member.id || p.member === member.name) && p.type === 'Membership')
+    .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')) || String(a.id || '').localeCompare(String(b.id || '')));
+  const groups = [];
+  rows.forEach((p) => {
+    const paidToDate = Number(p.paidAmountAtInvoice ?? p.amount ?? 0);
+    const balance = Number(p.balanceAtInvoice ?? 0);
+    const inferredTotal = paidToDate + balance;
+    const description = p.description || `${member.plan || 'Membership'} membership`;
+    let group = groups[groups.length - 1];
+    const matches = group && group.description === description &&
+      (inferredTotal <= 0 || group.planTotal <= 0 || Math.abs(group.planTotal - inferredTotal) < 0.01) &&
+      group.balance > 0.001;
+    if (!matches) {
+      group = { id: `sub-${p.id}`, description, planTotal: inferredTotal || Number(member.amount || p.amount || 0), payments: [], balance, startDate: p.date || today, endDate: p.date || today, lastPayment: p };
+      groups.push(group);
+    }
+    group.payments.push(p);
+    group.endDate = p.date || group.endDate;
+    group.lastPayment = p;
+    group.balance = balance;
+    if (inferredTotal > 0) group.planTotal = inferredTotal;
+  });
+  // If there are no saved membership transactions, provide a current-plan fallback.
+  if (!groups.length && member) groups.push({ id: 'current-plan', description: `${member.plan || 'Membership'} membership`, planTotal: Number(member.amount || 0), payments: [], balance: Number(member.due || 0), startDate: member.start || today, endDate: member.start || today, lastPayment: null });
+  return groups.reverse().map((g, index) => ({ ...g, label: `${g.description} · ${formatDate(g.startDate)}${g.endDate && g.endDate !== g.startDate ? ` – ${formatDate(g.endDate)}` : ''} · ${g.payments.length} payment(s)` }));
+}
+
 function openPrintWindow(title, html) {
   const printWindow = window.open('', '_blank', 'width=900,height=800');
-  if (!printWindow) return false;
-  printWindow.document.open();
-  printWindow.document.write(`<!doctype html><html><head><title>${escapeHtml(title)}</title><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>
-  @page{size:A4 portrait;margin:5mm}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#edf0f8;color:#151743;font-family:Arial,Helvetica,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}.invoice-page{width:100%;max-width:820px;margin:18px auto;background:#fff;border:0;border-radius:12px;overflow:hidden;box-shadow:0 4px 18px rgba(24,24,70,.07);font-size:10px}.invoice-hero{height:132px;position:relative;overflow:hidden;background:linear-gradient(110deg,#171343 0%,#28206f 68%,#4b35b8 100%);color:#fff;padding:22px 25px;display:flex;align-items:center;justify-content:space-between;gap:16px}.invoice-hero:after{content:"";position:absolute;right:-30px;bottom:-57px;width:320px;height:105px;border-radius:50%;border:14px solid rgba(255,255,255,.12);transform:rotate(-9deg)}.hero-brand{display:flex;align-items:center;gap:12px;position:relative;z-index:1}.hero-logo{width:54px;height:54px;object-fit:contain;background:#fff;border-radius:13px;padding:4px}.hero-name{font-size:25px;line-height:1;font-weight:900;letter-spacing:.02em}.hero-tag{font-size:9px;letter-spacing:.2em;color:#f6d77a;margin-top:8px;font-weight:800}.hero-invoice{position:relative;z-index:1;text-align:right}.invoice-title{font-size:26px;letter-spacing:.04em;font-weight:900}.invoice-status{display:inline-block;margin-top:8px;background:#fff;color:#4524c9;padding:5px 10px;border-radius:20px;font-size:8px;font-weight:900;letter-spacing:.08em}.invoice-meta{font-size:9px;line-height:1.7;margin-top:8px;color:#f0edff}.invoice-meta strong{color:#fff}.seller-details{padding:10px 23px;background:#f7f6ff;border-bottom:1px solid #e7e4ff;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;font-size:9px;color:#55577a;line-height:1.55}.seller-details strong{color:#171746}.invoice-parties{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:14px 20px 12px}.party-box{border:1px solid #e5e3fb;border-radius:10px;padding:12px 13px;background:#fbfaff;font-size:9px;line-height:1.65;color:#5c5e7b;min-width:0}.party-label{display:flex;align-items:center;gap:7px;font-size:9px;font-weight:900;letter-spacing:.09em;color:#4d2ed2;margin-bottom:6px;text-transform:uppercase}.party-box strong{display:block;color:#191944;font-size:13px;margin-bottom:3px}.invoice-table-wrap{padding:0 20px}.invoice-table{width:100%;border-collapse:separate;border-spacing:0;font-size:9px;border:1px solid #dcd9f7;border-radius:8px;overflow:hidden}.invoice-table th{background:#3f2a9d;color:#fff;text-align:left;padding:10px 8px;font-size:8px;letter-spacing:.02em}.invoice-table td{padding:11px 8px;border-bottom:1px solid #e8e7f5;color:#505271;vertical-align:top}.invoice-table tr:last-child td{border-bottom:0}.invoice-table td strong{display:block;color:#1b1b48;font-size:10px}.invoice-table td small{display:block;color:#77799b;margin-top:3px}.right{text-align:right}.invoice-lower{display:grid;grid-template-columns:1fr 270px;gap:12px;padding:12px 20px 0;align-items:start}.payment-summary,.amount-summary{border:1px solid #e2e0f8;border-radius:10px;overflow:hidden;background:#fff}.summary-title{padding:9px 11px;background:#f1efff;color:#4a2bc7;font-size:8px;font-weight:900;letter-spacing:.1em}.summary-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid #eeedf8;font-size:9px;color:#626382}.summary-row strong{color:#191944;font-size:9px;text-align:right}.summary-row.grand{background:#4b35b8;color:#fff;border:0;padding:10px}.summary-row.grand span,.summary-row.grand strong{color:#fff;font-weight:900}.summary-row.grand strong{font-size:13px}.payment-chip{display:inline-block;margin:9px 10px;background:#eafaf6;color:#087f70;border:1px solid #c9f0e7;border-radius:30px;padding:5px 8px;font-size:8px;font-weight:800}.invoice-note{margin:11px 20px 0;padding:9px 12px;background:#f1efff;border-radius:8px;color:#25205e;font-size:9px;line-height:1.5}.invoice-note strong{color:#4b2acb}.invoice-bottom{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px 20px 0}.qr-card,.terms-card{border:1px solid #dfdcfb;border-radius:10px;padding:11px;background:#fff;min-width:0}.bottom-title{font-size:9px;font-weight:900;color:#3820a6;margin-bottom:8px;letter-spacing:.03em}.qr-row{display:flex;align-items:center;gap:12px}.qr-frame{position:relative;width:104px;height:104px;flex:0 0 104px;padding:0;border-radius:0;background:transparent;box-shadow:none}.qr-frame .qr-code{width:100%;height:100%;display:block;object-fit:contain;background:white;border-radius:0;border:0;box-shadow:none}.qr-center-logo{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:23px;height:23px;object-fit:contain;background:#fff;border:0;border-radius:5px;padding:2px;box-shadow:0 0 0 3px #fff}.qr-copy{font-size:8px;color:#666887;line-height:1.55;overflow-wrap:anywhere}.qr-copy strong{display:block;color:#24205e;font-size:10px;margin-bottom:4px}.public-link{display:inline-block;margin-top:5px;background:#5c35e8;color:#fff!important;padding:5px 8px;border-radius:20px;font-weight:800;text-decoration:none;font-size:8px}.terms-card ol{margin:7px 0 0;padding-left:15px;color:#626382;font-size:8px;line-height:1.6}.terms-card li{padding-left:2px;margin-bottom:3px}.signature{margin-top:8px;text-align:right;color:#565779;font-size:8px}.signature-line{border-top:1px solid #a8a3d2;width:135px;margin:17px 0 5px auto}.invoice-footer{position:relative;margin-top:14px;padding:28px 22px 15px;color:#fff;background:#15113f;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:8px;line-height:1.5;overflow:hidden}.invoice-footer:before{content:"";position:absolute;left:-3%;top:-35px;width:106%;height:64px;background:#fff;border-bottom:6px solid #e8c65b;border-radius:0 0 50% 50%/0 0 72% 72%;transform:rotate(-.5deg)}.invoice-footer:after{content:"";position:absolute;left:0;right:0;top:25px;height:3px;background:#6d4ce5;clip-path:polygon(0 0,25% 45%,50% 100%,75% 45%,100% 0,100% 100%,0 100%)}.footer-contact,.footer-slogan{position:relative;z-index:1}.footer-slogan{text-align:right;color:#f6d77a;font-weight:900;letter-spacing:.12em}.footer-contact{display:flex;gap:12px;flex-wrap:wrap}.small-muted{color:#9291bd}
+  const documentHtml = `<!doctype html><html><head><title>${escapeHtml(title)}</title><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>
+  @page{size:A4 portrait;margin:10mm}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#fff;color:#1d2b42;font-family:Arial,Helvetica,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}.invoice-page{width:100%;max-width:760px;margin:12px auto;background:#fff;font-size:10px}.invoice-hero{position:relative;overflow:hidden;color:#1d2b42;padding:12px 0 15px;display:flex;align-items:center;justify-content:space-between;gap:18px;border-bottom:3px solid #23354d}.hero-brand{display:flex;align-items:center;gap:12px;min-width:0}.hero-logo{width:54px;height:54px;object-fit:contain;background:#fff;border-radius:5px;padding:1px}.hero-name{font-size:24px;line-height:1.05;font-weight:900;letter-spacing:.01em;color:#1d2b42}.hero-tag{font-size:8px;letter-spacing:.2em;color:#596777;margin-top:6px;font-weight:700}.hero-invoice{text-align:right;flex:0 0 auto}.invoice-title{font-size:23px;letter-spacing:.02em;font-weight:900;color:#1d2b42}.invoice-status{display:block;margin-top:7px;color:#168d82;font-size:8px;font-weight:900;letter-spacing:.12em}.invoice-meta{font-size:9px;line-height:1.7;margin-top:10px;color:#34445a}.invoice-meta strong{color:#1d2b42}.seller-details{padding:9px 0 11px;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:9px;color:#48576a;line-height:1.55;border-bottom:1px solid #e0e5ea}.seller-details strong{color:#1d2b42}.invoice-parties{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:14px 0 15px}.party-box{border:1px solid #e0e5e9;border-radius:11px;padding:12px 13px;background:#fff;font-size:9px;line-height:1.65;color:#4e5a69;min-width:0}.party-label{display:flex;align-items:center;gap:7px;font-size:8px;font-weight:900;letter-spacing:.13em;color:#4b5663;margin-bottom:7px;text-transform:uppercase}.party-box strong{display:block;color:#1d2b42;font-size:13px;margin-bottom:3px}.invoice-table-wrap{padding:0}.invoice-table{width:100%;border-collapse:collapse;font-size:9px}.invoice-table th{background:#fff;color:#687384;text-align:left;padding:9px 7px;font-size:8px;letter-spacing:.03em;border-bottom:1px solid #dce2e8}.invoice-table td{padding:11px 7px;border-bottom:1px solid #e1e6eb;color:#4e5a69;vertical-align:top}.invoice-table tr:last-child td{border-bottom:1px solid #dce2e8}.invoice-table td strong{display:block;color:#1d2b42;font-size:10px}.invoice-table td small{display:block;color:#6e7886;margin-top:3px}.right{text-align:right}.invoice-lower{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px 0 0;align-items:stretch}.payment-summary,.amount-summary{border:1px solid #e0e5e9;border-top:3px solid #168f83;border-radius:10px;overflow:hidden;background:#fff}.amount-summary{border-top-color:#23354d}.summary-title{padding:10px 12px;background:#fff;color:#374457;font-size:8px;font-weight:900;letter-spacing:.14em}.summary-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid #e8ecef;font-size:9px;color:#586473}.summary-row strong{color:#1d2b42;font-size:9px;text-align:right}.summary-row.grand{background:#fff;color:#16877d;border-top:2px solid #23354d;border-bottom:0;padding:10px 12px}.summary-row.grand span,.summary-row.grand strong{color:#16877d;font-weight:900}.summary-row.grand strong{font-size:14px}.payment-chip{display:inline-block;margin:9px 12px;background:#f2fbf9;color:#16877d;border:1px solid #d5eee9;border-radius:30px;padding:5px 8px;font-size:8px;font-weight:800}.invoice-note{margin:12px 0 0;padding:10px 12px;background:#fff;border:1px solid #e0e5e9;border-left:3px solid #168f83;border-radius:5px;color:#596574;font-size:9px;line-height:1.5}.invoice-note strong{color:#344257}.schedule-wrap{margin-top:14px;border:1px solid #e0e5e9;border-radius:10px;overflow:hidden}.schedule-title{padding:10px 12px;font-size:8px;font-weight:900;letter-spacing:.14em;color:#344257;border-bottom:1px solid #e0e5e9}.schedule-table{width:100%;border-collapse:collapse;font-size:9px}.schedule-table th{font-size:7px;letter-spacing:.1em;color:#7a8592;text-align:left;padding:8px 10px;background:#fff;border-bottom:1px solid #e5e9ed}.schedule-table td{padding:9px 10px;border-bottom:1px solid #e5e9ed;color:#4e5a69}.schedule-table tr:last-child td{border-bottom:0}.status-pill{display:inline-block;border:1px solid #cfe9e1;color:#16876f;background:#f7fcfa;border-radius:20px;padding:4px 10px;font-size:7px;font-weight:900;letter-spacing:.06em}.status-pill.pending{border-color:#eee3ca;color:#9a6a25;background:#fffdf7}.invoice-bottom{display:grid;grid-template-columns:1fr 220px;gap:14px;padding:14px 0 0;align-items:start}.terms-card{border-top:1px solid #dce2e8;padding:11px 0;background:#fff;min-width:0}.qr-card{border:1px solid #e0e5e9;border-radius:10px;padding:10px;background:#fff;min-width:0}.bottom-title{font-size:8px;font-weight:900;color:#344257;margin-bottom:8px;letter-spacing:.13em}.qr-row{display:flex;align-items:center;gap:10px}.qr-frame{position:relative;width:94px;height:94px;flex:0 0 94px;padding:0;background:transparent}.qr-frame .qr-code{width:100%;height:100%;display:block;object-fit:contain;background:white}.qr-center-logo{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:21px;height:21px;object-fit:contain;background:#fff;border-radius:4px;padding:2px;box-shadow:0 0 0 2px #fff}.qr-copy{font-size:8px;color:#647080;line-height:1.5;overflow-wrap:anywhere}.qr-copy strong{display:block;color:#1d2b42;font-size:10px;margin-bottom:4px}.public-link{display:inline-block;margin-top:5px;color:#16877d!important;font-weight:800;text-decoration:none;font-size:8px}.terms-card .bottom-title{margin-bottom:6px}.terms-card ol{margin:7px 0 0;padding-left:15px;color:#5e6977;font-size:8px;line-height:1.55}.terms-card li{padding-left:2px;margin-bottom:2px}.signature{margin-top:8px;text-align:right;color:#596574;font-size:8px}.signature-line{border-top:1px solid #8c97a4;width:135px;margin:16px 0 5px auto}.invoice-footer{margin-top:13px;padding:12px 0 0;color:#596574;background:#fff;border-top:1px solid #dce2e8;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:8px;line-height:1.5}.footer-contact{display:flex;gap:12px;flex-wrap:wrap}.footer-slogan{text-align:right;color:#16877d;font-weight:900;letter-spacing:.08em}.small-muted{color:#87919c}
   @media screen{.invoice-page{min-height:0}}
-  @media print{html,body{width:100%;height:auto;background:#fff!important;margin:0!important;padding:0!important;overflow:visible!important}.invoice-page{width:100%;max-width:none;margin:0;border:0;border-radius:0;box-shadow:none;overflow:hidden;break-inside:avoid;page-break-inside:avoid}.invoice-hero{height:112px;padding:16px 20px}.hero-name{font-size:22px}.hero-logo{width:46px;height:46px}.invoice-parties{padding:10px 15px 9px;gap:9px}.party-box{padding:9px 10px}.invoice-table-wrap{padding:0 15px}.invoice-table th{padding:8px 6px}.invoice-table td{padding:8px 6px}.invoice-lower{padding:9px 15px 0;grid-template-columns:1fr 245px;gap:9px}.summary-row{padding:6px 8px}.invoice-note{margin:8px 15px 0;padding:7px 10px}.invoice-bottom{padding:9px 15px 0;gap:9px}.qr-card,.terms-card{padding:8px}.qr-frame{width:86px;height:86px;flex-basis:86px}.qr-center-logo{width:20px;height:20px}.invoice-footer{margin-top:9px;padding:24px 16px 10px}.seller-details{padding:8px 18px}.party-box,.invoice-table,.invoice-lower,.invoice-note,.invoice-bottom,.invoice-footer{break-inside:avoid;page-break-inside:avoid}a{color:inherit;text-decoration:none}}
-  </style></head><body>${html}<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),500));</script></body></html>`);
+  @media print{html,body{width:100%;height:auto;background:#fff!important;margin:0!important;padding:0!important;overflow:visible!important}.invoice-page{width:100%;max-width:none;margin:0;border:0;box-shadow:none;overflow:visible}.invoice-hero{padding-top:4px}.invoice-parties{padding:10px 0}.party-box{padding:9px 10px}.invoice-table th{padding:7px 6px}.invoice-table td{padding:8px 6px}.invoice-lower{padding-top:10px;gap:10px}.summary-row{padding:6px 8px}.invoice-note{margin-top:9px;padding:8px 10px}.schedule-wrap{margin-top:10px}.invoice-bottom{padding-top:10px;gap:10px}.qr-card{padding:8px}.qr-frame{width:82px;height:82px;flex-basis:82px}.qr-center-logo{width:18px;height:18px}.invoice-footer{margin-top:9px}.party-box,.invoice-table,.invoice-lower,.invoice-note,.schedule-wrap,.invoice-bottom,.invoice-footer{break-inside:avoid;page-break-inside:avoid}a{color:inherit;text-decoration:none}}
+  </style></head><body>${html}<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),500));</script></body></html>`;
+  if (!printWindow) {
+    // Popup blockers can prevent window.open. Print the same invoice through a
+    // temporary iframe instead of silently doing nothing.
+    const frame = document.createElement('iframe');
+    frame.setAttribute('title', `${title} print preview`);
+    frame.style.position = 'fixed';
+    frame.style.right = '0';
+    frame.style.bottom = '0';
+    frame.style.width = '1px';
+    frame.style.height = '1px';
+    frame.style.border = '0';
+    frame.style.opacity = '0';
+    frame.onload = () => {
+      setTimeout(() => {
+        try { frame.contentWindow.focus(); frame.contentWindow.print(); }
+        catch (error) { console.error('Invoice print failed:', error); alert('Invoice preview could not open. Please allow pop-ups and try again.'); }
+        setTimeout(() => frame.remove(), 1500);
+      }, 600);
+    };
+    document.body.appendChild(frame);
+    frame.srcdoc = documentHtml;
+    return true;
+  }
+  printWindow.document.open();
+  printWindow.document.write(documentHtml);
   printWindow.document.close();
   return true;
+}
+
+function printMemberFitnessMedical(member, settings) {
+  const gymName = settings?.gymName || 'Preface Fitness';
+  const meta = readMemberMeta(member?.notes);
+  const conditions = Array.isArray(meta.medicalConditions) ? meta.medicalConditions : (Array.isArray(member?.medicalConditions) ? member.medicalConditions : []);
+  const rows = [
+    ['Height', member?.height ? `${member.height} cm` : 'Not provided'],
+    ['Weight', member?.weight ? `${member.weight} kg` : 'Not provided'],
+    ['Body fat', member?.bodyFat ? `${member.bodyFat}%` : 'Not provided'],
+    ['Trainer', member?.trainer || 'Not assigned'],
+    ['Chest', meta.chest ?? member?.chest], ['Shoulder', meta.shoulder ?? member?.shoulder],
+    ['Biceps', meta.biceps ?? member?.biceps], ['Forearms', meta.forearms ?? member?.forearms],
+    ['Waist', meta.waist ?? member?.waist], ['Hips', meta.hips ?? member?.hips],
+    ['Thighs', meta.thighs ?? member?.thighs], ['Calves', meta.calves ?? member?.calves],
+    ['Neck', meta.neck ?? member?.neck]
+  ];
+  const measurementRows = rows.filter(([label, value]) => ['Chest','Shoulder','Biceps','Forearms','Waist','Hips','Thighs','Calves','Neck'].includes(label) && value !== undefined && value !== null && String(value).trim() !== '')
+    .map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)} cm</td></tr>`).join('');
+  const profileRows = rows.filter(([label]) => ['Height','Weight','Body fat','Trainer'].includes(label))
+    .map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`).join('');
+  const conditionPills = conditions.length ? conditions.map((item) => `<span class="pill">${escapeHtml(item)}</span>`).join('') : '<p>No medical conditions or injuries recorded.</p>';
+  const html = `<div class="fitness-print">
+    <header><div><div class="gym">${escapeHtml(gymName)}</div><div class="sub">MEMBER FITNESS & MEDICAL PROFILE</div></div><div class="date">Printed: ${escapeHtml(formatDate(new Date().toISOString().slice(0,10)))}</div></header>
+    <section class="member"><h1>${escapeHtml(member?.name || 'Member')}</h1><div><b>Member ID:</b> ${escapeHtml(member?.id || '—')} &nbsp; <b>Phone:</b> ${escapeHtml(member?.phone || '—')}</div><div><b>Email:</b> ${escapeHtml(member?.email || '—')} &nbsp; <b>Plan:</b> ${escapeHtml(member?.plan || '—')}</div></section>
+    <div class="columns">
+      <section class="panel"><h2>Fitness profile</h2><table>${profileRows}</table></section>
+      <section class="panel"><h2>Body measurements (cm)</h2>${measurementRows ? `<table>${measurementRows}</table>` : '<p>No body measurements recorded.</p>'}</section>
+    </div>
+    <section class="panel medical"><h2>Medical conditions & injuries</h2><div class="pills">${conditionPills}</div>
+      ${conditions.includes('Other') && meta.medicalOther ? `<p><b>Other condition:</b> ${escapeHtml(meta.medicalOther)}</p>` : ''}
+      ${meta.surgeryDetails ? `<p><b>Surgery (last 5 years):</b> ${escapeHtml(meta.surgeryDetails)}</p>` : ''}
+      ${meta.additionalMedicalNotes ? `<p><b>Additional details:</b> ${escapeHtml(meta.additionalMedicalNotes)}</p>` : ''}
+    </section>
+    <footer>This profile records information reported by the member for gym safety and training awareness. It is not a medical diagnosis.</footer>
+  </div>
+  <style>
+    .fitness-print{font:12px Arial,sans-serif;color:#1d2b42;max-width:760px;margin:20px auto}
+    header{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:0 0 14px;border-bottom:3px solid #23354d}
+    .gym{font-size:24px;font-weight:900}.sub{font-size:9px;letter-spacing:.16em;color:#168d82;font-weight:800;margin-top:5px}.date{font-size:10px;color:#64748b}
+    .member{padding:16px 0;border-bottom:1px solid #dce2e8;line-height:1.8}.member h1{font-size:19px;margin:0 0 4px}
+    .columns{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}.panel{border:1px solid #dce2e8;border-radius:10px;padding:12px;margin-top:14px;break-inside:avoid}
+    .columns .panel{margin-top:0}h2{font-size:12px;margin:0 0 10px;text-transform:uppercase;letter-spacing:.08em}
+    table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:7px 5px;border-bottom:1px solid #edf0f3;font-size:11px}th{color:#64748b;font-weight:600;width:48%}td{font-weight:700}tr:last-child th,tr:last-child td{border-bottom:0}
+    .pills{display:flex;flex-wrap:wrap;gap:7px}.pill{border:1px solid #fecdd3;background:#fff1f2;color:#be123c;border-radius:18px;padding:5px 8px;font-size:10px;font-weight:700}
+    .medical p{line-height:1.55}footer{margin-top:18px;border-top:1px solid #dce2e8;padding-top:10px;color:#64748b;font-size:9px;line-height:1.5}
+    @media print{.fitness-print{margin:0;max-width:none}.panel,.member{break-inside:avoid}}
+  </style>`;
+  return openPrintWindow(`${gymName} - ${member?.name || 'Member'} Fitness and Medical Profile`, html);
 }
 
 function printMemberIdCard(member, settings) {
@@ -8463,43 +8651,51 @@ function shareMemberWhatsApp(member) {
 function printPaymentInvoice(member, payment, settings, overrideGstMode = null) {
   const gymName = settings?.gymName || 'Preface Fitness';
   const gstMode = overrideGstMode || (payment?.gstApplicable ? 'gst' : 'without');
-  const invoiceAmount = Number(payment?.invoiceAmount ?? (payment?.type === 'Membership' ? member.amount : payment?.amount) ?? member.amount ?? 0);
+  const invoiceAmount = Number(payment?.consolidated ? payment.planTotal : (payment?.invoiceAmount ?? (payment?.type === 'Membership' ? member.amount : payment?.amount) ?? member.amount ?? 0));
   const rate = gstMode === 'gst' ? Number(payment?.gstRate || settings?.defaultGstRate || 5) : 0;
   const gst = calculateGstBreakdown(invoiceAmount, rate);
   const invoiceNumber = makeInvoiceNumber(payment, settings);
   const invoiceDate = payment?.date || today;
-  const received = Number(payment?.paidAmountAtInvoice ?? payment?.amount ?? member.paid ?? 0);
-  const balance = Number(payment?.balanceAtInvoice ?? member.due ?? 0);
+  const includedPayments = Array.isArray(payment?.payments) ? payment.payments : [payment];
+  const paymentAmount = payment?.consolidated ? includedPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0) : Number(payment?.amount || 0);
+  const received = payment?.consolidated ? paymentAmount : Number(payment?.paidAmountAtInvoice ?? payment?.amount ?? member.paid ?? 0);
+  const balance = payment?.consolidated ? Number(payment.balance ?? Math.max(0, invoiceAmount - received)) : Number(payment?.balanceAtInvoice ?? member.due ?? 0);
   const serviceDescription = payment?.description || `${member.plan || 'Membership'} membership`;
-  const paymentAmount = Number(payment?.amount || 0);
+  // Define currency formatter before building any rows that call it; otherwise
+  // JavaScript's const temporal-dead-zone throws and invoice generation stops.
+  const currency = (value) => `₹${Number(value || 0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+  const schedulePaymentsRows = payment?.consolidated ? includedPayments.map((p) => `<tr><td>${escapeHtml(formatDate(p.date || today))}</td><td>${currency(p.amount)}</td><td>${escapeHtml(p.mode || '—')}</td><td><span class="status-pill">PAID / RECEIVED</span></td></tr>`).join('') : `<tr><td>${escapeHtml(formatDate(invoiceDate))}</td><td>${currency(paymentAmount)}</td><td>${escapeHtml(payment?.mode || '—')}</td><td><span class="status-pill">PAID / RECEIVED</span></td></tr>`;
   const isGst = gstMode === 'gst';
   const publicUrl = String(settings?.publicPage?.publicUrl || settings?.publicPage?.websiteUrl || settings?.publicPage?.url || 'https://noscodera.github.io/preface-fitness/#gym').trim();
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=2&color=271080&bgcolor=FFFFFF&data=${encodeURIComponent(publicUrl)}`;
-  const currency = (value) => `₹${Number(value || 0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+  const servicePeriod = member.start && member.expiry ? `${formatDate(member.start)} – ${formatDate(member.expiry)}` : 'As per membership';
+  const pendingDate = member.expiry ? formatDate(member.expiry) : 'As agreed';
+  const scheduleRows = `${schedulePaymentsRows}${balance > 0 ? `<tr><td>${escapeHtml(pendingDate)}</td><td>${currency(balance)}</td><td>—</td><td><span class="status-pill pending">PENDING</span></td></tr>` : ''}`;
   const html = `
   <div class="invoice-page">
     <header class="invoice-hero">
-      <div class="hero-brand"><img class="hero-logo" src="${LOGO_URL}" alt="Preface Fitness logo"/><div><div class="hero-name">PREFACE<br/>FITNESS</div><div class="hero-tag">FIT BODY · BETTER YOU</div></div></div>
-      <div class="hero-invoice"><div class="invoice-title">${isGst ? 'TAX INVOICE' : 'INVOICE'}</div><div class="invoice-status">${isGst ? 'GST INVOICE' : 'PAYMENT RECEIPT'}</div><div class="invoice-meta">Invoice No. <strong>${escapeHtml(invoiceNumber)}</strong><br/>Date <strong>${escapeHtml(formatDate(invoiceDate))}</strong><br/>Payment <strong>${escapeHtml(payment?.mode || '—')}</strong></div></div>
+      <div class="hero-brand"><img class="hero-logo" src="${LOGO_URL}" alt="Preface Fitness logo"/><div><div class="hero-name">${escapeHtml(gymName)}</div><div class="hero-tag">GYM &amp; FITNESS SERVICES</div></div></div>
+      <div class="hero-invoice"><div class="invoice-title">${isGst ? 'TAX INVOICE' : 'INVOICE'}</div><div class="invoice-status">${isGst ? 'GST APPLICABLE' : 'PAYMENT RECEIPT'}</div><div class="invoice-meta">Invoice No. <strong>${escapeHtml(invoiceNumber)}</strong><br/>Invoice Date <strong>${escapeHtml(formatDate(invoiceDate))}</strong></div></div>
     </header>
-    <div class="seller-details"><span>${settings?.gymAddress ? `<strong>Address:</strong> ${escapeHtml(settings.gymAddress)}` : '<strong>Stronger Today · Stronger Tomorrow</strong>'}</span><span>${settings?.gymPhone ? `<strong>Phone:</strong> ${escapeHtml(settings.gymPhone)}` : ''}${settings?.gymEmail ? ` &nbsp; <strong>Email:</strong> ${escapeHtml(settings.gymEmail)}` : ''}${isGst && settings?.gstin ? ` &nbsp; <strong>GSTIN:</strong> ${escapeHtml(settings.gstin)}` : ''}</span></div>
+    <div class="seller-details"><span>${settings?.gymAddress ? `${escapeHtml(settings.gymAddress)}` : 'Nadan Mahal Rd, Yahiyaganj, Lucknow, Uttar Pradesh'}</span><span>${settings?.gymPhone ? `${escapeHtml(settings.gymPhone)}` : ''}${settings?.gymEmail ? ` &nbsp; · &nbsp; ${escapeHtml(settings.gymEmail)}` : ''}${isGst && settings?.gstin ? ` &nbsp; · &nbsp; GSTIN: ${escapeHtml(settings.gstin)}` : ''}</span></div>
     <section class="invoice-parties">
-      <div class="party-box"><div class="party-label">● Customer Details</div><strong>${escapeHtml(member.name)}</strong><div>Member ID: <b>${escapeHtml(member.id)}</b></div><div>Phone: ${escapeHtml(member.phone || '—')}</div>${member.email ? `<div>Email: ${escapeHtml(member.email)}</div>` : ''}${member.address ? `<div>Address: ${escapeHtml(member.address)}</div>` : ''}</div>
-      <div class="party-box"><div class="party-label">▣ Membership Details</div><strong>${escapeHtml(member.plan || 'Membership')}</strong><div>Duration: ${escapeHtml(member.start && member.expiry ? `${formatDate(member.start)} – ${formatDate(member.expiry)}` : 'As per membership')}</div><div>Trainer: ${escapeHtml(member.trainer || 'Not assigned')}</div><div>Payment status: ${balance > 0 ? 'Part payment' : 'Paid'}</div></div>
+      <div class="party-box"><div class="party-label">Bill To</div><strong>${escapeHtml(member.name)}</strong><div>Member ID: ${escapeHtml(member.id)}</div><div>Phone: ${escapeHtml(member.phone || '—')}</div>${member.email ? `<div>Email: ${escapeHtml(member.email)}</div>` : ''}${member.address ? `<div>Address: ${escapeHtml(member.address)}</div>` : ''}</div>
+      <div class="party-box"><div class="party-label">Membership Details</div><strong>${escapeHtml(member.plan || 'Membership')}</strong><div>Service period: ${escapeHtml(servicePeriod)}</div><div>Trainer: ${escapeHtml(member.trainer || 'Not assigned')}</div><div>Payment mode: ${escapeHtml(payment?.mode || '—')}</div></div>
     </section>
-    <div class="invoice-table-wrap"><table class="invoice-table"><thead><tr><th style="width:7%">Sr.</th><th>Description</th>${isGst ? '<th>HSN/SAC</th>' : ''}<th class="right">Qty</th><th class="right">Rate (₹)</th><th class="right">Amount (₹)</th></tr></thead><tbody>
-      <tr><td>01</td><td><strong>${escapeHtml(serviceDescription)}</strong><small>Membership / fitness services</small></td>${isGst ? '<td>999799</td>' : ''}<td class="right">1</td><td class="right">${Number(gst.taxable).toLocaleString('en-IN',{minimumFractionDigits:2})}</td><td class="right">${Number(gst.taxable).toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>
+    <div class="invoice-table-wrap"><table class="invoice-table"><thead><tr><th style="width:6%">#</th><th>Description</th><th>Service Period</th><th class="right">Qty</th><th class="right">Rate</th><th class="right">Amount</th></tr></thead><tbody>
+      <tr><td>01</td><td><strong>${escapeHtml(serviceDescription)}</strong><small>Membership / fitness service</small></td><td>${escapeHtml(servicePeriod)}</td><td class="right">1</td><td class="right">${currency(invoiceAmount)}</td><td class="right">${currency(invoiceAmount)}</td></tr>
     </tbody></table></div>
     <section class="invoice-lower">
-      <div class="payment-summary"><div class="summary-title">PAYMENT DETAILS</div><div class="summary-row"><span>This payment received</span><strong>${currency(paymentAmount)}</strong></div><div class="summary-row"><span>Total paid to date</span><strong>${currency(received)}</strong></div><div class="summary-row"><span>Outstanding balance</span><strong>${currency(balance)}</strong></div><div class="payment-chip">✓ ${escapeHtml(payment?.mode || 'Payment')} · ${escapeHtml(formatDate(invoiceDate))}</div></div>
-      <div class="amount-summary"><div class="summary-title">INVOICE SUMMARY</div><div class="summary-row"><span>Taxable value</span><strong>${currency(gst.taxable)}</strong></div>${isGst ? `<div class="summary-row"><span>CGST (${(rate/2).toFixed(2)}%)</span><strong>${currency(gst.cgst)}</strong></div><div class="summary-row"><span>SGST (${(rate/2).toFixed(2)}%)</span><strong>${currency(gst.sgst)}</strong></div>` : `<div class="summary-row"><span>GST</span><strong>${currency(0)}</strong></div>`}<div class="summary-row grand"><span>Total invoice</span><strong>${currency(invoiceAmount)}</strong></div></div>
+      <div class="payment-summary"><div class="summary-title">PAYMENT DETAILS</div><div class="summary-row"><span>Payment received</span><strong>${currency(paymentAmount)}</strong></div><div class="summary-row"><span>Total paid to date</span><strong>${currency(received)}</strong></div><div class="summary-row"><span>Outstanding balance</span><strong>${currency(balance)}</strong></div><div class="payment-chip">${escapeHtml(payment?.mode || 'Payment')} · ${escapeHtml(formatDate(invoiceDate))}</div></div>
+      <div class="amount-summary"><div class="summary-row"><span>Subtotal / Taxable value</span><strong>${currency(gst.taxable)}</strong></div>${isGst ? `<div class="summary-row"><span>CGST (${(rate/2).toFixed(2)}%)</span><strong>${currency(gst.cgst)}</strong></div><div class="summary-row"><span>SGST (${(rate/2).toFixed(2)}%)</span><strong>${currency(gst.sgst)}</strong></div>` : ''}<div class="summary-row grand"><span>Total invoice value</span><strong>${currency(invoiceAmount)}</strong></div></div>
     </section>
+    <section class="schedule-wrap"><div class="schedule-title">PAYMENT SCHEDULE</div><table class="schedule-table"><thead><tr><th>DUE / PAYMENT DATE</th><th>AMOUNT</th><th>PAYMENT MODE</th><th>STATUS</th></tr></thead><tbody>${scheduleRows}</tbody></table></section>
     <section class="invoice-note"><strong>Amount in words:</strong> ${escapeHtml(amountInWordsIndian(invoiceAmount))}</section>
     <section class="invoice-bottom">
-      <div class="qr-card"><div class="bottom-title">SCAN TO VISIT OUR GYM</div><div class="qr-row"><div class="qr-frame"><img class="qr-code" src="${qrUrl}" alt="QR code linking to Preface Fitness public page" /><img class="qr-center-logo" src="${LOGO_URL}" alt="Preface Fitness logo" /></div><div class="qr-copy"><strong>Visit Preface Fitness</strong>Scan this designer QR code to open our public gym page.<br/><a class="public-link" href="${escapeHtml(publicUrl)}">prefacefitness.in ↗</a><div style="margin-top:6px">${escapeHtml(settings?.gymPhone || '')}</div></div></div></div>
-      <div class="terms-card"><div class="bottom-title">TERMS & CONDITIONS</div><ol><li>Membership is non-transferable.</li><li>Fees once paid are non-refundable, subject to applicable law.</li><li>Members must follow gym rules and safety guidelines.</li><li>Keep this invoice for your records.</li></ol><div class="signature"><div>For ${escapeHtml(gymName)}</div><div class="signature-line"></div><strong>Authorised Signatory</strong></div></div>
+      <div class="terms-card"><div class="bottom-title">NOTES &amp; TERMS</div><ol><li>This document records the membership / fitness service billed by ${escapeHtml(gymName)}.</li><li>Please retain this invoice for your records.</li>${isGst ? '<li>GST details should match the billing details configured by the gym.</li>' : ''}</ol><div class="signature"><div>For ${escapeHtml(gymName)}</div><div class="signature-line"></div><strong>Authorised Signatory</strong></div></div>
+      <div class="qr-card"><div class="bottom-title">SCAN TO VISIT OUR GYM</div><div class="qr-row"><div class="qr-frame"><img class="qr-code" src="${qrUrl}" alt="QR code linking to Preface Fitness public page"/><img class="qr-center-logo" src="${LOGO_URL}" alt="Preface Fitness logo"/></div><div class="qr-copy"><strong>Thank you for choosing ${escapeHtml(gymName)}.</strong>Scan to visit our gym.<br/><a class="public-link" href="${escapeHtml(publicUrl)}">${escapeHtml(publicUrl)}</a></div></div></div>
     </section>
-    <footer class="invoice-footer"><div class="footer-contact"><span>☎ ${escapeHtml(settings?.gymPhone || 'Preface Fitness')}</span>${settings?.gymEmail ? `<span>✉ ${escapeHtml(settings.gymEmail)}</span>` : ''}<span>◎ preface_fitness</span></div><div class="footer-slogan">STRONGER PEOPLE<br/>STRONGER COMMUNITY</div></footer>
+    <footer class="invoice-footer"><div class="footer-contact"><span>${escapeHtml(settings?.gymPhone || 'Preface Fitness')}</span>${settings?.gymEmail ? `<span>${escapeHtml(settings.gymEmail)}</span>` : ''}</div><div class="footer-slogan">THANK YOU FOR CHOOSING US</div></footer>
   </div>`;
   return openPrintWindow(`${gymName} - ${invoiceNumber}`, html);
 }
@@ -8620,7 +8816,7 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
   } : {
     id: '', attendanceNumber: '', name: '', phone: '', email: '', dob: '', gender: 'Prefer not to say', address: '',
     emergencyContact: '', dietPreference: 'Veg', referredBy: '', plan: 'Monthly', start: today, expiry: addMonthsToDate(today, MEMBERSHIP_PLANS.find((item) => item.name === 'Monthly')?.months || 1), amount: Number(planPrices?.Monthly || 0), paid: 0,
-    due: 0, paymentMode: 'Cash', gstMode: 'without', gstRate: 5, height: '', weight: '', bodyFat: '', trainer: '', referral: 'None / Walk-In', referralOther: '', medicalConditions: [], medicalOther: '', surgeryDetails: '', additionalMedicalNotes: '', notes: '',
+    due: 0, paymentMode: 'Cash', gstMode: 'without', gstRate: 5, height: '', weight: '', bodyFat: '', chest: '', shoulder: '', biceps: '', forearms: '', waist: '', hips: '', thighs: '', calves: '', neck: '', trainer: '', referral: 'None / Walk-In', referralOther: '', medicalConditions: [], medicalOther: '', surgeryDetails: '', additionalMedicalNotes: '', notes: '',
   });
 
   const update = (key, value) => {
@@ -8823,11 +9019,27 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
       <FormField label="Body fat %"><input type="number" min="0" max="100" step="0.1" value={form.bodyFat} onChange={(e) => update('bodyFat', e.target.value)} placeholder="20" /></FormField>
       <FormField label="Trainer"><select value={form.trainer || ''} onChange={(e) => update('trainer', e.target.value)}><option value="">Not assigned</option>{trainers.filter((item) => item.status !== 'Inactive').map((trainer) => <option key={trainer.id} value={trainer.name}>{trainer.name}</option>)}</select></FormField>
     </div>
+    <div className="form-section-title">Body measurements</div>
+    <div style={{ border: '1px solid #e2e8f0', borderRadius: '12px', padding: '10px', marginBottom: '12px', background: '#fbfdff' }}>
+      <p style={{ margin: '0 0 8px', color: '#64748b', fontSize: '12px' }}>Optional fitness measurements in centimetres (cm).</p>
+      <div className="form-grid three" style={{ gap: '8px', rowGap: '6px' }}>
+        <FormField label="Chest (cm)"><input type="number" min="0" step="0.1" value={form.chest || ''} onChange={(e) => update('chest', e.target.value)} placeholder="e.g. 100" /></FormField>
+        <FormField label="Shoulder (cm)"><input type="number" min="0" step="0.1" value={form.shoulder || ''} onChange={(e) => update('shoulder', e.target.value)} placeholder="e.g. 46" /></FormField>
+        <FormField label="Biceps (cm)"><input type="number" min="0" step="0.1" value={form.biceps || ''} onChange={(e) => update('biceps', e.target.value)} placeholder="e.g. 35" /></FormField>
+        <FormField label="Forearms (cm)"><input type="number" min="0" step="0.1" value={form.forearms || ''} onChange={(e) => update('forearms', e.target.value)} placeholder="e.g. 29" /></FormField>
+        <FormField label="Waist (cm)"><input type="number" min="0" step="0.1" value={form.waist || ''} onChange={(e) => update('waist', e.target.value)} placeholder="e.g. 82" /></FormField>
+        <FormField label="Hips (cm)"><input type="number" min="0" step="0.1" value={form.hips || ''} onChange={(e) => update('hips', e.target.value)} placeholder="e.g. 96" /></FormField>
+        <FormField label="Thighs (cm)"><input type="number" min="0" step="0.1" value={form.thighs || ''} onChange={(e) => update('thighs', e.target.value)} placeholder="e.g. 55" /></FormField>
+        <FormField label="Calves (cm)"><input type="number" min="0" step="0.1" value={form.calves || ''} onChange={(e) => update('calves', e.target.value)} placeholder="e.g. 37" /></FormField>
+        <FormField label="Neck (cm)"><input type="number" min="0" step="0.1" value={form.neck || ''} onChange={(e) => update('neck', e.target.value)} placeholder="e.g. 38" /></FormField>
+      </div>
+    </div>
+
     <div className="form-section-title">Medical questionnaire</div>
-    <div style={{ border: '1px solid #e2e8f0', borderRadius: '14px', padding: '16px', marginBottom: '16px', background: '#fbfdff' }}>
-      <p style={{ margin: '0 0 12px', color: '#64748b', fontSize: '13px' }}>Select any conditions or injuries the member reports. This information is for gym safety and training awareness, not a medical diagnosis.</p>
-      <div className="form-grid three">
-        {MEMBER_MEDICAL_OPTIONS.map((condition) => <label key={condition} style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '8px 10px', border: '1px solid #e2e8f0', borderRadius: '9px', background: (form.medicalConditions || []).includes(condition) ? '#e9fbf6' : '#fff', fontSize: '13px', fontWeight: 600 }}><input type="checkbox" checked={(form.medicalConditions || []).includes(condition)} onChange={(e) => update('medicalConditions', e.target.checked ? [...(form.medicalConditions || []), condition] : (form.medicalConditions || []).filter((item) => item !== condition))} />{condition}</label>)}
+    <div style={{ border: '1px solid #e2e8f0', borderRadius: '12px', padding: '8px', marginBottom: '12px', background: '#fbfdff' }}>
+      <p style={{ margin: '0 0 7px', color: '#64748b', fontSize: '12px', lineHeight: 1.35 }}>Select any conditions or injuries the member reports. This information is for gym safety and training awareness, not a medical diagnosis.</p>
+      <div className="form-grid three" style={{ alignItems: 'start', gap: '6px', rowGap: '4px' }}>
+        {MEMBER_MEDICAL_OPTIONS.map((condition) => <label key={condition} style={{ display: 'flex', alignItems: 'center', minHeight: '30px', boxSizing: 'border-box', gap: '6px', padding: '3px 6px', border: '1px solid #e2e8f0', borderRadius: '7px', background: (form.medicalConditions || []).includes(condition) ? '#e9fbf6' : '#fff', fontSize: '12px', lineHeight: 1.2, fontWeight: 600 }}><input type="checkbox" style={{ margin: 0, flex: '0 0 auto' }} checked={(form.medicalConditions || []).includes(condition)} onChange={(e) => update('medicalConditions', e.target.checked ? [...(form.medicalConditions || []), condition] : (form.medicalConditions || []).filter((item) => item !== condition))} />{condition}</label>)}
       </div>
       {(form.medicalConditions || []).includes('Other') && <FormField label="Other medical condition / injury details"><textarea rows="2" value={form.medicalOther || ''} onChange={(e) => update('medicalOther', e.target.value)} placeholder="Describe the condition or injury" /></FormField>}
       <FormField label="Surgery in the last 5 years? If yes, when and what type?"><textarea rows="2" value={form.surgeryDetails || ''} onChange={(e) => update('surgeryDetails', e.target.value)} placeholder="Write details, or leave blank if none" /></FormField>
@@ -8840,25 +9052,37 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
 
 // NOTE: Duplicate LeadModal removed from here
 
-function InvoiceOptionsModal({ member, payment, settings, onClose, onPrint }) {
+function InvoiceOptionsModal({ member, payment, payments = [], mode = 'single', settings, onClose, onPrint }) {
   const [gstMode, setGstMode] = useState(payment?.gstApplicable ? 'gst' : (settings?.gstin ? 'gst' : 'without'));
   const [gstRate, setGstRate] = useState(Number(payment?.gstRate || settings?.defaultGstRate || 5));
-  const invoiceAmount = Number(payment?.invoiceAmount || (payment?.type === 'Membership' ? member?.amount : payment?.amount) || member?.amount || 0);
+  const groups = mode === 'member' ? getMemberSubscriptionGroups(member, payments) : [];
+  const [selectedGroupId, setSelectedGroupId] = useState(groups[0]?.id || '');
+  const selectedGroup = groups.find((g) => g.id === selectedGroupId) || groups[0] || null;
+  const selectedPayment = mode === 'member' && selectedGroup ? {
+    id: selectedGroup.id, invoiceNumber: `${settings?.invoicePrefix || 'PF-INV'}-${String(selectedGroup.id).replace(/[^a-zA-Z0-9-]/g, '')}`,
+    type: 'Membership', description: selectedGroup.description, date: selectedGroup.endDate || today,
+    mode: selectedGroup.payments.length === 1 ? selectedGroup.payments[0].mode : 'Multiple modes',
+    consolidated: true, payments: selectedGroup.payments, planTotal: selectedGroup.planTotal,
+    balance: selectedGroup.balance, gstApplicable: payment?.gstApplicable, gstRate,
+  } : payment;
+  const invoiceAmount = Number(mode === 'member' ? (selectedGroup?.planTotal || 0) : (payment?.invoiceAmount || (payment?.type === 'Membership' ? member?.amount : payment?.amount) || member?.amount || 0));
   const gst = calculateGstBreakdown(invoiceAmount, gstMode === 'gst' ? gstRate : 0);
-  return <Modal title="Generate invoice / bill" onClose={onClose}>
+  return <Modal title={mode === 'member' ? 'Generate membership invoice' : 'Generate payment invoice'} onClose={onClose}>
     <div className="invoice-choice-card">
-      <div><div className="eyebrow">DOCUMENT TYPE</div><strong>Select how this bill should be generated</strong><span>The selected format will be used by both Payments and the member profile.</span></div>
+      <div><div className="eyebrow">INVOICE SCOPE</div><strong>{mode === 'member' ? 'Select the membership subscription' : 'This invoice is for one payment only'}</strong><span>{mode === 'member' ? 'All recorded payments belonging to the selected subscription will appear on the invoice. Renewals are listed separately.' : 'Only the selected payment transaction will be included.'}</span></div>
+      {mode === 'member' && <FormField label="Membership / subscription"><select value={selectedGroup?.id || ''} onChange={(e) => setSelectedGroupId(e.target.value)}>{groups.map((g) => <option key={g.id} value={g.id}>{g.label} · Plan value ₹{Number(g.planTotal || 0).toLocaleString('en-IN')}</option>)}</select></FormField>}
       <div className="invoice-choice-options">
         <label className={`invoice-choice ${gstMode === 'gst' ? 'selected' : ''}`}><input type="radio" name="invoice-gst-mode" checked={gstMode === 'gst'} onChange={() => setGstMode('gst')} /><div><strong>Tax Invoice with GST</strong><span>Shows GSTIN, taxable value, CGST and SGST.</span></div></label>
         <label className={`invoice-choice ${gstMode === 'without' ? 'selected' : ''}`}><input type="radio" name="invoice-gst-mode" checked={gstMode === 'without'} onChange={() => setGstMode('without')} /><div><strong>Bill without GST</strong><span>Shows the same professional bill without tax breakup.</span></div></label>
       </div>
       <div className="form-grid two">
         <FormField label="GST rate (%)"><input type="number" min="0" step="0.01" disabled={gstMode !== 'gst'} value={gstRate} onChange={(e) => setGstRate(e.target.value)} /></FormField>
-        <FormField label="Invoice value"><input readOnly value={`₹${invoiceAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`} /></FormField>
+        <FormField label={mode === 'member' ? 'Subscription value' : 'Invoice value'}><input readOnly value={`₹${invoiceAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`} /></FormField>
       </div>
+      {mode === 'member' && selectedGroup && <div className="invoice-tax-preview"><div><span>Payments included</span><strong>{selectedGroup.payments.length}</strong></div><div><span>Paid in this subscription</span><strong>₹{selectedGroup.payments.reduce((sum, p) => sum + Number(p.amount || 0), 0).toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div><div><span>Balance</span><strong>₹{Number(selectedGroup.balance || 0).toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div><div className="grand"><span>Subscription total</span><strong>₹{invoiceAmount.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div></div>}
       <div className="invoice-tax-preview"><div><span>Taxable</span><strong>₹{gst.taxable.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div><div><span>CGST</span><strong>₹{gst.cgst.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div><div><span>SGST</span><strong>₹{gst.sgst.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div><div className="grand"><span>Total</span><strong>₹{invoiceAmount.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div></div>
     </div>
-    <ModalActions onClose={onClose} disabled={!member} onSave={() => onPrint(gstMode, Number(gstRate || 0))} saveLabel={gstMode === 'gst' ? 'Generate GST invoice' : 'Generate bill'} />
+    <ModalActions onClose={onClose} disabled={!member || (mode === 'member' && !selectedGroup)} onSave={() => onPrint(gstMode, Number(gstRate || 0), selectedPayment)} saveLabel={gstMode === 'gst' ? 'Generate GST invoice' : 'Generate bill'} />
   </Modal>;
 }
 
@@ -8876,7 +9100,7 @@ function PaymentModal({ members, onClose, onSave, settings = {} }) {
   });
 
   const selectedMember = members.find((m) => m.id === form.memberId);
-  const invoiceBase = form.type === 'Membership' ? Number(selectedMember?.amount || form.amount || 0) : Number(form.amount || 0);
+  const invoiceBase = Number(form.amount || 0); // Preview only the amount entered as received.
   const gst = calculateGstBreakdown(invoiceBase, form.gstMode === 'gst' ? form.gstRate : 0);
 
   const update = (key, value) => {
@@ -8955,8 +9179,21 @@ function FormField({ label, children }) {
   return <label className="form-field"><span>{label}</span>{children}</label>; 
 }
 
-function ModalActions({ onClose, onSave, disabled, saveLabel }) { 
-  return <div className="modal-actions"><button className="btn btn-secondary" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={disabled} onClick={onSave}><CheckCircle2 size={17} /> {saveLabel}</button></div>; 
+function ModalActions({ onClose, onSave, disabled, saveLabel }) {
+  // Explicit button types prevent accidental form submission/reload when a modal
+  // is rendered inside a form in the application shell.
+  const handleSave = () => {
+    try {
+      if (typeof onSave === 'function') onSave();
+    } catch (error) {
+      console.error('Invoice generation failed:', error);
+      window.alert(`Invoice generation failed: ${error?.message || 'Unknown error'}. Please open DevTools Console for details.`);
+    }
+  };
+  return <div className="modal-actions">
+    <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+    <button type="button" className="btn btn-primary" disabled={disabled} onClick={handleSave}><CheckCircle2 size={17} /> {saveLabel}</button>
+  </div>;
 }
 
 

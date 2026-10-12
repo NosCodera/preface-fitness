@@ -597,173 +597,35 @@ function mapAttendance(row, members) {
 
 
 function mapTrainer(row) {
-
-  return {
-
-    id: row.legacy_id || row.id,
-
-    cloudId: row.id,
-
-
-
-    name: row.name || '',
-
-    phone: row.phone || '',
-
-
-
-    specialization:
-
-      row.specialization || '',
-
-
-
-    experience:
-
-      Number(row.experience || 0),
-
-
-
-    status:
-
-      row.status || 'Active',
-
-
-
-    monthlySalary:
-
-      Number(row.monthly_salary || 0),
-
-
-
-    notes:
-
-      row.notes || '',
-
-  };
-
+  return {
+    id: row.legacy_id || row.id, cloudId: row.id,
+    name: row.name || '', phone: row.phone || '', specialization: row.specialization || '',
+    experience: Number(row.experience || 0), status: row.status || 'Active',
+    monthlySalary: Number(row.monthly_salary || 0), notes: row.notes || '',
+    tier: row.tier || 'Silver', ptPricing: row.pt_pricing || {},
+  };
 }
 
 
 
 function mapPTSession(row, members, trainers) {
-
-  const member = memberByCloudId(
-
-    members,
-
-    row.member_id
-
-  );
-
-
-
-  const trainer = trainerByCloudId(
-
-    trainers,
-
-    row.trainer_id
-
-  );
-
-
-
-  return {
-
-    id: row.legacy_id || row.id,
-
-    cloudId: row.id,
-
-
-
-    memberId:
-
-      member?.id || '',
-
-
-
-    member:
-
-      member?.name || '',
-
-
-
-    trainerId:
-
-      trainer?.id || '',
-
-
-
-    trainer:
-
-      trainer?.name || '',
-
-
-
-    date:
-
-      row.session_date || '',
-
-
-
-    startTime:
-
-      row.start_time || '',
-
-
-
-    endTime:
-
-      row.end_time || '',
-
-
-
-    time:
-
-      row.start_time || '',
-
-
-
-    duration:
-
-      Number(row.duration_minutes || 0),
-
-
-
-    type:
-
-      row.session_type ||
-
-      'Personal Training',
-
-
-
-    status:
-
-      row.status ||
-
-      'Scheduled',
-
-
-
-    fee:
-
-      Number(row.amount || 0),
-
-
-
-    amount:
-
-      Number(row.amount || 0),
-
-
-
-    notes:
-
-      row.notes || '',
-
-  };
-
+  const member = memberByCloudId(members, row.member_id);
+  const trainer = trainerByCloudId(trainers, row.trainer_id);
+  const expiryDate = row.expiry_date || '';
+  const storedStatus = row.status || 'Scheduled';
+  const status = !['Cancelled','Completed'].includes(storedStatus) && expiryDate && expiryDate < new Date().toISOString().slice(0,10) ? 'Expired' : storedStatus;
+  return {
+    id: row.legacy_id || row.id, cloudId: row.id,
+    memberId: member?.id || '', member: member?.name || '',
+    trainerId: trainer?.id || '', trainer: trainer?.name || '',
+    date: row.session_date || '', startTime: '', endTime: '', time: '', duration: 0,
+    type: row.session_type || 'Personal Training', status,
+    fee: Number(row.amount || 0), amount: Number(row.amount || 0), notes: row.notes || '',
+    planName: row.plan_name || row.session_type || 'Monthly',
+    sessionsTotal: Number(row.sessions_total || 22),
+    sessionsCompleted: Number(row.sessions_completed || 0),
+    validityDays: Number(row.validity_days || 30), expiryDate,
+  };
 }
 
 
