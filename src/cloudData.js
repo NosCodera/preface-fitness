@@ -1,1190 +1,2400 @@
 import { supabase } from './supabase';
 
+
+
 const TABLES = {
-  membershipPlans: 'membership_plans',
-  members: 'members',
-  payments: 'payments',
-  attendance: 'attendance',
-  leads: 'leads',
-  trainers: 'trainers',
-  ptSessions: 'pt_sessions',
-  progressRecords: 'progress_records',
-  workoutPlans: 'workout_plans',
-  dietPlans: 'diet_plans',
-  communicationLogs: 'communication_logs',
-  feedbacks: 'feedbacks',
-  appSettings: 'app_settings',
+
+  membershipPlans: 'membership_plans',
+
+  members: 'members',
+
+  payments: 'payments',
+
+  attendance: 'attendance',
+
+  leads: 'leads',
+
+  trainers: 'trainers',
+
+  ptSessions: 'pt_sessions',
+
+  progressRecords: 'progress_records',
+
+  workoutPlans: 'workout_plans',
+
+  dietPlans: 'diet_plans',
+
+  communicationLogs: 'communication_logs',
+
+  feedbacks: 'feedbacks',
+
+  appSettings: 'app_settings',
+
 };
 
+
+
 function throwIfError(error, context) {
-  if (error) throw new Error(`${context}: ${error.message}`);
+
+  if (error) throw new Error(`${context}: ${error.message}`);
+
 }
+
+
 
 async function getAuthenticatedUser() {
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
 
-  throwIfError(error, 'Unable to read Supabase user');
+  const {
 
-  if (!user) {
-    throw new Error('No authenticated Supabase user');
-  }
+    data: { user },
 
-  return user;
+    error,
+
+  } = await supabase.auth.getUser();
+
+
+
+  throwIfError(error, 'Unable to read Supabase user');
+
+
+
+  if (!user) {
+
+    throw new Error('No authenticated Supabase user');
+
+  }
+
+
+
+  return user;
+
 }
+
+
 
 export async function getCurrentUser() {
-  return getAuthenticatedUser();
+
+  return getAuthenticatedUser();
+
 }
+
+
 
 export async function getCurrentGym() {
-  const user = await getAuthenticatedUser();
 
-  const {
-    data: membership,
-    error: membershipError,
-  } = await supabase
-    .from('gym_users')
-    .select('id, gym_id, role')
-    .eq('id', user.id)
-    .limit(1)
-    .maybeSingle();
+  const user = await getAuthenticatedUser();
 
-  throwIfError(membershipError, 'Unable to read gym membership');
 
-  if (!membership) {
-    throw new Error(
-      'Authenticated user is not assigned to a Preface Fitness gym'
-    );
-  }
 
-  const {
-    data: gym,
-    error: gymError,
-  } = await supabase
-    .from('gyms')
-    .select('*')
-    .eq('id', membership.gym_id)
-    .single();
+  const {
 
-  throwIfError(gymError, 'Unable to read gym');
+    data: membership,
 
-  return gym;
+    error: membershipError,
+
+  } = await supabase
+
+    .from('gym_users')
+
+    .select('id, gym_id, role')
+
+    .eq('id', user.id)
+
+    .limit(1)
+
+    .maybeSingle();
+
+
+
+  throwIfError(membershipError, 'Unable to read gym membership');
+
+
+
+  if (!membership) {
+
+    throw new Error(
+
+      'Authenticated user is not assigned to a Preface Fitness gym'
+
+    );
+
+  }
+
+
+
+  const {
+
+    data: gym,
+
+    error: gymError,
+
+  } = await supabase
+
+    .from('gyms')
+
+    .select('*')
+
+    .eq('id', membership.gym_id)
+
+    .single();
+
+
+
+  throwIfError(gymError, 'Unable to read gym');
+
+
+
+  return gym;
+
 }
+
+
 
 async function getGymId() {
-  const gym = await getCurrentGym();
-  return gym.id;
+
+  const gym = await getCurrentGym();
+
+  return gym.id;
+
 }
+
+
 
 async function selectTable(tableName, gymId) {
-  const {
-    data,
-    error,
-  } = await supabase
-    .from(tableName)
-    .select('*')
-    .eq('gym_id', gymId)
-    .order('created_at', { ascending: false });
 
-  throwIfError(error, `Unable to load ${tableName}`);
+  const {
 
-  return data || [];
+    data,
+
+    error,
+
+  } = await supabase
+
+    .from(tableName)
+
+    .select('*')
+
+    .eq('gym_id', gymId)
+
+    .order('created_at', { ascending: false });
+
+
+
+  throwIfError(error, `Unable to load ${tableName}`);
+
+
+
+  return data || [];
+
 }
+
+
 
 const memberByCloudId = (members, id) =>
-  members.find((m) => m.cloudId === id);
+
+  members.find((m) => m.cloudId === id);
+
+
 
 const memberByUiId = (members, id) =>
-  members.find((m) => m.id === id);
+
+  members.find((m) => m.id === id);
+
+
 
 const trainerByCloudId = (trainers, id) =>
-  trainers.find((t) => t.cloudId === id);
+
+  trainers.find((t) => t.cloudId === id);
+
+
 
 function mapMembershipPlan(row) {
-  return {
-    id: row.id,
-    cloudId: row.id,
-    name: row.name || '',
-    months: Number(row.months || 0),
-    price: Number(row.price || 0),
-    description: row.description || '',
-  };
+
+  return {
+
+    id: row.id,
+
+    cloudId: row.id,
+
+    name: row.name || '',
+
+    months: Number(row.months || 0),
+
+    price: Number(row.price || 0),
+
+    description: row.description || '',
+
+  };
+
 }
+
+
 
 function mapMember(row) {
-  return {
-    id: row.member_code || row.id,
-    cloudId: row.id,
 
-    name: row.name || '',
-    phone: row.phone || '',
-    email: row.email || '',
+  return {
 
-    dob: row.dob || '',
-    birthday: row.dob || '',
-    gender: row.gender || '',
-    address: row.address || '',
-    emergencyContact: row.emergency_contact || '',
+    id: row.member_code || row.id,
 
-    plan: row.plan_name || '',
-    start: row.start_date || '',
-    expiry: row.expiry_date || '',
-    status: row.status || 'Active',
+    cloudId: row.id,
 
-    visits: Number(row.visits || 0),
 
-    due: Number(
-      row.due_amount ??
-      row.due ??
-      0
-    ),
 
-    amount: Number(
-      row.membership_amount ??
-      row.amount ??
-      0
-    ),
+    name: row.name || '',
 
-    paid: Number(
-      row.paid_amount ??
-      row.paid ??
-      0
-    ),
+    phone: row.phone || '',
 
-    height: row.height || '',
-    weight: row.weight || '',
-    currentWeight: row.weight || '',
-    bodyFat: row.body_fat || '',
-    trainer: row.trainer_name || '',
+    email: row.email || '',
 
-    referral: row.referral_source || '',
-    notes: row.notes || '',
-    photo: row.photo || '',
-    dietPreference: row.diet_preference || '',
-    attendanceNumber: row.attendance_number || '',
 
-    referralPoints: Number(
-      row.referral_points || 0
-    ),
 
-    referredBy:
-      row.referred_by_member_code ||
-      row.referred_by_member_id ||
-      '',
+    dob: row.dob || '',
 
-    referredClients: Number(
-      row.referred_clients || 0
-    ),
+    birthday: row.dob || '',
 
-    createdAt: row.created_at || '',
-  };
+    gender: row.gender || '',
+
+    address: row.address || '',
+
+    emergencyContact: row.emergency_contact || '',
+
+
+
+    plan: row.plan_name || '',
+
+    start: row.start_date || '',
+
+    expiry: row.expiry_date || '',
+
+    status: row.status || 'Active',
+
+
+
+    visits: Number(row.visits || 0),
+
+
+
+    due: Number(
+
+      row.due_amount ??
+
+      row.due ??
+
+      0
+
+    ),
+
+
+
+    amount: Number(
+
+      row.membership_amount ??
+
+      row.amount ??
+
+      0
+
+    ),
+
+
+
+    paid: Number(
+
+      row.paid_amount ??
+
+      row.paid ??
+
+      0
+
+    ),
+
+
+
+    height: row.height || '',
+
+    weight: row.weight || '',
+
+    currentWeight: row.weight || '',
+
+    bodyFat: row.body_fat || '',
+
+    trainer: row.trainer_name || '',
+
+
+
+    referral: row.referral_source || '',
+
+    notes: row.notes || '',
+
+    photo: row.photo || '',
+
+    dietPreference: row.diet_preference || '',
+
+    attendanceNumber: row.attendance_number || '',
+
+
+
+    referralPoints: Number(
+
+      row.referral_points || 0
+
+    ),
+
+
+
+    referredBy:
+
+      row.referred_by_member_code ||
+
+      row.referred_by_member_id ||
+
+      '',
+
+
+
+    referredClients: Number(
+
+      row.referred_clients || 0
+
+    ),
+
+
+
+    createdAt: row.created_at || '',
+
+  };
+
 }
+
+
 
 function mapLead(row) {
-  return {
-    id: row.legacy_id || row.id,
-    cloudId: row.id,
 
-    name: row.name || '',
-    phone: row.phone || '',
-    email: row.email || '',
+  return {
 
-    source: row.source || '',
-    stage: row.stage || 'New',
+    id: row.legacy_id || row.id,
 
-    followUp: row.follow_up_date || '',
-    interestedPlan: row.interested_plan || '',
+    cloudId: row.id,
 
-    notes: row.notes || '',
-    lastContact: row.last_contact || '',
 
-    convertedMemberId:
-      row.converted_member_code || '',
 
-    convertedAt:
-      row.converted_at || '',
-  };
+    name: row.name || '',
+
+    phone: row.phone || '',
+
+    email: row.email || '',
+
+
+
+    source: row.source || '',
+
+    stage: row.stage || 'New',
+
+
+
+    followUp: row.follow_up_date || '',
+
+    interestedPlan: row.interested_plan || '',
+
+
+
+    notes: row.notes || '',
+
+    lastContact: row.last_contact || '',
+
+
+
+    convertedMemberId:
+
+      row.converted_member_code || '',
+
+
+
+    convertedAt:
+
+      row.converted_at || '',
+
+  };
+
 }
+
+
 
 function mapPayment(row, members) {
-  const member = memberByCloudId(
-    members,
-    row.member_id
-  );
 
-  return {
-    id: row.legacy_id || row.id,
-    cloudId: row.id,
+  const member = memberByCloudId(
 
-    memberId: member?.id || '',
-    member: member?.name || '',
+    members,
 
-    amount: Number(row.amount || 0),
+    row.member_id
 
-    type:
-      row.payment_type ||
-      'Membership',
+  );
 
-    mode: row.payment_mode || '',
-    date: row.payment_date || '',
-    notes: row.notes || '',
 
-    invoiceNumber:
-      row.invoice_number || '',
 
-    gstApplicable:
-      Boolean(row.gst_applicable),
+  return {
 
-    gstRate:
-      Number(row.gst_rate || 0),
+    id: row.legacy_id || row.id,
 
-    taxableAmount:
-      Number(row.taxable_amount || 0),
+    cloudId: row.id,
 
-    cgstAmount:
-      Number(row.cgst_amount || 0),
 
-    sgstAmount:
-      Number(row.sgst_amount || 0),
 
-    invoiceAmount:
-      Number(row.invoice_amount || 0),
+    memberId: member?.id || '',
 
-    paidAmountAtInvoice:
-      Number(row.paid_amount_at_invoice || 0),
+    member: member?.name || '',
 
-    balanceAtInvoice:
-      Number(row.balance_at_invoice || 0),
 
-    description:
-      row.description || '',
-  };
+
+    amount: Number(row.amount || 0),
+
+
+
+    type:
+
+      row.payment_type ||
+
+      'Membership',
+
+
+
+    mode: row.payment_mode || '',
+
+    date: row.payment_date || '',
+
+    notes: row.notes || '',
+
+
+
+    invoiceNumber:
+
+      row.invoice_number || '',
+
+
+
+    gstApplicable:
+
+      Boolean(row.gst_applicable),
+
+
+
+    gstRate:
+
+      Number(row.gst_rate || 0),
+
+
+
+    taxableAmount:
+
+      Number(row.taxable_amount || 0),
+
+
+
+    cgstAmount:
+
+      Number(row.cgst_amount || 0),
+
+
+
+    sgstAmount:
+
+      Number(row.sgst_amount || 0),
+
+
+
+    invoiceAmount:
+
+      Number(row.invoice_amount || 0),
+
+
+
+    paidAmountAtInvoice:
+
+      Number(row.paid_amount_at_invoice || 0),
+
+
+
+    balanceAtInvoice:
+
+      Number(row.balance_at_invoice || 0),
+
+
+
+    description:
+
+      row.description || '',
+
+  };
+
 }
+
+
 
 function mapAttendance(row, members) {
-  const member = memberByCloudId(
-    members,
-    row.member_id
-  );
 
-  return {
-    id: row.legacy_id || row.id,
-    cloudId: row.id,
+  const member = memberByCloudId(
 
-    memberId: member?.id || '',
-    member: member?.name || '',
+    members,
 
-    date:
-      row.attendance_date || '',
+    row.member_id
 
-    time:
-      row.check_in_time || '',
+  );
 
-    latitude:
-      row.latitude ?? null,
 
-    longitude:
-      row.longitude ?? null,
 
-    distance:
-      row.distance_meters ?? null,
+  return {
 
-    source:
-      row.source || 'Manual',
-  };
+    id: row.legacy_id || row.id,
+
+    cloudId: row.id,
+
+
+
+    memberId: member?.id || '',
+
+    member: member?.name || '',
+
+
+
+    date:
+
+      row.attendance_date || '',
+
+
+
+    time:
+
+      row.check_in_time || '',
+
+
+
+    latitude:
+
+      row.latitude ?? null,
+
+
+
+    longitude:
+
+      row.longitude ?? null,
+
+
+
+    distance:
+
+      row.distance_meters ?? null,
+
+
+
+    source:
+
+      row.source || 'Manual',
+
+  };
+
 }
+
+
 
 function mapTrainer(row) {
-  return {
-    id: row.legacy_id || row.id,
-    cloudId: row.id,
 
-    name: row.name || '',
-    phone: row.phone || '',
+  return {
 
-    specialization:
-      row.specialization || '',
+    id: row.legacy_id || row.id,
 
-    experience:
-      Number(row.experience || 0),
+    cloudId: row.id,
 
-    status:
-      row.status || 'Active',
 
-    monthlySalary:
-      Number(row.monthly_salary || 0),
 
-    notes:
-      row.notes || '',
-  };
+    name: row.name || '',
+
+    phone: row.phone || '',
+
+
+
+    specialization:
+
+      row.specialization || '',
+
+
+
+    experience:
+
+      Number(row.experience || 0),
+
+
+
+    status:
+
+      row.status || 'Active',
+
+
+
+    monthlySalary:
+
+      Number(row.monthly_salary || 0),
+
+
+
+    notes:
+
+      row.notes || '',
+
+  };
+
 }
+
+
 
 function mapPTSession(row, members, trainers) {
-  const member = memberByCloudId(
-    members,
-    row.member_id
-  );
 
-  const trainer = trainerByCloudId(
-    trainers,
-    row.trainer_id
-  );
+  const member = memberByCloudId(
 
-  return {
-    id: row.legacy_id || row.id,
-    cloudId: row.id,
+    members,
 
-    memberId:
-      member?.id || '',
+    row.member_id
 
-    member:
-      member?.name || '',
+  );
 
-    trainerId:
-      trainer?.id || '',
 
-    trainer:
-      trainer?.name || '',
 
-    date:
-      row.session_date || '',
+  const trainer = trainerByCloudId(
 
-    startTime:
-      row.start_time || '',
+    trainers,
 
-    endTime:
-      row.end_time || '',
+    row.trainer_id
 
-    time:
-      row.start_time || '',
+  );
 
-    duration:
-      Number(row.duration_minutes || 0),
 
-    type:
-      row.session_type ||
-      'Personal Training',
 
-    status:
-      row.status ||
-      'Scheduled',
+  return {
 
-    fee:
-      Number(row.amount || 0),
+    id: row.legacy_id || row.id,
 
-    amount:
-      Number(row.amount || 0),
+    cloudId: row.id,
 
-    notes:
-      row.notes || '',
-  };
+
+
+    memberId:
+
+      member?.id || '',
+
+
+
+    member:
+
+      member?.name || '',
+
+
+
+    trainerId:
+
+      trainer?.id || '',
+
+
+
+    trainer:
+
+      trainer?.name || '',
+
+
+
+    date:
+
+      row.session_date || '',
+
+
+
+    startTime:
+
+      row.start_time || '',
+
+
+
+    endTime:
+
+      row.end_time || '',
+
+
+
+    time:
+
+      row.start_time || '',
+
+
+
+    duration:
+
+      Number(row.duration_minutes || 0),
+
+
+
+    type:
+
+      row.session_type ||
+
+      'Personal Training',
+
+
+
+    status:
+
+      row.status ||
+
+      'Scheduled',
+
+
+
+    fee:
+
+      Number(row.amount || 0),
+
+
+
+    amount:
+
+      Number(row.amount || 0),
+
+
+
+    notes:
+
+      row.notes || '',
+
+  };
+
 }
+
+
 
 function mapProgressRecord(row, members) {
-  const member = memberByCloudId(
-    members,
-    row.member_id
-  );
 
-  return {
-    id: row.legacy_id || row.id,
-    cloudId: row.id,
+  const member = memberByCloudId(
 
-    memberId:
-      member?.id || '',
+    members,
 
-    date:
-      row.record_date || '',
+    row.member_id
 
-    weight:
-      row.weight ?? '',
+  );
 
-    bodyFat:
-      row.body_fat ?? '',
 
-    chest:
-      row.chest ?? '',
 
-    waist:
-      row.waist ?? '',
+  return {
 
-    hips:
-      row.hips ?? '',
+    id: row.legacy_id || row.id,
 
-    arms:
-      row.arms ?? '',
+    cloudId: row.id,
 
-    thighs:
-      row.thighs ?? '',
 
-    neck:
-      row.neck ?? '',
 
-    notes:
-      row.notes || '',
+    memberId:
 
-    photos:
-      row.photos || {
-        front: '',
-        side: '',
-        back: '',
-      },
-  };
+      member?.id || '',
+
+
+
+    date:
+
+      row.record_date || '',
+
+
+
+    weight:
+
+      row.weight ?? '',
+
+
+
+    bodyFat:
+
+      row.body_fat ?? '',
+
+
+
+    chest:
+
+      row.chest ?? '',
+
+
+
+    waist:
+
+      row.waist ?? '',
+
+
+
+    hips:
+
+      row.hips ?? '',
+
+
+
+    arms:
+
+      row.arms ?? '',
+
+
+
+    thighs:
+
+      row.thighs ?? '',
+
+
+
+    neck:
+
+      row.neck ?? '',
+
+
+
+    notes:
+
+      row.notes || '',
+
+
+
+    photos:
+
+      row.photos || {
+
+        front: '',
+
+        side: '',
+
+        back: '',
+
+      },
+
+  };
+
 }
+
+
 
 function mapWorkoutPlan(row, members) {
-  const ids = Array.isArray(
-    row.assigned_member_ids
-  )
-    ? row.assigned_member_ids
-    : [];
 
-  return {
-    id: row.legacy_id || row.id,
-    cloudId: row.id,
+  const ids = Array.isArray(
 
-    name:
-      row.name || '',
+    row.assigned_member_ids
 
-    goal:
-      row.goal || '',
+  )
 
-    level:
-      row.level || '',
+    ? row.assigned_member_ids
 
-    durationWeeks:
-      Number(row.duration_weeks || 0),
+    : [];
 
-    trainer:
-      row.trainer_name || '',
 
-    notes:
-      row.notes || '',
 
-    assignedMemberIds:
-      ids
-        .map((x) =>
-          memberByCloudId(
-            members,
-            x
-          )?.id
-        )
-        .filter(Boolean),
+  return {
 
-    exercises:
-      row.exercises || [],
+    id: row.legacy_id || row.id,
 
-    createdAt:
-      row.created_at || '',
-  };
+    cloudId: row.id,
+
+
+
+    name:
+
+      row.name || '',
+
+
+
+    goal:
+
+      row.goal || '',
+
+
+
+    level:
+
+      row.level || '',
+
+
+
+    durationWeeks:
+
+      Number(row.duration_weeks || 0),
+
+
+
+    trainer:
+
+      row.trainer_name || '',
+
+
+
+    notes:
+
+      row.notes || '',
+
+
+
+    assignedMemberIds:
+
+      ids
+
+        .map((x) =>
+
+          memberByCloudId(
+
+            members,
+
+            x
+
+          )?.id
+
+        )
+
+        .filter(Boolean),
+
+
+
+    exercises:
+
+      row.exercises || [],
+
+
+
+    createdAt:
+
+      row.created_at || '',
+
+  };
+
 }
+
+
 
 function mapDietPlan(row, members) {
-  const ids = Array.isArray(
-    row.assigned_member_ids
-  )
-    ? row.assigned_member_ids
-    : [];
 
-  return {
-    id: row.legacy_id || row.id,
-    cloudId: row.id,
+  const ids = Array.isArray(
 
-    name:
-      row.name || '',
+    row.assigned_member_ids
 
-    goal:
-      row.goal || '',
+  )
 
-    calories:
-      Number(row.calories || 0),
+    ? row.assigned_member_ids
 
-    protein:
-      Number(row.protein || 0),
+    : [];
 
-    durationWeeks:
-      Number(row.duration_weeks || 0),
 
-    coach:
-      row.coach || '',
 
-    notes:
-      row.notes || '',
+  return {
 
-    assignedMemberIds:
-      ids
-        .map((x) =>
-          memberByCloudId(
-            members,
-            x
-          )?.id
-        )
-        .filter(Boolean),
+    id: row.legacy_id || row.id,
 
-    meals:
-      row.meals || [],
+    cloudId: row.id,
 
-    createdAt:
-      row.created_at || '',
-  };
+
+
+    name:
+
+      row.name || '',
+
+
+
+    goal:
+
+      row.goal || '',
+
+
+
+    calories:
+
+      Number(row.calories || 0),
+
+
+
+    protein:
+
+      Number(row.protein || 0),
+
+
+
+    durationWeeks:
+
+      Number(row.duration_weeks || 0),
+
+
+
+    coach:
+
+      row.coach || '',
+
+
+
+    notes:
+
+      row.notes || '',
+
+
+
+    assignedMemberIds:
+
+      ids
+
+        .map((x) =>
+
+          memberByCloudId(
+
+            members,
+
+            x
+
+          )?.id
+
+        )
+
+        .filter(Boolean),
+
+
+
+    meals:
+
+      row.meals || [],
+
+
+
+    createdAt:
+
+      row.created_at || '',
+
+  };
+
 }
+
+
 
 function mapCommunicationLog(row, members) {
-  const member = memberByCloudId(
-    members,
-    row.member_id
-  );
 
-  return {
-    id: row.legacy_id || row.id,
-    cloudId: row.id,
+  const member = memberByCloudId(
 
-    memberId:
-      member?.id || '',
+    members,
 
-    member:
-      member?.name || '',
+    row.member_id
 
-    channel:
-      row.channel || '',
+  );
 
-    direction:
-      row.direction || '',
 
-    template:
-      row.template || '',
 
-    subject:
-      row.subject || '',
+  return {
 
-    message:
-      row.message || '',
+    id: row.legacy_id || row.id,
 
-    status:
-      row.status || '',
+    cloudId: row.id,
 
-    date:
-      row.communication_date ||
-      row.sent_at ||
-      '',
 
-    time:
-      row.communication_time ||
-      '',
 
-    createdAt:
-      row.created_at || '',
-  };
+    memberId:
+
+      member?.id || '',
+
+
+
+    member:
+
+      member?.name || '',
+
+
+
+    channel:
+
+      row.channel || '',
+
+
+
+    direction:
+
+      row.direction || '',
+
+
+
+    template:
+
+      row.template || '',
+
+
+
+    subject:
+
+      row.subject || '',
+
+
+
+    message:
+
+      row.message || '',
+
+
+
+    status:
+
+      row.status || '',
+
+
+
+    date:
+
+      row.communication_date ||
+
+      row.sent_at ||
+
+      '',
+
+
+
+    time:
+
+      row.communication_time ||
+
+      '',
+
+
+
+    createdAt:
+
+      row.created_at || '',
+
+  };
+
 }
+
+
 
 function mapFeedback(row, members) {
-  const member = memberByCloudId(
-    members,
-    row.member_id
-  );
 
-  return {
-    id: row.legacy_id || row.id,
-    cloudId: row.id,
+  const member = memberByCloudId(
 
-    memberId:
-      member?.id || '',
+    members,
 
-    memberName:
-      row.member_name ||
-      member?.name ||
-      '',
+    row.member_id
 
-    category:
-      row.category ||
-      'General',
+  );
 
-    priority:
-      row.priority ||
-      'medium',
 
-    feedback:
-      row.feedback ||
-      '',
 
-    status:
-      row.status ||
-      'Open',
+  return {
 
-    date:
-      row.feedback_date ||
-      '',
+    id: row.legacy_id || row.id,
 
-    notes:
-      row.notes ||
-      '',
+    cloudId: row.id,
 
-    createdAt:
-      row.created_at ||
-      '',
-  };
+
+
+    memberId:
+
+      member?.id || '',
+
+
+
+    memberName:
+
+      row.member_name ||
+
+      member?.name ||
+
+      '',
+
+
+
+    category:
+
+      row.category ||
+
+      'General',
+
+
+
+    priority:
+
+      row.priority ||
+
+      'medium',
+
+
+
+    feedback:
+
+      row.feedback ||
+
+      '',
+
+
+
+    status:
+
+      row.status ||
+
+      'Open',
+
+
+
+    date:
+
+      row.feedback_date ||
+
+      '',
+
+
+
+    notes:
+
+      row.notes ||
+
+      '',
+
+
+
+    createdAt:
+
+      row.created_at ||
+
+      '',
+
+  };
+
 }
+
+
 
 function parseSetting(value) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return value;
-  }
 
-  if (
-    typeof value !== 'string'
-  ) {
-    return value;
-  }
+  if (
 
-  try {
-    return JSON.parse(value);
-  } catch {
-    return value;
-  }
+    value === null ||
+
+    value === undefined
+
+  ) {
+
+    return value;
+
+  }
+
+
+
+  if (
+
+    typeof value !== 'string'
+
+  ) {
+
+    return value;
+
+  }
+
+
+
+  try {
+
+    return JSON.parse(value);
+
+  } catch {
+
+    return value;
+
+  }
+
 }
+
+
 
 function buildSettings(rows) {
-  const out = {};
 
-  for (const row of rows) {
-    if (row.setting_key) {
-      out[row.setting_key] =
-        parseSetting(
-          row.setting_value
-        );
-    }
-  }
+  const out = {};
 
-  return out;
+
+
+  for (const row of rows) {
+
+    if (row.setting_key) {
+
+      out[row.setting_key] =
+
+        parseSetting(
+
+          row.setting_value
+
+        );
+
+    }
+
+  }
+
+
+
+  return out;
+
 }
+
+
 
 export async function loadCloudState() {
-  const gym = await getCurrentGym();
-  const gymId = gym.id;
 
-  const [
-    membershipPlans,
-    membersRows,
-    leads,
-    paymentsRows,
-    attendanceRows,
-    trainersRows,
-    ptRows,
-    progressRows,
-    workoutRows,
-    dietRows,
-    communicationRows,
-    feedbacksRows,
-    settingsRows,
-  ] = await Promise.all([
-    selectTable(
-      TABLES.membershipPlans,
-      gymId
-    ),
+  const gym = await getCurrentGym();
 
-    selectTable(
-      TABLES.members,
-      gymId
-    ),
+  const gymId = gym.id;
 
-    selectTable(
-      TABLES.leads,
-      gymId
-    ),
 
-    selectTable(
-      TABLES.payments,
-      gymId
-    ),
 
-    selectTable(
-      TABLES.attendance,
-      gymId
-    ),
+  const [
 
-    selectTable(
-      TABLES.trainers,
-      gymId
-    ),
+    membershipPlans,
 
-    selectTable(
-      TABLES.ptSessions,
-      gymId
-    ),
+    membersRows,
 
-    selectTable(
-      TABLES.progressRecords,
-      gymId
-    ),
+    leads,
 
-    selectTable(
-      TABLES.workoutPlans,
-      gymId
-    ),
+    paymentsRows,
 
-    selectTable(
-      TABLES.dietPlans,
-      gymId
-    ),
+    attendanceRows,
 
-    selectTable(
-      TABLES.communicationLogs,
-      gymId
-    ),
+    trainersRows,
 
-    selectTable(
-      TABLES.feedbacks,
-      gymId
-    ),
+    ptRows,
 
-    selectTable(
-      TABLES.appSettings,
-      gymId
-    ),
-  ]);
+    progressRows,
 
-  const members =
-    membersRows.map(mapMember);
+    workoutRows,
 
-  const trainers =
-    trainersRows.map(mapTrainer);
+    dietRows,
 
-  return {
-    gym,
+    communicationRows,
 
-    membershipPlans:
-      membershipPlans.map(
-        mapMembershipPlan
-      ),
+    feedbacksRows,
 
-    members,
+    settingsRows,
 
-    leads:
-      leads.map(mapLead),
+  ] = await Promise.all([
 
-    payments:
-      paymentsRows.map(
-        (r) =>
-          mapPayment(
-            r,
-            members
-          )
-      ),
+    selectTable(
 
-    attendance:
-      attendanceRows.map(
-        (r) =>
-          mapAttendance(
-            r,
-            members
-          )
-      ),
+      TABLES.membershipPlans,
 
-    trainers,
+      gymId
 
-    ptSessions:
-      ptRows.map(
-        (r) =>
-          mapPTSession(
-            r,
-            members,
-            trainers
-          )
-      ),
+    ),
 
-    progressRecords:
-      progressRows.map(
-        (r) =>
-          mapProgressRecord(
-            r,
-            members
-          )
-      ),
 
-    workoutPlans:
-      workoutRows.map(
-        (r) =>
-          mapWorkoutPlan(
-            r,
-            members
-          )
-      ),
 
-    dietPlans:
-      dietRows.map(
-        (r) =>
-          mapDietPlan(
-            r,
-            members
-          )
-      ),
+    selectTable(
 
-    communicationLogs:
-      communicationRows.map(
-        (r) =>
-          mapCommunicationLog(
-            r,
-            members
-          )
-      ),
+      TABLES.members,
 
-    feedbacks:
-      feedbacksRows.map(
-        (r) =>
-          mapFeedback(
-            r,
-            members
-          )
-      ),
+      gymId
 
-    settings:
-      buildSettings(
-        settingsRows
-      ),
-  };
+    ),
+
+
+
+    selectTable(
+
+      TABLES.leads,
+
+      gymId
+
+    ),
+
+
+
+    selectTable(
+
+      TABLES.payments,
+
+      gymId
+
+    ),
+
+
+
+    selectTable(
+
+      TABLES.attendance,
+
+      gymId
+
+    ),
+
+
+
+    selectTable(
+
+      TABLES.trainers,
+
+      gymId
+
+    ),
+
+
+
+    selectTable(
+
+      TABLES.ptSessions,
+
+      gymId
+
+    ),
+
+
+
+    selectTable(
+
+      TABLES.progressRecords,
+
+      gymId
+
+    ),
+
+
+
+    selectTable(
+
+      TABLES.workoutPlans,
+
+      gymId
+
+    ),
+
+
+
+    selectTable(
+
+      TABLES.dietPlans,
+
+      gymId
+
+    ),
+
+
+
+    selectTable(
+
+      TABLES.communicationLogs,
+
+      gymId
+
+    ),
+
+
+
+    selectTable(
+
+      TABLES.feedbacks,
+
+      gymId
+
+    ),
+
+
+
+    selectTable(
+
+      TABLES.appSettings,
+
+      gymId
+
+    ),
+
+  ]);
+
+
+
+  const members =
+
+    membersRows.map(mapMember);
+
+
+
+  const trainers =
+
+    trainersRows.map(mapTrainer);
+
+
+
+  const mappedFeedbacks = feedbacksRows.map((row) => mapFeedback(row, members));
+  const regularFeedbacks = mappedFeedbacks.filter((item) => item.category !== 'Website Enquiry');
+  const websiteEnquiries = mappedFeedbacks.filter((item) => item.category === 'Website Enquiry');
+
+
+
+  return {
+
+    gym,
+
+
+
+    membershipPlans:
+
+      membershipPlans.map(
+
+        mapMembershipPlan
+
+      ),
+
+
+
+    members,
+
+
+
+    leads:
+
+      leads.map(mapLead),
+
+
+
+    payments:
+
+      paymentsRows.map(
+
+        (r) =>
+
+          mapPayment(
+
+            r,
+
+            members
+
+          )
+
+      ),
+
+
+
+    attendance:
+
+      attendanceRows.map(
+
+        (r) =>
+
+          mapAttendance(
+
+            r,
+
+            members
+
+          )
+
+      ),
+
+
+
+    trainers,
+
+
+
+    ptSessions:
+
+      ptRows.map(
+
+        (r) =>
+
+          mapPTSession(
+
+            r,
+
+            members,
+
+            trainers
+
+          )
+
+      ),
+
+
+
+    progressRecords:
+
+      progressRows.map(
+
+        (r) =>
+
+          mapProgressRecord(
+
+            r,
+
+            members
+
+          )
+
+      ),
+
+
+
+    workoutPlans:
+
+      workoutRows.map(
+
+        (r) =>
+
+          mapWorkoutPlan(
+
+            r,
+
+            members
+
+          )
+
+      ),
+
+
+
+    dietPlans:
+
+      dietRows.map(
+
+        (r) =>
+
+          mapDietPlan(
+
+            r,
+
+            members
+
+          )
+
+      ),
+
+
+
+    communicationLogs:
+
+      communicationRows.map(
+
+        (r) =>
+
+          mapCommunicationLog(
+
+            r,
+
+            members
+
+          )
+
+      ),
+
+
+
+    // Keep website enquiries separate from regular Customer Feedback.
+  feedbacks: regularFeedbacks,
+  websiteEnquiries,
+
+
+
+    settings:
+
+      buildSettings(
+
+        settingsRows
+
+      ),
+
+  };
+
 }
+
+
 
 export async function insertRecord(
-  tableName,
-  payload
+
+  tableName,
+
+  payload
+
 ) {
-  const gymId =
-    await getGymId();
 
-  const {
-    data,
-    error,
-  } = await supabase
-    .from(tableName)
-    .insert({
-      ...payload,
-      gym_id: gymId,
-    })
-    .select()
-    .single();
+  const gymId =
 
-  throwIfError(
-    error,
-    `Unable to insert into ${tableName}`
-  );
+    await getGymId();
 
-  return data;
+
+
+  const {
+
+    data,
+
+    error,
+
+  } = await supabase
+
+    .from(tableName)
+
+    .insert({
+
+      ...payload,
+
+      gym_id: gymId,
+
+    })
+
+    .select()
+
+    .single();
+
+
+
+  throwIfError(
+
+    error,
+
+    `Unable to insert into ${tableName}`
+
+  );
+
+
+
+  return data;
+
 }
+
+
 
 export async function updateRecord(
-  tableName,
-  id,
-  payload
+
+  tableName,
+
+  id,
+
+  payload
+
 ) {
-  const gymId =
-    await getGymId();
 
-  const {
-    data,
-    error,
-  } = await supabase
-    .from(tableName)
-    .update(payload)
-    .eq('id', id)
-    .eq('gym_id', gymId)
-    .select()
-    .single();
+  const gymId =
 
-  throwIfError(
-    error,
-    `Unable to update ${tableName}`
-  );
+    await getGymId();
 
-  return data;
+
+
+  const {
+
+    data,
+
+    error,
+
+  } = await supabase
+
+    .from(tableName)
+
+    .update(payload)
+
+    .eq('id', id)
+
+    .eq('gym_id', gymId)
+
+    .select()
+
+    .single();
+
+
+
+  throwIfError(
+
+    error,
+
+    `Unable to update ${tableName}`
+
+  );
+
+
+
+  return data;
+
 }
+
+
 
 export async function deleteRecord(
-  tableName,
-  id
+
+  tableName,
+
+  id
+
 ) {
-  const gymId =
-    await getGymId();
 
-  const {
-    error,
-  } = await supabase
-    .from(tableName)
-    .delete()
-    .eq('id', id)
-    .eq('gym_id', gymId);
+  const gymId =
 
-  throwIfError(
-    error,
-    `Unable to delete from ${tableName}`
-  );
+    await getGymId();
 
-  return true;
+
+
+  const {
+
+    error,
+
+  } = await supabase
+
+    .from(tableName)
+
+    .delete()
+
+    .eq('id', id)
+
+    .eq('gym_id', gymId);
+
+
+
+  throwIfError(
+
+    error,
+
+    `Unable to delete from ${tableName}`
+
+  );
+
+
+
+  return true;
+
 }
+
+
 
 /*
- * FIX:
- * app_settings.setting_value is JSONB.
- *
- * We now store the value directly instead of
- * JSON.stringify(value).
- *
- * This is important for:
- *   publicPage
- *   publicPage.trainers
- *   publicPage.packages
- *   membershipPrices
- *
- * It also uses an atomic UPSERT against:
- *   gym_id + setting_key
- */
+
+ * FIX:
+
+ * app_settings.setting_value is JSONB.
+
+ *
+
+ * We now store the value directly instead of
+
+ * JSON.stringify(value).
+
+ *
+
+ * This is important for:
+
+ *   publicPage
+
+ *   publicPage.trainers
+
+ *   publicPage.packages
+
+ *   membershipPrices
+
+ *
+
+ * It also uses an atomic UPSERT against:
+
+ *   gym_id + setting_key
+
+ */
+
 export async function saveSettings(
-  settings
+
+  settings
+
 ) {
-  const gymId =
-    await getGymId();
 
-  const entries =
-    Object.entries(
-      settings || {}
-    );
+  const gymId =
 
-  if (!entries.length) {
-    return settings;
-  }
+    await getGymId();
 
-  const rows =
-    entries.map(
-      ([key, value]) => ({
-        gym_id: gymId,
 
-        setting_key:
-          key,
 
-        /*
-         * IMPORTANT:
-         * Do NOT JSON.stringify here.
-         * Supabase column is JSONB.
-         */
-        setting_value:
-          value,
-      })
-    );
+  const entries =
 
-  const {
-    error,
-  } = await supabase
-    .from(TABLES.appSettings)
-    .upsert(
-      rows,
-      {
-        onConflict:
-          'gym_id,setting_key',
-      }
-    );
+    Object.entries(
 
-  throwIfError(
-    error,
-    'Unable to save gym settings'
-  );
+      settings || {}
 
-  return settings;
+    );
+
+
+
+  if (!entries.length) {
+
+    return settings;
+
+  }
+
+
+
+  const rows =
+
+    entries.map(
+
+      ([key, value]) => ({
+
+        gym_id: gymId,
+
+
+
+        setting_key:
+
+          key,
+
+
+
+        /*
+
+         * IMPORTANT:
+
+         * Do NOT JSON.stringify here.
+
+         * Supabase column is JSONB.
+
+         */
+
+        setting_value:
+
+          value,
+
+      })
+
+    );
+
+
+
+  const {
+
+    error,
+
+  } = await supabase
+
+    .from(TABLES.appSettings)
+
+    .upsert(
+
+      rows,
+
+      {
+
+        onConflict:
+
+          'gym_id,setting_key',
+
+      }
+
+    );
+
+
+
+  throwIfError(
+
+    error,
+
+    'Unable to save gym settings'
+
+  );
+
+
+
+  return settings;
+
 }
+
+
 
 export async function publicCheckIn({
-  gymId,
-  memberNumber,
-  latitude,
-  longitude,
-  gymLatitude,
-  gymLongitude,
+
+  gymId,
+
+  memberNumber,
+
+  latitude,
+
+  longitude,
+
+  gymLatitude,
+
+  gymLongitude,
+
 }) {
-  const {
-    data,
-    error,
-  } = await supabase.rpc(
-    'public_check_in',
-    {
-      p_gym_id:
-        gymId,
 
-      p_member_number:
-        String(
-          memberNumber || ''
-        ).trim(),
+  const {
 
-      p_lat:
-        Number(latitude),
+    data,
 
-      p_lng:
-        Number(longitude),
+    error,
 
-      p_gym_lat:
-        Number(gymLatitude),
+  } = await supabase.rpc(
 
-      p_gym_lng:
-        Number(gymLongitude),
-    }
-  );
+    'public_check_in',
 
-  throwIfError(
-    error,
-    'Unable to mark attendance'
-  );
+    {
 
-  return (
-    data || {
-      success: false,
-      message:
-        'Attendance service returned no response.',
-    }
-  );
+      p_gym_id:
+
+        gymId,
+
+
+
+      p_member_number:
+
+        String(
+
+          memberNumber || ''
+
+        ).trim(),
+
+
+
+      p_lat:
+
+        Number(latitude),
+
+
+
+      p_lng:
+
+        Number(longitude),
+
+
+
+      p_gym_lat:
+
+        Number(gymLatitude),
+
+
+
+      p_gym_lng:
+
+        Number(gymLongitude),
+
+    }
+
+  );
+
+
+
+  throwIfError(
+
+    error,
+
+    'Unable to mark attendance'
+
+  );
+
+
+
+  return (
+
+    data || {
+
+      success: false,
+
+      message:
+
+        'Attendance service returned no response.',
+
+    }
+
+  );
+
 }
 
+
+
 export async function publicSubmitFeedback({
-  gymId,
-  memberName,
-  category,
-  priority,
-  feedback,
+
+  gymId,
+
+  memberName,
+
+  category,
+
+  priority,
+
+  feedback,
+
 }) {
-  const {
-    data,
-    error,
-  } = await supabase.rpc(
-    'public_submit_feedback',
-    {
-      p_gym_id:
-        gymId,
 
-      p_member_name:
-        String(
-          memberName || ''
-        ).trim(),
+  const {
 
-      p_category:
-        String(
-          category ||
-          'General'
-        ).trim(),
+    data,
 
-      p_priority:
-        String(
-          priority ||
-          'medium'
-        )
-          .trim()
-          .toLowerCase(),
+    error,
 
-      p_feedback:
-        String(
-          feedback || ''
-        ).trim(),
-    }
-  );
+  } = await supabase.rpc(
 
-  throwIfError(
-    error,
-    'Unable to submit feedback'
-  );
+    'public_submit_feedback',
 
-  return (
-    data || {
-      success: true,
-    }
-  );
+    {
+
+      p_gym_id:
+
+        gymId,
+
+
+
+      p_member_name:
+
+        String(
+
+          memberName || ''
+
+        ).trim(),
+
+
+
+      p_category:
+
+        String(
+
+          category ||
+
+          'General'
+
+        ).trim(),
+
+
+
+      p_priority:
+
+        String(
+
+          priority ||
+
+          'medium'
+
+        )
+
+          .trim()
+
+          .toLowerCase(),
+
+
+
+      p_feedback:
+
+        String(
+
+          feedback || ''
+
+        ).trim(),
+
+    }
+
+  );
+
+
+
+  throwIfError(
+
+    error,
+
+    'Unable to submit feedback'
+
+  );
+
+
+
+  return (
+
+    data || {
+
+      success: true,
+
+    }
+
+  );
+
+}
+
+
+
+
+export async function publicSubmitEnquiry({ gymId, name, phone, email, interestedPlan, message }) {
+  // Reuse the existing public_submit_feedback RPC and feedbacks table.
+  // This avoids adding a new database function/table or running a migration.
+  const cleanName = String(name || '').trim();
+  const cleanPhone = String(phone || '').trim();
+  const cleanEmail = String(email || '').trim();
+  const cleanPlan = String(interestedPlan || '').trim();
+  const cleanMessage = String(message || '').trim();
+  const enquiryText = [
+    `Phone: ${cleanPhone}`,
+    `Email: ${cleanEmail || 'Not provided'}`,
+    `Interested in: ${cleanPlan || 'Not specified'}`,
+    `Message: ${cleanMessage || 'No additional message provided.'}`,
+  ].join('\n');
+
+  const { data, error } = await supabase.rpc('public_submit_feedback', {
+    p_gym_id: String(gymId || '').trim(),
+    p_member_name: cleanName,
+    p_category: 'Website Enquiry',
+    p_priority: 'medium',
+    p_feedback: enquiryText,
+  });
+  throwIfError(error, 'Unable to submit customer enquiry');
+  return data || { success: true };
 }
 
 export async function getMyAccess() {
-  const {
-    data,
-    error,
-  } = await supabase.rpc(
-    'get_my_access'
-  );
 
-  throwIfError(
-    error,
-    'Unable to read user permissions'
-  );
+  const {
 
-  return (
-    data || {
-      role: 'staff',
-      permissions: {},
-    }
-  );
+    data,
+
+    error,
+
+  } = await supabase.rpc(
+
+    'get_my_access'
+
+  );
+
+
+
+  throwIfError(
+
+    error,
+
+    'Unable to read user permissions'
+
+  );
+
+
+
+  return (
+
+    data || {
+
+      role: 'staff',
+
+      permissions: {},
+
+    }
+
+  );
+
 }
+
+
 
 export async function getGymStaff() {
-  const {
-    data,
-    error,
-  } = await supabase.rpc(
-    'get_gym_staff'
-  );
 
-  throwIfError(
-    error,
-    'Unable to load staff accounts'
-  );
+  const {
 
-  return data || [];
+    data,
+
+    error,
+
+  } = await supabase.rpc(
+
+    'get_gym_staff'
+
+  );
+
+
+
+  throwIfError(
+
+    error,
+
+    'Unable to load staff accounts'
+
+  );
+
+
+
+  return data || [];
+
 }
+
+
 
 export async function updateStaffPermissions(
-  userId,
-  permissions
+
+  userId,
+
+  permissions
+
 ) {
-  const {
-    data,
-    error,
-  } = await supabase.rpc(
-    'update_staff_permissions',
-    {
-      p_user_id:
-        userId,
 
-      p_permissions:
-        permissions,
-    }
-  );
+  const {
 
-  throwIfError(
-    error,
-    'Unable to update staff permissions'
-  );
+    data,
 
-  return data;
+    error,
+
+  } = await supabase.rpc(
+
+    'update_staff_permissions',
+
+    {
+
+      p_user_id:
+
+        userId,
+
+
+
+      p_permissions:
+
+        permissions,
+
+    }
+
+  );
+
+
+
+  throwIfError(
+
+    error,
+
+    'Unable to update staff permissions'
+
+  );
+
+
+
+  return data;
+
 }
 
+
+
 export async function setStaffActive(
-  userId,
-  isActive
+
+  userId,
+
+  isActive
+
 ) {
-  const {
-    data,
-    error,
-  } = await supabase.rpc(
-    'set_staff_active',
-    {
-      p_user_id:
-        userId,
 
-      p_is_active:
-        isActive,
-    }
-  );
+  const {
 
-  throwIfError(
-    error,
-    'Unable to update staff status'
-  );
+    data,
 
-  return data;
+    error,
+
+  } = await supabase.rpc(
+
+    'set_staff_active',
+
+    {
+
+      p_user_id:
+
+        userId,
+
+
+
+      p_is_active:
+
+        isActive,
+
+    }
+
+  );
+
+
+
+  throwIfError(
+
+    error,
+
+    'Unable to update staff status'
+
+  );
+
+
+
+  return data;
+
 }

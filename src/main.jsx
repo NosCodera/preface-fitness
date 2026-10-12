@@ -14,6 +14,7 @@ import {
   ClipboardList,
   CreditCard,
   Dumbbell,
+  Eye,
   FileDown,
   FileUp,
   LayoutDashboard,
@@ -57,6 +58,7 @@ import {
   saveSettings as saveCloudSettings,
   publicCheckIn,
   publicSubmitFeedback,
+  publicSubmitEnquiry,
   getMyAccess,
   getGymStaff,
   updateStaffPermissions,
@@ -80,6 +82,32 @@ const MEMBERSHIP_PLANS = [
 const DEFAULT_MEMBERSHIP_PRICES = Object.fromEntries(
   MEMBERSHIP_PLANS.map((plan) => [plan.name, plan.price])
 );
+
+
+const MEMBER_META_MARKER = '<!--PREFACE_MEMBER_META:';
+const MEMBER_MEDICAL_OPTIONS = [
+  'Heart Disease', 'Asthma', 'Infectious Diseases', 'High/Low Blood Pressure',
+  'Family Hx of Heart Disease', 'Cardiovascular Condition', 'Dizziness', 'Arthritis',
+  'Diabetes', 'Fainting', 'Epilepsy/Fits', 'Blackouts', 'Knees', 'Lower Back',
+  'Neck/Shoulders', 'Flexibility', 'Hips/Pelvis', 'Other',
+];
+function readMemberMeta(notes) {
+  const value = String(notes || '');
+  const index = value.lastIndexOf(MEMBER_META_MARKER);
+  if (index < 0) return {};
+  const raw = value.slice(index + MEMBER_META_MARKER.length).split('-->')[0];
+  try { return JSON.parse(raw); } catch { return {}; }
+}
+function cleanMemberNotes(notes) {
+  const value = String(notes || '');
+  const index = value.lastIndexOf(MEMBER_META_MARKER);
+  return (index < 0 ? value : value.slice(0, index)).trim();
+}
+function encodeMemberNotes(notes, meta = {}) {
+  const clean = String(notes || '').trim();
+  const payload = JSON.stringify({ medicalConditions: Array.isArray(meta.medicalConditions) ? meta.medicalConditions : [], medicalOther: String(meta.medicalOther || ''), surgeryDetails: String(meta.surgeryDetails || ''), additionalMedicalNotes: String(meta.additionalMedicalNotes || ''), referralOther: String(meta.referralOther || '') });
+  return `${clean}${clean ? '\n\n' : ''}${MEMBER_META_MARKER}${payload}-->`;
+}
 
 
 const VIBRANT_THEME_CSS = `
@@ -1896,7 +1924,8 @@ const STAFF_PERMISSION_DEFINITIONS = [
   { key: 'dashboard', label: 'Dashboard', description: 'View dashboard and daily overview' },
   { key: 'performance', label: 'Performance', description: 'View performance analytics' },
   { key: 'members', label: 'Members', description: 'Add, edit and manage members' },
-  { key: 'leads', label: 'Leads', description: 'Manage enquiries and leads' },
+  { key: 'leads', label: 'Leads', description: 'Manage sales leads and prospects' },
+  { key: 'enquiries', label: 'Website Enquiries', description: 'View enquiries submitted through the public gym website' },
   { key: 'memberships', label: 'Memberships', description: 'Manage membership renewals and plans' },
   { key: 'attendance', label: 'Attendance', description: 'View and record attendance' },
   { key: 'payments', label: 'Payments & Invoices', description: 'Record payments and generate invoices' },
@@ -1932,6 +1961,8 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState('');
+  const [excelImportPreview, setExcelImportPreview] = useState(null);
+  const [excelImportBusy, setExcelImportBusy] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [cloudStatus, setCloudStatus] = useState('checking');
   const [access, setAccess] = useState({
@@ -1941,8 +1972,46 @@ function App() {
     permissions: {},
   });
 
-  const isOwner = access.role === 'owner';
-  const can = (permission) => isOwner || access.permissions?.[permission] === true;
+  const normalizedRole = String(access.role || '').trim().toLowerCase();
+  const isOwner = ['owner', 'admin', 'administrator'].includes(normalizedRole);
+  const isReadOnlyStaff = isAuthenticated && !isOwner;
+  // Existing staff accounts may not yet have an explicit 'enquiries' key.
+  // Reuse their existing Leads or Customer Feedback permission for access.
+  const can = (permission) => isOwner || access.permissions?.[permission] === true || (permission === 'enquiries' && (access.permissions?.leads === true || access.permissions?.feedback === true));
+  const seenWebsiteEnquiriesRef = useRef(null);
+
+  // Staff accounts are strictly view-only in the UI. Capture actions before
+  // page components receive them so add/edit/delete/save/payment/attendance
+  // actions cannot be triggered through normal UI controls. Navigation,
+  // search, filters, tabs and view/details actions remain usable.
+  const blockStaffMutation = (event) => {
+    if (!isReadOnlyStaff) return;
+    const target = event.target instanceof Element ? event.target : null;
+    const control = target?.closest('button, [role="button"], input[type="submit"], input[type="button"]');
+    if (!control) return;
+
+    const label = [
+      control.innerText,
+      control.getAttribute('aria-label'),
+      control.getAttribute('title'),
+      control.getAttribute('data-action'),
+    ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().toLowerCase();
+
+    const mutationAction = /\b(add|create|new member|new lead|delete|remove|edit|save|submit|update|modify|record payment|mark attendance|check.?in|convert|confirm payment|refund|renew|extend membership|enable staff|disable staff|save permissions|allow all|remove all|upload|import|export changes)\b/.test(label);
+    if (mutationAction) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+      setToast('Read-only access: staff can view information but cannot add, edit, or delete records.');
+    }
+  };
+
+  const blockStaffFormSubmit = (event) => {
+    if (!isReadOnlyStaff) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setToast('Read-only access: staff cannot submit changes.');
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -2097,9 +2166,13 @@ function App() {
           communicationLogs: cloud.communicationLogs?.length
             ? cloud.communicationLogs
             : current.communicationLogs,
-          feedbacks: cloud.feedbacks?.length
+          // Website enquiries are maintained separately from Customer Feedback.
+          feedbacks: Array.isArray(cloud.feedbacks)
             ? cloud.feedbacks
             : current.feedbacks,
+          websiteEnquiries: Array.isArray(cloud.websiteEnquiries)
+            ? cloud.websiteEnquiries
+            : (current.websiteEnquiries || []),
           settings: {
             ...(current.settings || {}),
             ...(cloud.settings || {}),
@@ -2160,6 +2233,7 @@ function App() {
       gstRate: Number(member.gstRate || data.settings?.defaultGstRate || 5),
       createdAt: new Date().toISOString(),
     };
+    clean.notes = encodeMemberNotes(clean.notes, clean);
 
     try {
       const referredMember = data.members.find((item) => String(item.id) === String(clean.referredBy || ''));
@@ -2270,6 +2344,7 @@ function App() {
       paid: Number(updated.paid || 0),
       status: getMemberStatus(updated.expiry),
     };
+    clean.notes = encodeMemberNotes(clean.notes, clean);
 
     try {
       const referredMember = data.members.find((item) => String(item.id) === String(clean.referredBy || ''));
@@ -2568,16 +2643,45 @@ function App() {
     }
   };
 
-  const markAttendance = (name, attendanceDate = today) => {
-    const already = data.attendance.some(
-      (a) => a.member === name && a.date === attendanceDate
+  const updateWebsiteEnquiryStatus = async (enquiry, status) => {
+    try {
+      if (enquiry.cloudId) await updateRecord('feedbacks', enquiry.cloudId, { status });
+      setData((current) => ({
+        ...current,
+        websiteEnquiries: (current.websiteEnquiries || []).map((item) =>
+          (item.cloudId || item.id) === (enquiry.cloudId || enquiry.id) ? { ...item, status } : item
+        ),
+      }));
+      setToast(`Enquiry marked ${status.toLowerCase()}`);
+    } catch (error) {
+      console.error('Website enquiry status update failed:', error);
+      setToast(error?.message || 'Unable to update enquiry status');
+    }
+  };
+
+  const markAttendance = (memberOrId, attendanceDate = today) => {
+    // Prefer a unique member ID. Names are not unique (e.g. two members named Aditya Rawat).
+    const requestedId = typeof memberOrId === 'object' && memberOrId
+      ? memberOrId.id
+      : memberOrId;
+    const member = data.members.find((m) => String(m.id) === String(requestedId)) || (() => {
+      if (typeof memberOrId !== 'string') return null;
+      const matches = data.members.filter((m) => m.name === memberOrId);
+      return matches.length === 1 ? matches[0] : null;
+    })();
+
+    if (!member) {
+      return setToast('Could not identify this member uniquely. Please select the member by ID.');
+    }
+
+    const already = data.attendance.some((a) =>
+      a.date === attendanceDate && String(a.memberId || '') === String(member.id)
     );
 
     if (already) {
-      return setToast(`${name} is already marked present for this date`);
+      return setToast(`${member.name} is already marked present for this date`);
     }
 
-    const member = data.members.find((m) => m.name === name);
     const time = new Date().toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit',
@@ -2588,21 +2692,57 @@ function App() {
       attendance: [
         {
           id: `A-${Date.now()}`,
-          member: name,
-          memberId: member?.id || '',
+          member: member.name,
+          memberId: member.id,
           date: attendanceDate,
           time,
         },
         ...d.attendance,
       ],
       members: d.members.map((m) =>
-        m.name === name
+        String(m.id) === String(member.id)
           ? { ...m, visits: Number(m.visits || 0) + 1 }
           : m
       ),
     }));
 
-    setToast(`${name} marked present`);
+    setToast(`${member.name} marked present`);
+  };
+
+  const removeAttendanceRecord = async (record) => {
+    if (!isOwner) {
+      setToast('Only the Administrator can remove attendance records.');
+      return;
+    }
+
+    const memberName = record?.member || 'this member';
+    const recordDate = record?.date || today;
+    if (!window.confirm(`Remove attendance for ${memberName} on ${recordDate}?`)) return;
+
+    try {
+      if (record?.cloudId) {
+        await deleteRecord('attendance', record.cloudId);
+      }
+
+      setData((current) => ({
+        ...current,
+        attendance: (current.attendance || []).filter((item) =>
+          (item.cloudId || item.id) !== (record.cloudId || record.id)
+        ),
+        members: (current.members || []).map((member) => {
+          const sameMember = record.memberId
+            ? member.id === record.memberId
+            : member.name === memberName;
+          return sameMember
+            ? { ...member, visits: Math.max(0, Number(member.visits || 0) - 1) }
+            : member;
+        }),
+      }));
+      setToast(`Attendance removed for ${memberName}`);
+    } catch (error) {
+      console.error('Attendance removal failed:', error);
+      setToast(error?.message || 'Unable to remove attendance. Please try again.');
+    }
   };
 
   const createWorkoutPlan = (plan) => {
@@ -2970,6 +3110,314 @@ function App() {
     setToast('Progress record deleted');
   };
 
+  const normalizeExcelHeader = (value) => String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+
+  const parseExcelDate = (value) => {
+    if (value === null || value === undefined || value === '') return '';
+    if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+    const text = String(value).trim();
+    if (!text) return '';
+    // Excel serial dates may be returned as numbers when raw cell values are used.
+    if (typeof value === 'number' && value > 20000 && value < 80000) {
+      const date = new Date(Date.UTC(1899, 11, 30) + value * 86400000);
+      return date.toISOString().slice(0, 10);
+    }
+    const iso = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+    if (iso) return `${iso[1]}-${String(iso[2]).padStart(2, '0')}-${String(iso[3]).padStart(2, '0')}`;
+    const dmy = text.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
+    if (dmy) {
+      let year = Number(dmy[3]);
+      if (year < 100) year += year < 50 ? 2000 : 1900;
+      return `${year}-${String(dmy[2]).padStart(2, '0')}-${String(dmy[1]).padStart(2, '0')}`;
+    }
+    const parsed = new Date(text);
+    return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10);
+  };
+
+  const mapExcelMemberRow = (row, sheetName) => {
+    const normalized = {};
+    Object.entries(row || {}).forEach(([key, value]) => { normalized[normalizeExcelHeader(key)] = value; });
+    const pick = (...keys) => {
+      for (const key of keys) {
+        const value = normalized[normalizeExcelHeader(key)];
+        if (value !== undefined && value !== null && String(value).trim() !== '') return value;
+      }
+      return '';
+    };
+    const name = String(pick('Member Name', 'Name', 'Customer Name', 'Full Name')).trim();
+    const phone = String(pick('Phone', 'Mobile', 'Mobile Number', 'Phone Number', 'Contact')).trim();
+    const sheetPlan = /half[ -]?year|6[ -]?month/i.test(sheetName) ? 'Half-yearly' : /quarter|3[ -]?month/i.test(sheetName) ? 'Quarterly' : /annual|yearly|12[ -]?month/i.test(sheetName) ? 'Annual' : /month/i.test(sheetName) ? 'Monthly' : sheetName;
+    const plan = String(pick('Membership Plan', 'Plan', 'Membership', 'Package') || sheetPlan || 'Monthly').trim();
+    const amount = Number(String(pick('Membership Amount', 'Amount', 'Total Amount', 'Fees', 'Fee') || 0).replace(/[₹,\s]/g, '')) || 0;
+    const paid = Number(String(pick('Amount Paid', 'Paid Amount', 'Paid', 'Payment Received') || 0).replace(/[₹,\s]/g, '')) || 0;
+    const explicitDue = pick('Due Amount', 'Outstanding Due', 'Due', 'Balance');
+    const due = explicitDue === '' ? Math.max(0, amount - paid) : (Number(String(explicitDue).replace(/[₹,\s]/g, '')) || 0);
+    return {
+      id: String(pick('Member ID', 'Member Code', 'ID', 'Customer ID')).trim(),
+      name,
+      phone,
+      email: String(pick('Email', 'Email Address')).trim(),
+      plan,
+      start: parseExcelDate(pick('Joining Date', 'Start Date', 'Date Joined', 'Membership Start')),
+      expiry: parseExcelDate(pick('Expiry Date', 'End Date', 'Membership Expiry', 'Valid Until')),
+      amount,
+      paid,
+      due,
+      address: String(pick('Address')).trim(),
+      gender: String(pick('Gender')).trim(),
+      dob: parseExcelDate(pick('Date of Birth', 'DOB', 'Birthday')),
+      emergencyContact: String(pick('Emergency Contact', 'Emergency Phone')).trim(),
+      trainer: String(pick('Trainer', 'Trainer Name')).trim(),
+      notes: String(pick('Notes', 'Remarks', 'Comments')).trim(),
+      _sourceSheet: sheetName,
+      _errors: [
+        !name ? 'Member name is required' : '',
+        !phone ? 'Phone number is required' : '',
+        !plan ? 'Membership plan is required' : '',
+      ].filter(Boolean),
+    };
+  };
+
+  const handleExcelFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    try {
+      const XLSX = await import('xlsx');
+      const bytes = await file.arrayBuffer();
+      const workbook = XLSX.read(bytes, { type: 'array', cellDates: true });
+      const rows = [];
+      workbook.SheetNames.forEach((sheetName) => {
+        const sheet = workbook.Sheets[sheetName];
+        const sheetRows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false, dateNF: 'yyyy-mm-dd' });
+        sheetRows.forEach((row) => {
+          if (Object.values(row).every((value) => String(value ?? '').trim() === '')) return;
+          rows.push(mapExcelMemberRow(row, sheetName));
+        });
+      });
+      if (!rows.length) throw new Error('No member rows found. Please check the workbook headers and sheets.');
+      const existingPhones = new Set((data.members || []).map((m) => String(m.phone || '').replace(/\D/g, '')).filter(Boolean));
+      const existingIds = new Set((data.members || []).map((m) => String(m.id || '').trim().toLowerCase()).filter(Boolean));
+      const seenPhones = new Set();
+      const seenIds = new Set();
+      const previewRows = rows.map((row, index) => {
+        const errors = [...row._errors];
+        const phoneKey = row.phone.replace(/\D/g, '');
+        const idKey = row.id.trim().toLowerCase();
+        if (phoneKey && (existingPhones.has(phoneKey) || seenPhones.has(phoneKey))) errors.push('Duplicate phone number');
+        if (idKey && (existingIds.has(idKey) || seenIds.has(idKey))) errors.push('Duplicate member ID');
+        if (phoneKey) seenPhones.add(phoneKey);
+        if (idKey) seenIds.add(idKey);
+        return { ...row, _rowNumber: index + 2, _errors: [...new Set(errors)], _skip: errors.length > 0 };
+      });
+      setExcelImportPreview({ fileName: file.name, rows: previewRows, sheetNames: workbook.SheetNames });
+      setModal('excelImportPreview');
+    } catch (error) {
+      console.error('Excel import failed:', error);
+      setToast(error?.message || 'Could not read this Excel file. Please use .xlsx or .xls.');
+    }
+  };
+
+  const confirmExcelImport = async () => {
+    if (!excelImportPreview || excelImportBusy) return;
+    const rows = excelImportPreview.rows.filter((row) => !row._skip && !row._errors.length);
+    if (!rows.length) { setToast('There are no valid rows to import. Fix the highlighted rows in Excel and upload again.'); return; }
+    if (!window.confirm(`Import ${rows.length} member(s) into Preface Fitness? Duplicate/invalid rows will be skipped.`)) return;
+    setExcelImportBusy(true);
+    let importedMembers = [];
+    let importedPayments = [];
+    let skipped = excelImportPreview.rows.length - rows.length;
+    const reservedIds = new Set((data.members || []).map((m) => String(m.id || '').toLowerCase()));
+    // attendance_number has a UNIQUE constraint in Supabase. Never insert an empty
+    // string for every imported member; allocate a distinct numeric value per member.
+    const reservedAttendanceNumbers = new Set(
+      (data.members || [])
+        .map((m) => String(m.attendanceNumber ?? m.attendance_number ?? '').trim())
+        .filter(Boolean)
+    );
+    let nextAttendanceNumber = (data.members || []).reduce((max, m) => {
+      const n = Number(String(m.attendanceNumber ?? m.attendance_number ?? '').trim());
+      return Number.isFinite(n) ? Math.max(max, n) : max;
+    }, 0) + 1;
+    const allocateAttendanceNumber = () => {
+      while (reservedAttendanceNumbers.has(String(nextAttendanceNumber))) nextAttendanceNumber += 1;
+      const number = String(nextAttendanceNumber++);
+      reservedAttendanceNumbers.add(number);
+      return number;
+    };
+    try {
+      for (const row of rows) {
+        let memberId = String(row.id || '').trim();
+        if (!memberId || reservedIds.has(memberId.toLowerCase())) {
+          memberId = nextSystemMemberId([...(data.members || []), ...importedMembers]);
+          while (reservedIds.has(memberId.toLowerCase())) memberId = nextSystemMemberId([...(data.members || []), ...importedMembers, { id: memberId }]);
+        }
+        reservedIds.add(memberId.toLowerCase());
+        const planPrice = Number(planPrices[row.plan] || row.amount || 0);
+        const amount = Number(row.amount || planPrice || 0);
+        const paid = Math.max(0, Number(row.paid || 0));
+        const due = Math.max(0, Number(row.due ?? (amount - paid)));
+        const status = getMemberStatus(row.expiry);
+        const attendanceNumber = allocateAttendanceNumber();
+        const memberRow = await insertRecord('members', {
+          member_code: memberId,
+          name: row.name,
+          phone: row.phone,
+          email: row.email || '',
+          dob: row.dob || null,
+          gender: row.gender || '',
+          address: row.address || '',
+          emergency_contact: row.emergencyContact || '',
+          plan_name: row.plan,
+          start_date: row.start || null,
+          expiry_date: row.expiry || null,
+          status,
+          visits: 0,
+          due_amount: due,
+          membership_amount: amount,
+          paid_amount: paid,
+          trainer_name: row.trainer || '',
+          notes: row.notes || '',
+          photo: '',
+          diet_preference: '',
+          attendance_number: attendanceNumber,
+          referral_points: 0,
+          referred_by_member_id: null,
+        });
+        const savedMember = {
+          id: memberRow.member_code || memberId,
+          cloudId: memberRow.id,
+          name: row.name,
+          phone: row.phone,
+          email: row.email || '',
+          dob: row.dob || '',
+          birthday: row.dob || '',
+          gender: row.gender || '',
+          address: row.address || '',
+          emergencyContact: row.emergencyContact || '',
+          plan: row.plan,
+          start: row.start || '',
+          expiry: row.expiry || '',
+          status,
+          visits: 0,
+          attendanceNumber: memberRow.attendance_number || attendanceNumber,
+          due,
+          amount,
+          paid,
+          trainer: row.trainer || '',
+          notes: row.notes || '',
+          createdAt: new Date().toISOString(),
+        };
+        importedMembers.push(savedMember);
+        if (paid > 0) {
+          const paymentId = `EXCEL-${Date.now()}-${importedPayments.length + 1}`;
+          const paymentRow = await insertRecord('payments', {
+            member_id: memberRow.id,
+            legacy_id: paymentId,
+            amount: paid,
+            payment_type: 'Membership',
+            payment_mode: 'Cash',
+            payment_date: row.start || today,
+            notes: `Imported from Excel | Plan: ${row.plan} | Joining: ${row.start || ''} | Expiry: ${row.expiry || ''}`,
+            invoice_number: '',
+            gst_applicable: false,
+            gst_rate: 0,
+            taxable_amount: paid,
+            cgst_amount: 0,
+            sgst_amount: 0,
+            invoice_amount: amount,
+            paid_amount_at_invoice: paid,
+            balance_at_invoice: due,
+            description: `${row.plan} membership (Excel import)`,
+          });
+          importedPayments.push({
+            id: paymentRow.legacy_id || paymentId,
+            cloudId: paymentRow.id,
+            memberId: savedMember.id,
+            member: savedMember.name,
+            amount: paid,
+            type: 'Membership',
+            mode: 'Cash',
+            date: row.start || today,
+            notes: `Imported from Excel | Plan: ${row.plan}`,
+            invoiceNumber: '',
+            gstApplicable: false,
+            gstRate: 0,
+            taxableAmount: paid,
+            cgstAmount: 0,
+            sgstAmount: 0,
+            invoiceAmount: amount,
+            paidAmountAtInvoice: paid,
+            balanceAtInvoice: due,
+            description: `${row.plan} membership (Excel import)`,
+          });
+        }
+      }
+      setData((current) => ({
+        ...current,
+        members: [...importedMembers, ...(current.members || [])],
+        payments: [...importedPayments, ...(current.payments || [])],
+      }));
+      setExcelImportPreview(null);
+      setModal(null);
+      setToast(`Excel import complete: ${importedMembers.length} member(s) imported, ${skipped} row(s) skipped.`);
+    } catch (error) {
+      console.error('Excel import stopped:', error);
+      setData((current) => ({
+        ...current,
+        members: [...importedMembers, ...(current.members || [])],
+        payments: [...importedPayments, ...(current.payments || [])],
+      }));
+      setToast(`Import stopped after ${importedMembers.length} member(s): ${error?.message || 'Supabase error'}. Successfully saved rows were kept.`);
+    } finally {
+      setExcelImportBusy(false);
+    }
+  };
+
+  const exportMembersExcel = async () => {
+    try {
+      const XLSX = await import('xlsx');
+      const workbook = XLSX.utils.book_new();
+      const members = data.members || [];
+      const columns = ['Member ID', 'Member Name', 'Phone', 'Email', 'Membership Plan', 'Joining Date', 'Expiry Date', 'Membership Amount', 'Amount Paid', 'Due Amount', 'Gender', 'Date of Birth', 'Address', 'Emergency Contact', 'Trainer', 'Notes'];
+      const toExcelRow = (member) => ({
+        'Member ID': member.id || '',
+        'Member Name': member.name || '',
+        'Phone': member.phone || '',
+        'Email': member.email || '',
+        'Membership Plan': member.plan || '',
+        'Joining Date': member.start || '',
+        'Expiry Date': member.expiry || '',
+        'Membership Amount': Number(member.amount || 0),
+        'Amount Paid': Number(member.paid || 0),
+        'Due Amount': Number(member.due || 0),
+        'Gender': member.gender || '',
+        'Date of Birth': member.dob || member.birthday || '',
+        'Address': member.address || '',
+        'Emergency Contact': member.emergencyContact || '',
+        'Trainer': member.trainer || '',
+        'Notes': member.notes || '',
+      });
+      const allRows = members.map(toExcelRow);
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(allRows, { header: columns }), 'All Members');
+      const plans = [...new Set(members.map((m) => String(m.plan || 'Other').trim() || 'Other'))];
+      plans.forEach((plan) => {
+        const rows = members.filter((m) => (String(m.plan || 'Other').trim() || 'Other') === plan).map(toExcelRow);
+        const safeSheetName = plan.replace(/[\\/?*\[\]:]/g, ' ').slice(0, 31) || 'Members';
+        if (workbook.SheetNames.includes(safeSheetName)) return;
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows, { header: columns }), safeSheetName);
+      });
+      XLSX.writeFile(workbook, `preface-fitness-members-${today}.xlsx`);
+      setToast('Excel export downloaded successfully');
+    } catch (error) {
+      console.error('Excel export failed:', error);
+      setToast('Excel export failed. Please install the xlsx package and try again.');
+    }
+  };
+
   const exportBackup = () => {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -3161,11 +3609,73 @@ function App() {
     }
   };
 
+
+  // Public enquiries use the existing public_submit_feedback RPC and feedbacks table,
+  // so no database migration or new table is required. Realtime is used when enabled;
+  // polling is the fallback and also works when the feedbacks table is not in Realtime.
+  useEffect(() => {
+    if (!isAuthenticated || !access.gymId || cloudStatus !== 'connected') return undefined;
+    let stopped = false;
+    let refreshInProgress = false;
+
+    const refreshWebsiteEnquiries = async (notify = false) => {
+      if (refreshInProgress || stopped) return;
+      refreshInProgress = true;
+      try {
+        const cloud = await loadCloudState();
+        if (stopped || !cloud) return;
+        const websiteEnquiries = Array.isArray(cloud.websiteEnquiries) ? cloud.websiteEnquiries : [];
+        const regularFeedbacks = Array.isArray(cloud.feedbacks) ? cloud.feedbacks : [];
+        const currentIds = new Set(websiteEnquiries.map((item) => String(item.cloudId || item.id)));
+
+        if (seenWebsiteEnquiriesRef.current === null) {
+          seenWebsiteEnquiriesRef.current = currentIds;
+        } else {
+          const previousIds = seenWebsiteEnquiriesRef.current;
+          const hasNew = [...currentIds].some((id) => !previousIds.has(id));
+          if (notify && hasNew) setToast('New customer enquiry received');
+          seenWebsiteEnquiriesRef.current = currentIds;
+        }
+
+        setData((current) => ({
+          ...current,
+          // The feedback list deliberately excludes Website Enquiry records.
+          feedbacks: regularFeedbacks,
+          websiteEnquiries,
+        }));
+      } catch (error) {
+        console.error('Unable to refresh website enquiries:', error);
+      } finally {
+        refreshInProgress = false;
+      }
+    };
+
+    // Establish a baseline first so old enquiries do not trigger a notification.
+    refreshWebsiteEnquiries(false);
+    const pollId = window.setInterval(() => refreshWebsiteEnquiries(true), 30000);
+    const channel = supabase
+      .channel(`preface-website-enquiries-${access.gymId}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'feedbacks',
+        filter: `gym_id=eq.${access.gymId}`,
+      }, () => refreshWebsiteEnquiries(true))
+      .subscribe();
+
+    return () => {
+      stopped = true;
+      window.clearInterval(pollId);
+      supabase.removeChannel(channel);
+    };
+  }, [isAuthenticated, access.gymId, cloudStatus]);
+
   const nav = [
     { label: 'Dashboard', icon: LayoutDashboard, permission: 'dashboard' },
     { label: 'Performance', icon: BarChart3, permission: 'performance' },
     { label: 'Members', icon: Users, permission: 'members' },
     { label: 'Leads', icon: Target, permission: 'leads' },
+    { label: 'Website Enquiries', icon: Mail, permission: 'enquiries' },
     { label: 'Memberships', icon: ShieldCheck, permission: 'memberships' },
     { label: 'Attendance', icon: CheckCircle2, permission: 'attendance' },
     { label: 'Payments', icon: CreditCard, permission: 'payments' },
@@ -3271,13 +3781,22 @@ function App() {
   const activeAllowed = isOwner || active === 'Staff Access' || !activePermission || can(activePermission);
 
   return (
-    <div className={`app-shell vibrant-app-shell ${sidebarOpen ? 'sidebar-is-open' : 'sidebar-is-collapsed'}`}>
+    <div
+      className={`app-shell vibrant-app-shell ${sidebarOpen ? 'sidebar-is-open' : 'sidebar-is-collapsed'} ${isReadOnlyStaff ? 'staff-read-only' : ''}`}
+      onClickCapture={blockStaffMutation}
+      onSubmitCapture={blockStaffFormSubmit}
+    >
       <style>{VIBRANT_THEME_CSS}</style>
       <style>{NOTICE_SETTINGS_CSS}</style>
       <style>{FINAL_UI_FIX_CSS}</style>
       <style>{FINAL_LAYOUT_CSS}</style>
       <style>{SIDEBAR_ONLY_NAV_CSS}</style>
       <style>{DEVELOPER_CONTACT_BAR_CSS}</style>
+      {isReadOnlyStaff && (
+        <div role="status" style={{ position: 'fixed', zIndex: 1200, right: '18px', bottom: '16px', padding: '9px 13px', borderRadius: '12px', background: '#20264a', color: '#fff', boxShadow: '0 8px 24px rgba(20,25,60,.22)', fontSize: '12px', fontWeight: 700, pointerEvents: 'none' }}>
+          <Eye size={14} style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: '6px' }} /> View-only staff access
+        </div>
+      )}
       <aside className={`sidebar sidebar-compact ${sidebarOpen ? 'open' : 'collapsed'}`}>
         <div className="brand-block compact-brand">
           <div className="brand-logo"><img src={LOGO_URL} alt="Preface Fitness logo" /></div>
@@ -3295,6 +3814,11 @@ function App() {
           ))}
         </nav>
         <div className="sidebar-bottom compact-sidebar-bottom">
+          {visibleNav.filter((item) => item.label === 'Reports').map(({ label, icon: Icon }) => (
+            <button key={label} className={`nav-item ${active === label ? 'active' : ''}`} onClick={() => navigate(label)} title={label}>
+              <Icon size={20} strokeWidth={2.1} /><span>{label}</span>
+            </button>
+          ))}
           <button className="nav-item" onClick={() => openPublicGymPage(data.gym?.id || PRODUCTION_GYM_ID)}><Sparkles size={20} /><span>Public page</span></button>
           <div className="storage-card compact-storage-card">
             <div className="storage-icon"><ShieldCheck size={17} /></div>
@@ -3317,13 +3841,13 @@ function App() {
             </div>
             <div className="topbar-actions">
               <button className="icon-btn vibrant-icon-btn" title="Logout" onClick={logout}><LogOut size={19} /></button>
-              <button className="icon-btn vibrant-icon-btn" title="Notifications"><Bell size={20} /><span className="notification-dot" /></button>
+              <button className="icon-btn vibrant-icon-btn" title="Website enquiries" onClick={() => navigate('Website Enquiries')}><Bell size={20} />{(data.websiteEnquiries || []).some((item) => !['Resolved', 'Closed'].includes(item.status)) && <span className="notification-dot" />}</button>
               <div className="admin-chip vibrant-admin-chip"><div className="avatar">{isOwner ? 'O' : 'S'}</div><div><strong>{isOwner ? 'Administrator' : 'Staff Member'}</strong><span>{isOwner ? 'Owner' : 'Staff'}</span></div><ChevronDown size={15} /></div>
             </div>
           </div>
           <div className="top-navigation-scroll" aria-label="Main navigation">
             {visibleNav
-              .filter(({ label }) => !['Dashboard', 'Members', 'Attendance', 'Payments', 'Settings', 'Staff Access'].includes(label))
+              .filter(({ label }) => !['Dashboard', 'Members', 'Attendance', 'Payments', 'Reports', 'Settings', 'Staff Access'].includes(label))
               .map(({ label, icon: Icon }) => (
                 <button key={label} className={`top-navigation-item ${active === label ? 'active' : ''}`} onClick={() => navigate(label)}>
                   <Icon size={18} strokeWidth={2.2} /><span>{label}</span>
@@ -3356,8 +3880,9 @@ function App() {
           {active === 'Dashboard' && <Dashboard {...{ activeMembers, expiringMembers, overdue, revenue, data, navigate, setModal, markAttendance }} />}
           {active === 'Members' && <MembersPage members={data.members} query={query} setQuery={setQuery} setModal={setModal} markAttendance={markAttendance} deleteMember={deleteMember} settings={data.settings || {}} payments={data.payments || []} />}
           {active === 'Leads' && <LeadsPage leads={data.leads} members={data.members} setModal={setModal} updateLeadStage={updateLeadStage} updateLeadDetails={updateLeadDetails} deleteLead={deleteLead} convertLeadToMember={convertLeadToMember} />}
-          {active === 'Memberships' && <MembershipsPage members={data.members} setModal={setModal} planPrices={planPrices} setData={setData} setToast={setToast} onRenewMembership={renewMembership} />}
-          {active === 'Attendance' && <AttendancePage attendance={data.attendance} members={data.members} markAttendance={markAttendance} />}
+          {active === 'Website Enquiries' && <WebsiteEnquiriesPage enquiries={data.websiteEnquiries || []} onUpdateStatus={updateWebsiteEnquiryStatus} />}
+          {active === 'Memberships' && <MembershipsPage members={data.members} data={data} setModal={setModal} planPrices={planPrices} setData={setData} setToast={setToast} onRenewMembership={renewMembership} />}
+          {active === 'Attendance' && <AttendancePage attendance={data.attendance} members={data.members} markAttendance={markAttendance} isOwner={isOwner} removeAttendanceRecord={removeAttendanceRecord} />}
           {active === 'Payments' && <PaymentsPage payments={data.payments} overdue={overdue} setModal={setModal} deletePayment={deletePayment} members={data.members} settings={data.settings || {}} />}
           {active === 'Progress' && <ProgressPage progressRecords={data.progressRecords || []} members={data.members} setModal={setModal} deleteProgressRecord={deleteProgressRecord} />}
           {active === 'Trainers & PT' && <TrainersPTPage trainers={data.trainers || []} sessions={data.ptSessions || []} members={data.members} setModal={setModal} updatePTSessionStatus={updatePTSessionStatus} deletePTSession={deletePTSession} deleteTrainer={deleteTrainer} />}
@@ -3367,7 +3892,7 @@ function App() {
           {active === 'Customer Feedback' && <FeedbackPage feedbacks={data.feedbacks || []} members={data.members || []} setModal={setModal} deleteFeedback={deleteFeedback} />}
           {active === 'Reports' && <ReportsPage data={data} revenue={revenue} />}
           {active === 'Staff Access' && isOwner && <StaffAccessPage />}
-          {active === 'Settings' && <SettingsPage exportBackup={exportBackup} importBackup={importBackup} data={data} setData={setData} dbReady={dbReady} resetData={() => {
+          {active === 'Settings' && <SettingsPage exportBackup={exportBackup} importBackup={importBackup} onExportExcel={exportMembersExcel} onImportExcel={handleExcelFile} data={data} setData={setData} dbReady={dbReady} resetData={() => {
             if (window.confirm('Reset the local Preface Fitness database to demo data?')) {
               const auth = data.settings?.auth;
               clearState().then(() => {
@@ -3399,6 +3924,30 @@ function App() {
       {(modal === 'dietPlan' || modal?.type === 'editDietPlan') && <DietPlanModal members={data.members} plan={modal?.type === 'editDietPlan' ? modal.plan : null} onClose={() => setModal(null)} onSave={modal?.type === 'editDietPlan' ? updateDietPlan : createDietPlan} />}
       {modal === 'feedback' && <FeedbackModal members={data.members || []} onClose={() => setModal(null)} onSave={addFeedback} />}
       {modal?.type === 'invoiceOptions' && <InvoiceOptionsModal member={modal.member} payment={modal.payment} settings={data.settings || {}} onClose={() => setModal(null)} onPrint={(mode, rate) => { const selectedPayment = { ...(modal.payment || {}), gstApplicable: mode === 'gst', gstRate: Number(rate || 0) }; printPaymentInvoice(modal.member, selectedPayment, data.settings || {}, mode); setModal(null); }} />}
+      {modal === 'excelImportPreview' && excelImportPreview && (
+        <div className="modal-backdrop" onClick={() => !excelImportBusy && (setModal(null), setExcelImportPreview(null))}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()} style={{width:'min(1100px,96vw)',maxHeight:'88vh',overflow:'auto'}}>
+            <div className="modal-header"><div><h2>Preview Excel import</h2><p>{excelImportPreview.fileName} · Sheets: {excelImportPreview.sheetNames.join(', ')}</p></div><button className="icon-button" disabled={excelImportBusy} onClick={() => { setModal(null); setExcelImportPreview(null); }}><X size={20}/></button></div>
+            <div className="report-list" style={{marginBottom:14}}>
+              <div><span>Total rows</span><strong>{excelImportPreview.rows.length}</strong></div>
+              <div><span>Ready to import</span><strong>{excelImportPreview.rows.filter((row) => !row._skip && !row._errors.length).length}</strong></div>
+              <div><span>Skipped / needs correction</span><strong>{excelImportPreview.rows.filter((row) => row._skip || row._errors.length).length}</strong></div>
+            </div>
+            <div style={{overflowX:'auto',border:'1px solid #e1e7ef',borderRadius:12}}>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:13,minWidth:850}}>
+                <thead><tr>{['Excel row','Member','Phone','Plan','Joining','Expiry','Amount','Paid','Due','Import status'].map((heading) => <th key={heading} style={{padding:'10px',textAlign:'left',background:'#f5f7fb',whiteSpace:'nowrap'}}>{heading}</th>)}</tr></thead>
+                <tbody>{excelImportPreview.rows.map((row) => <tr key={`${row._sourceSheet}-${row._rowNumber}`} style={{borderTop:'1px solid #e7ebf1',background:row._errors.length?'#fff5f5':'#fff'}}>
+                  <td style={{padding:10}}>{row._sourceSheet}!{row._rowNumber}</td><td style={{padding:10}}>{row.name || '—'}</td><td style={{padding:10}}>{row.phone || '—'}</td><td style={{padding:10}}>{row.plan}</td><td style={{padding:10}}>{row.start || '—'}</td><td style={{padding:10}}>{row.expiry || '—'}</td><td style={{padding:10}}>{row.amount}</td><td style={{padding:10}}>{row.paid}</td><td style={{padding:10}}>{row.due}</td><td style={{padding:10,color:row._errors.length?'#b42318':'#168451'}}>{row._errors.length ? row._errors.join(', ') : 'Ready'}</td>
+                </tr>)}</tbody>
+              </table>
+            </div>
+            <div style={{display:'flex',justifyContent:'flex-end',gap:10,flexWrap:'wrap',marginTop:18}}>
+              <button className="btn btn-secondary" disabled={excelImportBusy} onClick={() => { setModal(null); setExcelImportPreview(null); }}>Cancel</button>
+              <button className="btn btn-primary" disabled={excelImportBusy || !excelImportPreview.rows.some((row) => !row._skip && !row._errors.length)} onClick={confirmExcelImport}>{excelImportBusy ? 'Importing…' : `Import ${excelImportPreview.rows.filter((row) => !row._skip && !row._errors.length).length} members`}</button>
+            </div>
+          </div>
+        </div>
+      )}
       {toast && <div className="toast"><CheckCircle2 size={18} />{toast}</div>}
     </div>
   );
@@ -3492,6 +4041,10 @@ function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [noticeOpen, setNoticeOpen] = useState(false);
+  const [enquiryForm, setEnquiryForm] = useState({ name: '', phone: '', email: '', interestedPlan: '', message: '' });
+  const [enquirySubmitting, setEnquirySubmitting] = useState(false);
+  const [enquiryResult, setEnquiryResult] = useState(null);
+
 
   useEffect(() => {
     let cancelled = false;
@@ -3517,6 +4070,43 @@ function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
     return () => { cancelled = true; };
   }, [gymId]);
 
+
+  const submitEnquiry = async (event) => {
+    event.preventDefault();
+    setEnquiryResult(null);
+    const name = String(enquiryForm.name || '').trim();
+    const phone = String(enquiryForm.phone || '').trim();
+    const email = String(enquiryForm.email || '').trim();
+    const message = String(enquiryForm.message || '').trim();
+    if (!gymId) {
+      setEnquiryResult({ type: 'error', message: 'Gym details are not configured. Please contact the gym directly.' });
+      return;
+    }
+    if (!name || !phone) {
+      setEnquiryResult({ type: 'error', message: 'Please enter your name and phone number.' });
+      return;
+    }
+    if (phone.replace(/\D/g, '').length < 10) {
+      setEnquiryResult({ type: 'error', message: 'Please enter a valid phone number.' });
+      return;
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setEnquiryResult({ type: 'error', message: 'Please enter a valid email address.' });
+      return;
+    }
+    setEnquirySubmitting(true);
+    try {
+      await publicSubmitEnquiry({ gymId, name, phone, email, interestedPlan: enquiryForm.interestedPlan, message });
+      setEnquiryForm({ name: '', phone: '', email: '', interestedPlan: '', message: '' });
+      setEnquiryResult({ type: 'success', message: 'Thank you! Your enquiry has been sent to the Preface Fitness team. We will contact you soon.' });
+    } catch (error) {
+      console.error('Public enquiry submission failed:', error);
+      setEnquiryResult({ type: 'error', message: error?.message || 'Unable to send your enquiry right now. Please try again.' });
+    } finally {
+      setEnquirySubmitting(false);
+    }
+  };
+
   const publicSettings = remoteSettings || {};
   const gymName = publicSettings.gymName || 'Preface Fitness';
   const description = publicSettings.gymIntro?.description || 'A modern fitness destination focused on strength, conditioning, personal training and sustainable results.';
@@ -3532,7 +4122,7 @@ function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
     'personal training': 'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?auto=format&fit=crop&w=1000&q=85',
     'functional training': 'https://images.unsplash.com/photo-1579758629938-03607ccdbaba?auto=format&fit=crop&w=1000&q=85',
     'locker & changing facilities': 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=1000&q=85',
-    'member progress tracking': 'https://images.unsplash.com/photo-1599058917212-d750089860fc?auto=format&fit=crop&w=1000&q=85',
+    'member progress tracking': 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?auto=format&fit=crop&w=1000&q=85',
     'diet & nutrition guidance': 'https://images.unsplash.com/photo-1490645935967-10de6ba17061?auto=format&fit=crop&w=1000&q=85',
   };
 
@@ -3541,7 +4131,7 @@ function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
     'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?auto=format&fit=crop&w=1000&q=85',
     'https://images.unsplash.com/photo-1579758629938-03607ccdbaba?auto=format&fit=crop&w=1000&q=85',
     'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=1000&q=85',
-    'https://images.unsplash.com/photo-1599058917212-d750089860fc?auto=format&fit=crop&w=1000&q=85',
+    'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?auto=format&fit=crop&w=1000&q=85',
     'https://images.unsplash.com/photo-1490645935967-10de6ba17061?auto=format&fit=crop&w=1000&q=85',
   ];
 
@@ -3576,7 +4166,6 @@ function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
   const publicNoticeText = String(publicNotice?.text || '').trim();
   const publicNoticePriority = publicNotice?.priority || 'medium';
   const trainers = Array.isArray(publicPage.trainers) ? publicPage.trainers.filter((t) => t && (t.name || t.photo || t.description)) : [];
-  const configuredPlanPrices = publicSettings.membershipPrices || {};
   const remotePlanByName = Object.fromEntries((remotePlans || []).map((p) => [String(p?.name || '').trim().toLowerCase(), p]));
   const packageSource = Array.isArray(publicPage.packages) && publicPage.packages.length
     ? publicPage.packages
@@ -3585,9 +4174,9 @@ function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
     const key = String(pkg?.name || '').trim().toLowerCase();
     const standardPlan = MEMBERSHIP_PLANS.find((plan) => String(plan.name).trim().toLowerCase() === key);
     const remotePlan = remotePlanByName[key];
-    const price = standardPlan
-      ? Number(configuredPlanPrices[standardPlan.name] ?? remotePlan?.price ?? pkg?.price ?? standardPlan.price)
-      : Number(remotePlan?.price ?? pkg?.price ?? 0);
+    // Public page prices are controlled only by Settings > Public Page packages.
+    // Do not read internal Memberships page prices or remote plan prices here.
+    const price = Number(pkg?.price ?? standardPlan?.price ?? 0);
     return {
       ...pkg,
       months: Number(remotePlan?.months ?? standardPlan?.months ?? pkg?.months ?? 1),
@@ -3611,8 +4200,11 @@ function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
   const googleReviewCount = String(publicPage.googleReviewCount || '').trim() === '2' ? '94' : (publicPage.googleReviewCount || '94');
   const googlePlaceName = publicPage.googlePlaceName || gymName;
   const googleAddress = publicPage.googleAddress || publicSettings.gymAddress || 'Preface Fitness, Nadan Mahal Rd. above Hdfc Bank, Yahiyaganj, Lucknow, Uttar Pradesh 226003';
+  const googleMapsTarget = mapsUrl || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${googlePlaceName || gymName} ${googleAddress}`.trim())}`;
   const googlePhone = publicPage.googlePhone || '093692 79056';
-  const hoursText = publicPage.hoursText || 'Mon-Sun · 6 AM - 11 PM';
+  const hoursText = publicPage.hoursText || '6 AM - 11 PM';
+  const openingDays = Array.isArray(publicPage.openingDays) ? publicPage.openingDays : ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const openingDaysText = openingDays.length === 7 ? 'Every day' : openingDays.length ? openingDays.join(', ') : 'Closed all week';
   const googleSearchUrl = publicPage.googleSearchUrl || 'https://www.google.com/search?q=preface+fitness';
   const gallery = [
     'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=1200&q=85',
@@ -3636,11 +4228,13 @@ function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
         .gym-public-dark-v2 .gym-hero{min-height:640px;padding:80px clamp(20px,7vw,110px);display:grid;grid-template-columns:1fr .92fr;gap:60px;align-items:center;background:radial-gradient(circle at 15% 20%,rgba(112,71,255,.22),transparent 38%),radial-gradient(circle at 90% 30%,rgba(16,185,129,.13),transparent 35%)}
         .gym-public-dark-v2 .gym-kicker,.gym-public-dark-v2 .gym-section-kicker{font-size:12px;font-weight:900;letter-spacing:2.2px;background:linear-gradient(90deg,#c78cff 0%,#7ea7ff 52%,#32e6d0 100%);-webkit-background-clip:text;background-clip:text;color:transparent;text-shadow:0 0 24px rgba(112,71,255,.12)}.gym-public-dark-v2 .gym-hero-rule{width:170px;height:4px;border-radius:999px;margin:14px 0 21px;background:linear-gradient(90deg,#8d4dff 0%,#b95cff 42%,#22d9c0 100%);box-shadow:0 0 24px rgba(139,77,255,.48),0 0 34px rgba(34,217,192,.18)}.gym-public-dark-v2 .gym-hero h1{font-size:clamp(48px,7vw,86px);line-height:1.10;margin:0 0 26px;letter-spacing:-4.5px;font-weight:950;overflow:visible;padding-bottom:.18em}.gym-public-dark-v2 .gym-hero h1 .hero-line{display:inline-block;line-height:1.10;padding-bottom:.18em;overflow:visible}.gym-public-dark-v2 .gym-hero h1 .hero-line{display:inline-block}.gym-public-dark-v2 .gym-hero h1 .hero-line-1{color:#f5f2ff;text-shadow:0 0 28px rgba(190,170,255,.16)}.gym-public-dark-v2 .gym-hero h1 .hero-line-2{background:linear-gradient(100deg,#ff6de7 0%,#bd68ff 48%,#8f7bff 100%);-webkit-background-clip:text;background-clip:text;color:transparent}.gym-public-dark-v2 .gym-hero h1 .hero-line-3{background:linear-gradient(100deg,#69ddff 0%,#53cfff 38%,#52e5b0 100%);-webkit-background-clip:text;background-clip:text;color:transparent}.gym-public-dark-v2 .gym-hero p{max-width:650px;color:#d3d8e7;font-size:18px;line-height:1.72;text-shadow:0 2px 18px rgba(0,0,0,.22)}.gym-public-dark-v2 .gym-trust-row{display:flex;flex-wrap:wrap;gap:18px;margin-top:30px;color:#e9edf7;font-size:13px}.gym-public-dark-v2 .gym-trust-row span{display:flex;align-items:center;gap:8px;font-weight:700}.gym-public-dark-v2 .gym-trust-row b{color:#ffffff}.gym-public-dark-v2 .trust-icon{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-style:normal;background:#0d1420;border:1px solid rgba(255,255,255,.14);box-shadow:0 0 24px rgba(112,71,255,.10)}.gym-public-dark-v2 .trust-icon-1{color:#d26cff;border-color:rgba(210,108,255,.65);box-shadow:0 0 22px rgba(210,108,255,.18)}.gym-public-dark-v2 .trust-icon-2{color:#55aaff;border-color:rgba(85,170,255,.65);box-shadow:0 0 22px rgba(85,170,255,.16)}.gym-public-dark-v2 .trust-icon-3{color:#37e0bd;border-color:rgba(55,224,189,.65);box-shadow:0 0 22px rgba(55,224,189,.16)}.gym-public-dark-v2 .gym-hero-visual{position:relative}.gym-public-dark-v2 .gym-hero-visual img{width:100%;height:500px;object-fit:cover;border-radius:28px;border:1px solid rgba(255,255,255,.1);box-shadow:0 30px 90px rgba(0,0,0,.42)}.gym-public-dark-v2 .gym-hero-float{position:absolute;left:-24px;bottom:26px;background:rgba(13,17,27,.9);border:1px solid rgba(255,255,255,.1);padding:16px 19px;border-radius:15px;box-shadow:0 15px 40px rgba(0,0,0,.35)}.gym-public-dark-v2 .gym-hero-float strong,.gym-public-dark-v2 .gym-hero-float span{display:block}.gym-public-dark-v2 .gym-hero-float span{color:#929db0;font-size:12px;margin-top:5px}
         .gym-public-dark-v2 .gym-public-section{padding:78px clamp(20px,7vw,110px)}.gym-public-dark-v2 .gym-about-grid{display:grid;grid-template-columns:1fr 1fr;gap:70px;border-top:1px solid rgba(255,255,255,.07);border-bottom:1px solid rgba(255,255,255,.07)}.gym-public-dark-v2 h2{font-size:clamp(30px,4vw,48px);line-height:1.05;margin:12px 0 0;letter-spacing:-1.5px}.gym-public-dark-v2 .gym-about-grid p{color:#9da8bb;font-size:16px;line-height:1.8;margin:0 0 15px}
-        .gym-public-dark-v2 .gym-section-heading{display:flex;justify-content:space-between;align-items:end;margin-bottom:28px}.gym-public-dark-v2 .gym-section-heading>span{color:#717d91;font-size:12px}.gym-public-dark-v2 .gym-facility-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.gym-public-dark-v2 .gym-facility-card{background:linear-gradient(145deg,#111827,#0d121d);border:1px solid rgba(255,255,255,.09);border-radius:20px;overflow:hidden;min-height:300px;box-shadow:0 18px 50px rgba(0,0,0,.20);transition:transform .28s ease,border-color .28s ease,box-shadow .28s ease}.gym-public-dark-v2 .gym-facility-card:hover{transform:translateY(-6px);border-color:rgba(169,145,255,.38);box-shadow:0 24px 65px rgba(0,0,0,.32),0 0 35px rgba(112,71,255,.10)}.gym-public-dark-v2 .gym-facility-image-wrap{position:relative;height:158px;overflow:hidden;background:#0b0f17}.gym-public-dark-v2 .gym-facility-image-wrap img{width:100%;height:100%;object-fit:cover;display:block;filter:saturate(.92) contrast(1.06);transition:transform .55s ease,filter .35s ease}.gym-public-dark-v2 .gym-facility-card:hover .gym-facility-image-wrap img{transform:scale(1.06);filter:saturate(1.05) contrast(1.08)}.gym-public-dark-v2 .gym-facility-image-overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(5,8,15,.04) 25%,rgba(5,8,15,.78) 100%);pointer-events:none}.gym-public-dark-v2 .gym-facility-number{position:absolute;left:18px;bottom:14px;color:#d7caff;font-weight:950;font-size:12px;letter-spacing:1px;background:rgba(10,13,23,.70);border:1px solid rgba(169,145,255,.30);padding:6px 9px;border-radius:999px;backdrop-filter:blur(8px)}.gym-public-dark-v2 .gym-facility-card-body{padding:21px 22px 24px}.gym-public-dark-v2 .gym-facility-card h3{margin:0 0 8px;font-size:19px;color:#f5f7ff;font-weight:900;letter-spacing:-.2px}.gym-public-dark-v2 .gym-facility-card p{color:#aeb8c8;font-size:13px;line-height:1.6;margin:0}
-        .gym-public-dark-v2 .gym-trainer-list{display:flex;flex-direction:column;gap:26px}.gym-public-dark-v2 .public-trainer-card{width:min(900px,92%);display:grid;grid-template-columns:260px 1fr;gap:30px;align-items:center;background:linear-gradient(135deg,#111722,#0c1018);border:1px solid rgba(255,255,255,.09);border-radius:24px;padding:18px;box-shadow:0 20px 60px rgba(0,0,0,.18)}.gym-public-dark-v2 .public-trainer-card:nth-child(odd){align-self:flex-start;transform:translateX(0)}.gym-public-dark-v2 .public-trainer-card:nth-child(even){align-self:flex-end;transform:translateX(-2%)}.gym-public-dark-v2 .public-trainer-card img,.gym-public-dark-v2 .public-trainer-photo-placeholder{width:260px;height:280px;object-fit:cover;border-radius:18px;background:linear-gradient(135deg,#27203f,#111827);display:grid;place-items:center;color:#a991ff;font-size:48px;font-weight:900}.gym-public-dark-v2 .public-trainer-copy .eyebrow{color:#8e98ab;font-size:11px;letter-spacing:2px;font-weight:900}.gym-public-dark-v2 .public-trainer-copy h3{font-size:31px;margin:8px 0}.gym-public-dark-v2 .public-trainer-copy p{color:#9ea8ba;line-height:1.7}.gym-public-dark-v2 .public-trainer-meta{display:flex;flex-wrap:wrap;gap:8px}.gym-public-dark-v2 .public-trainer-meta span{border:1px solid rgba(112,71,255,.3);background:rgba(112,71,255,.09);padding:8px 11px;border-radius:999px;color:#c8bcff;font-size:12px;font-weight:800}
-        .gym-public-dark-v2 .public-package-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:15px}.gym-public-dark-v2 .public-package-card{background:linear-gradient(145deg,#141a27,#0d111a);border:1px solid rgba(255,255,255,.09);border-radius:20px;padding:25px}.gym-public-dark-v2 .public-package-card.featured{border-color:rgba(119,82,255,.65);box-shadow:0 0 0 1px rgba(119,82,255,.14),0 22px 55px rgba(54,33,128,.25)}.gym-public-dark-v2 .public-package-card .package-tag{font-size:10px;letter-spacing:1.5px;color:#9d8bff;font-weight:900}.gym-public-dark-v2 .public-package-card h3{font-size:23px;margin:9px 0}.gym-public-dark-v2 .public-package-price{font-size:34px;font-weight:900}.gym-public-dark-v2 .public-package-price small{font-size:12px;color:#7e899b;font-weight:600}.gym-public-dark-v2 .public-package-card p{color:#8490a2;line-height:1.6;font-size:13px;min-height:43px}
+        .gym-public-dark-v2 .gym-section-heading{display:flex;justify-content:space-between;align-items:end;margin-bottom:28px}.gym-public-dark-v2 .gym-section-heading>span{color:#717d91;font-size:12px}.gym-public-dark-v2 .gym-facility-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}.gym-public-dark-v2 .gym-facility-card{display:grid;grid-template-columns:118px minmax(0,1fr);align-items:start;gap:0;background:linear-gradient(135deg,rgba(20,29,46,.98),rgba(13,19,31,.98) 62%,rgba(36,27,69,.72));border:1px solid rgba(157,137,255,.16);border-radius:22px;overflow:hidden;min-height:0;padding:18px;box-shadow:0 16px 36px rgba(0,0,0,.22),inset 0 1px 0 rgba(255,255,255,.035);transition:transform .28s ease,border-color .28s ease,box-shadow .28s ease}.gym-public-dark-v2 .gym-facility-card:hover{transform:translateY(-4px);border-color:rgba(169,145,255,.42);box-shadow:0 22px 48px rgba(0,0,0,.32),0 0 28px rgba(112,71,255,.10)}.gym-public-dark-v2 .gym-facility-image-wrap{position:relative;height:176px;min-height:176px;overflow:hidden;background:#0b0f17;border-radius:13px}.gym-public-dark-v2 .gym-facility-image-wrap img{width:100%;height:100%;object-fit:cover;display:block;filter:saturate(1.02) contrast(1.03);transition:transform .55s ease,filter .35s ease}.gym-public-dark-v2 .gym-facility-card:hover .gym-facility-image-wrap img{transform:scale(1.06);filter:saturate(1.08) contrast(1.05)}.gym-public-dark-v2 .gym-facility-image-overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(5,8,15,0) 45%,rgba(5,8,15,.12) 100%);pointer-events:none}.gym-public-dark-v2 .gym-facility-number{display:none}.gym-public-dark-v2 .gym-facility-card-body{padding:12px 0 8px 18px}.gym-public-dark-v2 .gym-facility-card h3{margin:0 0 8px;font-size:19px;color:#f5f7ff;font-weight:900;letter-spacing:-.2px}.gym-public-dark-v2 .gym-facility-card p{color:#aeb8c8;font-size:13px;line-height:1.6;margin:0}
+        @media(max-width:1100px){.gym-public-dark-v2 .gym-facility-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.gym-public-dark-v2 .gym-facility-card{grid-template-columns:120px minmax(0,1fr)}}
+        @media(max-width:640px){.gym-public-dark-v2 .gym-facility-grid{grid-template-columns:1fr}.gym-public-dark-v2 .gym-facility-card{grid-template-columns:112px minmax(0,1fr);padding:13px;gap:0}.gym-public-dark-v2 .gym-facility-image-wrap{height:150px;min-height:150px}.gym-public-dark-v2 .gym-facility-card-body{padding:8px 0 6px 13px}.gym-public-dark-v2 .gym-facility-card h3{font-size:17px}.gym-public-dark-v2 .gym-facility-card p{font-size:12px}}
+        .gym-public-dark-v2 .gym-trainer-list{display:flex;flex-direction:column;gap:26px}.gym-public-dark-v2 .public-trainer-card{width:min(900px,92%);display:grid;grid-template-columns:260px 1fr;gap:30px;align-items:center;background:linear-gradient(135deg,#111722,#0c1018);border:1px solid rgba(255,255,255,.09);border-radius:24px;padding:18px;box-shadow:0 18px 48px rgba(0,0,0,.22),0 0 26px rgba(112,71,255,.075),inset 0 1px 0 rgba(255,255,255,.025);transition:box-shadow .25s ease,border-color .25s ease,transform .25s ease}.gym-public-dark-v2 .public-trainer-card:hover{border-color:rgba(169,145,255,.25);box-shadow:0 22px 55px rgba(0,0,0,.3),0 0 34px rgba(112,71,255,.14),inset 0 1px 0 rgba(255,255,255,.035)}.gym-public-dark-v2 .public-trainer-card:nth-child(odd){align-self:flex-start;transform:translateX(0)}.gym-public-dark-v2 .public-trainer-card:nth-child(even){align-self:flex-end;transform:translateX(-2%)}.gym-public-dark-v2 .public-trainer-card img,.gym-public-dark-v2 .public-trainer-photo-placeholder{width:260px;height:280px;object-fit:cover;border-radius:18px;background:linear-gradient(135deg,#27203f,#111827);display:grid;place-items:center;color:#a991ff;font-size:48px;font-weight:900}.gym-public-dark-v2 .public-trainer-copy .eyebrow{color:#8e98ab;font-size:11px;letter-spacing:2px;font-weight:900}.gym-public-dark-v2 .public-trainer-copy h3{font-size:31px;margin:8px 0}.gym-public-dark-v2 .public-trainer-copy p{color:#9ea8ba;line-height:1.7}.gym-public-dark-v2 .public-trainer-meta{display:flex;flex-wrap:wrap;gap:8px}.gym-public-dark-v2 .public-trainer-meta span{border:1px solid rgba(112,71,255,.3);background:rgba(112,71,255,.09);padding:8px 11px;border-radius:999px;color:#c8bcff;font-size:12px;font-weight:800}
+        .gym-public-dark-v2 .public-package-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:15px}.gym-public-dark-v2 .public-package-card{background:linear-gradient(145deg,#141a27,#0d111a);border:1px solid rgba(255,255,255,.09);border-radius:20px;padding:25px}.gym-public-dark-v2 .public-package-card.featured{border-color:rgba(255,255,255,.09);box-shadow:none}.gym-public-dark-v2 .public-package-card .package-tag{font-size:10px;letter-spacing:1.5px;color:#9d8bff;font-weight:900}.gym-public-dark-v2 .public-package-card h3{font-size:23px;margin:9px 0}.gym-public-dark-v2 .public-package-price{font-size:34px;font-weight:900}.gym-public-dark-v2 .public-package-price small{font-size:12px;color:#7e899b;font-weight:600}.gym-public-dark-v2 .public-package-card p{color:#8490a2;line-height:1.6;font-size:13px;min-height:43px}
         .gym-public-dark-v2 .gym-gallery{display:grid;grid-template-columns:1.25fr .75fr;grid-template-rows:245px 245px;gap:12px}.gym-public-dark-v2 .gym-gallery-item{overflow:hidden;border-radius:18px}.gym-public-dark-v2 .gym-gallery-item img{width:100%;height:100%;object-fit:cover;transition:transform .5s}.gym-public-dark-v2 .gym-gallery-item:hover img{transform:scale(1.04)}.gym-public-dark-v2 .gallery-1{grid-row:1/3}.gym-public-dark-v2 .gym-gallery-item img{filter:saturate(.88) contrast(1.05)}
-        .gym-public-dark-v2 .public-google-card{display:grid;grid-template-columns:1.15fr .85fr;gap:20px;background:#10151f;border:1px solid rgba(255,255,255,.09);border-radius:24px;padding:28px}.gym-public-dark-v2 .google-rating{font-size:38px;font-weight:900}.gym-public-dark-v2 .stars{color:#ffc533;letter-spacing:2px;font-size:19px}.gym-public-dark-v2 .google-muted{color:#7f8a9d;font-size:13px}.gym-public-dark-v2 .google-map-box{min-height:180px;border-radius:17px;background:linear-gradient(135deg,#162133,#0c121c);display:flex;align-items:center;justify-content:center;text-align:center;padding:20px}.gym-public-dark-v2 .google-map-box a{color:#b9aaff;text-decoration:none;font-weight:800}
+        .gym-public-dark-v2 .public-google-card{display:grid;grid-template-columns:1.15fr .85fr;gap:20px;background:#10151f;border:1px solid rgba(255,255,255,.09);border-radius:24px;padding:28px}.gym-public-dark-v2 .google-rating{font-size:38px;font-weight:900}.gym-public-dark-v2 .stars{color:#ffc533;letter-spacing:2px;font-size:19px}.gym-public-dark-v2 .google-muted{color:#7f8a9d;font-size:13px}.gym-public-dark-v2 .google-map-box{min-height:180px;border-radius:17px;background:linear-gradient(135deg,#162133,#0c121c);display:flex;align-items:center;justify-content:center;text-align:center;padding:20px}.gym-public-dark-v2 .google-map-box a{color:#b9aaff;text-decoration:none;font-weight:800}.gym-public-dark-v2 .google-map-box-link{position:relative;display:flex;overflow:hidden;isolation:isolate;min-height:300px;color:#fff;text-decoration:none!important;border:1px solid rgba(255,255,255,.12);background:#182131;cursor:pointer;box-shadow:0 12px 32px rgba(0,0,0,.18);transition:transform .2s ease,border-color .2s ease,box-shadow .2s ease}.gym-public-dark-v2 .google-map-box-link:hover{transform:translateY(-2px);border-color:rgba(169,145,255,.45);box-shadow:0 18px 38px rgba(0,0,0,.28),0 0 22px rgba(112,71,255,.12)}.gym-public-dark-v2 .google-map-box-link iframe{position:absolute;inset:0;width:100%;height:100%;border:0;pointer-events:none;filter:saturate(.82) contrast(.94)}.gym-public-dark-v2 .google-map-open-label{position:absolute;z-index:2;top:12px;left:12px;padding:9px 12px;border-radius:10px;background:rgba(255,255,255,.94);color:#2455a4!important;font-size:12px;box-shadow:0 3px 12px rgba(0,0,0,.15)}.gym-public-dark-v2 .google-map-overlay{position:relative;z-index:1;width:100%;align-self:center;margin:42px 4px 4px;padding:20px 18px;border:1px solid rgba(255,255,255,.12);border-radius:17px;background:rgba(12,17,28,.78);backdrop-filter:blur(5px);text-align:center;box-shadow:0 12px 30px rgba(0,0,0,.22);color:#f5f6ff;pointer-events:none}.gym-public-dark-v2 .google-map-overlay strong{display:block;font-size:17px;margin:3px 0 6px}.gym-public-dark-v2 .google-map-overlay div:not(.stars){color:#d0d6e2;font-size:12px;line-height:1.45}.gym-public-dark-v2 .google-map-overlay small{display:block;color:#c0c8d6;font-size:12px}
         .gym-public-dark-v2 .review-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:22px}.gym-public-dark-v2 .public-review{background:#10151f;border:1px solid rgba(255,255,255,.08);border-radius:18px;padding:21px}.gym-public-dark-v2 .public-review-head{display:flex;gap:11px;align-items:center}.gym-public-dark-v2 .public-review-avatar{width:42px;height:42px;border-radius:50%;object-fit:cover;background:#27203f;display:grid;place-items:center;color:#b6a5ff;font-weight:900}.gym-public-dark-v2 .public-review strong{display:block}.gym-public-dark-v2 .public-review small{color:#758196}.gym-public-dark-v2 .public-review p{color:#a6afbf;line-height:1.6;font-size:13px}
         .gym-public-dark-v2 .gym-cta{padding:75px clamp(20px,7vw,110px);background:linear-gradient(110deg,#211348,#0c1020);border-top:1px solid rgba(255,255,255,.08);border-bottom:1px solid rgba(255,255,255,.08)}.gym-public-dark-v2 .public-contact-panel{display:flex;justify-content:space-between;gap:30px;align-items:center}.gym-public-dark-v2 .public-contact-panel p{color:#8d98ab}.gym-public-dark-v2 .public-socials{display:flex;flex-wrap:wrap;gap:10px}.gym-public-dark-v2 .public-socials a{color:#fff;text-decoration:none;padding:12px 15px;border-radius:12px;background:#151b29;border:1px solid rgba(255,255,255,.09);font-weight:800;font-size:13px}.gym-public-dark-v2 .public-socials .social-icon-btn{width:52px;height:52px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:14px;font-size:0}.gym-public-dark-v2 .public-socials .social-icon-btn svg{width:23px;height:23px;display:block}.gym-public-dark-v2 .public-socials .social-icon-btn:hover{transform:translateY(-2px);border-color:rgba(255,255,255,.24);background:#1c2435}
         /* Public page readability upgrade */
@@ -3680,6 +4274,11 @@ function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
         .gym-public-dark-v2 .gym-public-footer{display:flex;justify-content:space-between;gap:20px;padding:28px clamp(20px,7vw,110px);background:#05070b;color:#818b9c}.gym-public-dark-v2 .gym-public-footer strong{display:block;color:#f2f4f8}.gym-public-dark-v2 .gym-public-footer span{display:block;margin-top:5px}.gym-public-dark-v2 .public-developer-footer{padding:14px clamp(18px,5vw,70px);border-top:1px solid rgba(168,151,255,.16);background:linear-gradient(180deg,#090b13,#06080d);color:#8792a6;font-size:12px}.gym-public-dark-v2 .public-developer-footer .pf-developer-bar{max-width:1180px;margin:0 auto}.gym-public-dark-v2 .public-developer-footer strong{color:#e7e9f2}.gym-public-dark-v2 .public-developer-footer a{color:#fff;text-decoration:none;font-weight:800}.pf-developer-bar{width:100%;box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;gap:18px;padding:14px 18px;border:1px solid rgba(120,105,255,.18);border-radius:16px;background:linear-gradient(135deg,rgba(109,74,255,.12),rgba(18,191,166,.07));box-shadow:0 10px 28px rgba(0,0,0,.12)}.pf-developer-brand{display:flex;align-items:center;gap:12px;min-width:0}.pf-developer-mark{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:linear-gradient(135deg,#6d4aff,#12bfa6);color:#fff;box-shadow:0 7px 18px rgba(109,74,255,.25);flex:0 0 auto}.pf-developer-copy{min-width:0;line-height:1.35}.pf-developer-copy strong{display:block;font-size:12px;letter-spacing:.01em}.pf-developer-copy span{display:block;margin-top:2px;color:#7e899b;font-size:11px}.pf-developer-contact{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.pf-developer-contact a{display:inline-flex;align-items:center;gap:7px;width:38px;height:38px;padding:0;border-radius:10px;justify-content:center;border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.045);color:#e7e9f2!important;text-decoration:none;font-weight:800;transition:.18s ease}.pf-developer-contact a:hover{transform:translateY(-1px);background:rgba(255,255,255,.09);border-color:rgba(169,145,255,.35)}.pf-developer-contact svg{width:16px;height:16px}.pf-developer-bar.app{margin:24px 24px 18px;width:calc(100% - 48px);background:linear-gradient(135deg,rgba(109,74,255,.08),rgba(18,191,166,.06));border-color:rgba(92,76,170,.15);box-shadow:0 8px 24px rgba(32,30,73,.07)}.pf-developer-bar.app .pf-developer-copy strong{color:#24344b}.pf-developer-bar.app .pf-developer-copy span{color:#7b8998}.pf-developer-bar.app .pf-developer-contact a{background:#fff;border-color:#dce5ec;color:#26364b!important}.pf-developer-bar.app .pf-developer-contact a:hover{background:#f5f2ff;border-color:#d9d0ff}.pf-developer-bar.app .pf-developer-mark{box-shadow:0 7px 18px rgba(109,74,255,.18)}@media(max-width:650px){.pf-developer-bar{align-items:flex-start;flex-direction:column}.pf-developer-contact{width:100%;justify-content:flex-start}.pf-developer-contact a{flex:1 1 auto;justify-content:center}}.gym-public-dark-v2 .public-loading{min-height:100vh;display:grid;place-items:center;color:#aeb7c8}
         @media(max-width:900px){.gym-public-dark-v2 .gym-hero,.gym-public-dark-v2 .gym-about-grid,.gym-public-dark-v2 .public-google-card{grid-template-columns:1fr}.gym-public-dark-v2 .gym-facility-grid,.gym-public-dark-v2 .public-package-grid,.gym-public-dark-v2 .review-grid{grid-template-columns:1fr 1fr}.gym-public-dark-v2 .public-trainer-card{width:100%;grid-template-columns:180px 1fr}.gym-public-dark-v2 .public-trainer-card img,.gym-public-dark-v2 .public-trainer-photo-placeholder{width:180px;height:210px}}
         @media(max-width:620px){.gym-public-dark-v2 .gym-public-notice-overlay{padding:14px}.gym-public-dark-v2 .gym-public-notice-modal{max-height:86vh;border-radius:24px;padding:34px 22px 24px}.gym-public-dark-v2 .gym-public-notice-close{right:11px;top:11px;width:38px;height:38px}.gym-public-dark-v2 .gym-public-notice-modal h3{font-size:32px;letter-spacing:-1.2px;margin-right:40px}.gym-public-dark-v2 .gym-public-notice-modal-copy{font-size:15px;line-height:1.65}.gym-public-dark-v2 .gym-public-notice-footer{align-items:flex-start;flex-direction:column}.gym-public-dark-v2 .gym-public-notice-continue{width:100%;justify-content:center}.gym-public-dark-v2 .gym-public-nav{align-items:flex-start;flex-direction:column}.gym-public-dark-v2 .public-contact-actions{justify-content:flex-start}.gym-public-dark-v2 .gym-hero{padding-top:55px}.gym-public-dark-v2 .gym-hero-rule{width:125px;height:3px}.gym-public-dark-v2 .gym-hero h1{letter-spacing:-2px;line-height:1.10;padding-bottom:.18em}.gym-public-dark-v2 .gym-hero h1 .hero-line{line-height:1.10;padding-bottom:.18em}.gym-public-dark-v2 .gym-hero-visual img{height:360px}.gym-public-dark-v2 .gym-facility-grid,.gym-public-dark-v2 .public-package-grid,.gym-public-dark-v2 .review-grid{grid-template-columns:1fr}.gym-public-dark-v2 .public-trainer-card{grid-template-columns:1fr}.gym-public-dark-v2 .public-trainer-card:nth-child(even){transform:none}.gym-public-dark-v2 .public-trainer-card img,.gym-public-dark-v2 .public-trainer-photo-placeholder{width:100%;height:300px}.gym-public-dark-v2 .gym-gallery{grid-template-columns:1fr;grid-template-rows:280px 180px 180px 180px}.gym-public-dark-v2 .gallery-1{grid-row:auto}.gym-public-dark-v2 .public-contact-panel,.gym-public-dark-v2 .gym-public-footer{flex-direction:column;align-items:flex-start}}
+        .gym-enquiry-section{max-width:1240px;margin:20px auto 64px;padding:0 24px;scroll-margin-top:24px}
+        .gym-enquiry-card{display:grid;grid-template-columns:.9fr 1.1fr;gap:34px;padding:clamp(22px,4vw,48px);border:1px solid rgba(155,132,255,.24);border-radius:28px;background:radial-gradient(circle at 12% 10%,rgba(112,78,255,.18),transparent 42%),linear-gradient(135deg,#151b2a,#111827 60%,#1d1935);box-shadow:0 24px 60px rgba(0,0,0,.24)}
+        .gym-enquiry-copy{align-self:center}.gym-enquiry-eyebrow{font-size:11px;font-weight:900;letter-spacing:2px;color:#a997ff}.gym-public-dark-v2 .gym-enquiry-copy h2{font-size:clamp(30px,4vw,46px);line-height:1.08;letter-spacing:-1.2px;margin:14px 0}.gym-enquiry-copy p{color:#a7b1c3;line-height:1.8;font-size:15px;max-width:420px}.gym-enquiry-points{display:grid;gap:12px;margin-top:24px;color:#d7deea;font-size:13px;font-weight:700}.gym-enquiry-points span{display:flex;align-items:center;gap:9px}.gym-enquiry-points svg{color:#5ce0bf}
+        .gym-enquiry-form{padding:24px;border:1px solid rgba(255,255,255,.09);border-radius:20px;background:rgba(255,255,255,.045)}.gym-enquiry-form-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:18px}.gym-enquiry-form-heading strong{font-size:20px;color:#fff}.gym-enquiry-form-heading span{font-size:11px;color:#8793a8}.gym-enquiry-fields{display:grid;grid-template-columns:1fr 1fr;gap:14px}.gym-enquiry-fields label{display:grid;gap:7px;color:#cbd4e3;font-size:12px;font-weight:750}.gym-enquiry-fields input,.gym-enquiry-fields select,.gym-enquiry-fields textarea{box-sizing:border-box;width:100%;min-width:0;padding:12px 13px;border:1px solid rgba(185,195,215,.2);border-radius:11px;background:#0e1421;color:#f8fafc;font:inherit;font-size:13px;outline:none}.gym-enquiry-fields input:focus,.gym-enquiry-fields select:focus,.gym-enquiry-fields textarea:focus{border-color:#8e78ff;box-shadow:0 0 0 3px rgba(126,98,255,.14)}.gym-enquiry-fields input::placeholder,.gym-enquiry-fields textarea::placeholder{color:#657187}.gym-enquiry-message{grid-column:1/-1}.gym-enquiry-fields textarea{resize:vertical}.gym-enquiry-submit{width:100%;display:flex;align-items:center;justify-content:center;gap:9px;margin-top:16px;padding:14px 18px;border:0;border-radius:12px;background:linear-gradient(110deg,#7958ff,#9a59ff);color:#fff;font-weight:850;cursor:pointer}.gym-enquiry-submit:disabled{opacity:.65;cursor:wait}.gym-enquiry-privacy{display:block;margin-top:11px;color:#7f8ba0;font-size:10px;line-height:1.5}.gym-enquiry-result{margin-top:14px;padding:12px 14px;border-radius:10px;font-size:12px;line-height:1.6}.gym-enquiry-result.success{background:rgba(31,190,137,.12);border:1px solid rgba(31,190,137,.3);color:#8af0c7}.gym-enquiry-result.error{background:rgba(244,63,94,.1);border:1px solid rgba(244,63,94,.3);color:#ffb5c0}
+        @media(max-width:760px){.gym-enquiry-section{padding:0 14px;margin-bottom:40px}.gym-enquiry-card{grid-template-columns:1fr;gap:24px;padding:20px}.gym-enquiry-form{padding:16px}.gym-enquiry-fields{grid-template-columns:1fr}.gym-enquiry-message{grid-column:auto}.gym-enquiry-form-heading{align-items:flex-start;flex-direction:column;gap:5px}}
       `}</style>
       {!loading && noticeOpen && publicNoticeText && publicNotice?.enabled && <div className={`gym-public-notice-overlay gym-public-notice-${publicNoticePriority}`} role="dialog" aria-modal="true" aria-label="Gym notice">
         <div className="gym-public-notice-modal">
@@ -3725,11 +4324,11 @@ function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
       {loading && !publicSettings.publicPage ? <div className="public-loading">Loading gym profile…</div> : <>
       <section className="gym-hero"><div className="gym-hero-copy"><div className="gym-kicker">YOUR FITNESS. YOUR PROGRESS. YOUR SPACE.</div><div className="gym-hero-rule" aria-hidden="true" /><h1><span className="hero-line hero-line-1">Train</span><br /><span className="hero-line hero-line-2">stronger.</span><br /><span className="hero-line hero-line-3">Live better.</span></h1><p>{description}</p><div className="gym-trust-row"><span><i className="trust-icon trust-icon-1"><Dumbbell size={17} /></i><b>Professional</b> training</span><span><i className="trust-icon trust-icon-2"><TrendingUp size={17} /></i><b>Progress</b> focused</span><span><i className="trust-icon trust-icon-3"><Users size={17} /></i><b>Member</b> first</span></div></div><div className="gym-hero-visual"><img src={gallery[0]} alt="Fitness training area" /><div className="gym-hero-float"><strong>Built for consistency</strong><span>Strength • Conditioning • Results</span></div></div></section>
       <section className="gym-public-section gym-about-grid"><div><div className="gym-section-kicker">ABOUT THE GYM</div><h2>A focused environment for people who want to make progress.</h2></div><div><p>{description}</p><p>Whether your goal is fat loss, strength, muscle development or simply becoming more active, the space is designed to keep your training structured, measurable and sustainable.</p></div></section>
-      <section className="gym-public-section"><div className="gym-section-heading"><div><div className="gym-section-kicker">FACILITIES</div><h2>Everything you need to train with purpose.</h2></div></div><div className="gym-facility-grid">{facilities.map((item,index)=><article className="gym-facility-card" key={`${item.name}-${index}`}><div className="gym-facility-image-wrap"><img src={item.image} alt={item.name} loading="lazy" /><div className="gym-facility-image-overlay" /><div className="gym-facility-number">{String(index + 1).padStart(2, '0')}</div></div><div className="gym-facility-card-body"><h3>{item.name}</h3><p>{item.description}</p></div></article>)}</div></section>
+      <section className="gym-public-section"><div className="gym-section-heading"><div><div className="gym-section-kicker">FACILITIES</div><h2>Everything you need to train with purpose.</h2></div></div><div className="gym-facility-grid">{facilities.map((item,index)=><article className="gym-facility-card" key={`${item.name}-${index}`}><div className="gym-facility-image-wrap"><img src={item.image} alt={item.name} loading="lazy" /><div className="gym-facility-image-overlay" /></div><div className="gym-facility-card-body"><h3>{item.name}</h3><p>{item.description}</p></div></article>)}</div></section>
       <section className="gym-public-section"><div className="gym-section-heading"><div><div className="gym-section-kicker">OUR TRAINERS</div><h2>Meet the people behind the progress.</h2></div></div>{trainers.length ? <div className="gym-trainer-list">{trainers.map((trainer,index)=><article className="public-trainer-card" key={`${trainer.name}-${index}`}>{trainer.photo ? <img src={trainer.photo} alt={trainer.name || 'Trainer'} /> : <div className="public-trainer-photo-placeholder">{initials(trainer.name || 'Trainer')}</div>}<div className="public-trainer-copy"><div className="eyebrow">{trainer.role || 'FITNESS TRAINER'}</div><h3>{trainer.name || 'Trainer'}</h3><div className="public-trainer-meta">{trainer.experience && <span>{trainer.experience} years experience</span>}{trainer.forte && <span>Forte: {trainer.forte}</span>}{trainer.specialization && <span>{trainer.specialization}</span>}{trainer.certification && <span>{trainer.certification}</span>}</div><p>{trainer.description || 'Focused on structured training, safe technique and measurable member progress.'}</p></div></article>)}</div> : <div className="public-review"><strong>Trainer profiles coming soon</strong><p>Trainer details will appear here as the administrator adds them.</p></div>}</section>
       <section className="gym-public-section"><div className="gym-section-heading"><div><div className="gym-section-kicker">MEMBERSHIP PACKAGES</div><h2>Choose the plan that fits your routine.</h2></div></div><div className="public-package-grid">{packages.map((pkg,index)=><article className={`public-package-card ${index===packages.length-1?'featured':''}`} key={`${pkg.name}-${index}`}><div className="package-tag">MEMBERSHIP</div><h3>{pkg.name}</h3><div className="public-package-price">₹{Number(pkg.price||0).toLocaleString('en-IN')} <small>/ {Number(pkg.months||1)} month{Number(pkg.months||1)>1?'s':''}</small></div><p>{pkg.description || 'Flexible membership for your fitness goals.'}</p></article>)}</div></section>
       <section className="gym-public-section"><div className="gym-section-heading"><div><div className="gym-section-kicker">THE SPACE</div><h2>Train in a space built around movement.</h2></div><span>Swipe / scroll through the gallery</span></div><div className="gym-gallery">{gallery.map((src,index)=><div className={`gym-gallery-item gallery-${index+1}`} key={src}><img src={src} alt={`Gym training ${index+1}`} /></div>)}</div></section>
-      <section className="gym-public-section"><div className="gym-section-heading"><div><div className="gym-section-kicker">GOOGLE BUSINESS</div><h2>Find us. See what members say.</h2></div></div><div className="public-google-card"><div><div className="google-rating">{googleRating} <span className="stars">★★★★★</span></div><div className="google-muted">{googleReviewCount} Google reviews</div><h3 style={{fontSize:'22px',margin:'25px 0 6px'}}>{googlePlaceName}</h3><div className="google-muted">{googleAddress}</div><div style={{marginTop:'10px',color:'#ffbf36',fontWeight:800}}>Hours · {hoursText}</div><div className="google-muted" style={{marginTop:'10px'}}>Google phone · {googlePhone}</div><div style={{display:'flex',gap:'12px',flexWrap:'wrap',marginTop:'18px'}}>{(mapsUrl || googleSearchUrl) && <a href={mapsUrl || googleSearchUrl} target="_blank" rel="noreferrer" style={{color:'#a991ff',textDecoration:'none',fontWeight:800}}>Open Google →</a>}<a href={googleSearchUrl} target="_blank" rel="noreferrer" style={{color:'#d9d2ff',textDecoration:'none',fontWeight:800}}>View Google listing</a></div></div><div className="google-map-box"><div><div style={{fontSize:'42px'}}>📍</div><strong>{googlePlaceName}</strong><div className="google-muted">{googleAddress || 'Google business location'}</div><div className="stars" style={{marginTop:'12px'}}>★★★★★</div><div className="google-muted">{googleRating}/5 · {googleReviewCount} reviews</div></div></div></div></section>
+      <section className="gym-public-section"><div className="gym-section-heading"><div><div className="gym-section-kicker">GOOGLE BUSINESS</div><h2>Find us. See what members say.</h2></div></div><div className="public-google-card"><div><div className="google-rating">{googleRating} <span className="stars">★★★★★</span></div><div className="google-muted">{googleReviewCount} Google reviews</div><h3 style={{fontSize:'22px',margin:'25px 0 6px'}}>{googlePlaceName}</h3><div className="google-muted">{googleAddress}</div><div style={{marginTop:'10px',color:'#ffbf36',fontWeight:800}}>Hours · {hoursText}</div><div className="google-muted" style={{marginTop:'6px'}}>Opening days · {openingDaysText}</div><div className="google-muted" style={{marginTop:'10px'}}>Google phone · {googlePhone}</div><div style={{display:'flex',gap:'12px',flexWrap:'wrap',marginTop:'18px'}}>{(mapsUrl || googleSearchUrl) && <a href={mapsUrl || googleSearchUrl} target="_blank" rel="noreferrer" style={{color:'#a991ff',textDecoration:'none',fontWeight:800}}>Open Google →</a>}<a href={googleSearchUrl} target="_blank" rel="noreferrer" style={{color:'#d9d2ff',textDecoration:'none',fontWeight:800}}>View Google listing</a></div></div><a className="google-map-box google-map-box-link" href={googleMapsTarget} target="_blank" rel="noopener noreferrer" aria-label={`Open ${googlePlaceName} in Google Maps`}><iframe title={`${googlePlaceName} map`} src={`https://maps.google.com/maps?q=${encodeURIComponent(`${googlePlaceName} ${googleAddress}`)}&output=embed`} loading="lazy" aria-hidden="true" tabIndex={-1} /><span className="google-map-open-label">Open in Google Maps ↗</span><div className="google-map-overlay"><div style={{fontSize:'30px'}}>📍</div><strong>{googlePlaceName}</strong><div>{googleAddress || 'Google business location'}</div><div className="stars" style={{marginTop:'10px'}}>★★★★★</div><small>{googleRating}/5 · {googleReviewCount} reviews</small></div></a></div></section>
       <section className="gym-public-section"><div className="gym-section-heading"><div><div className="gym-section-kicker">MEMBER REVIEWS</div><h2>What our customers say.</h2></div></div>{reviews.length ? <div className="review-grid">{reviews.map((review,index)=><article className="public-review" key={`${review.name}-${index}`}><div className="public-review-head">{review.photo ? <img className="public-review-avatar" src={review.photo} alt="" /> : <div className="public-review-avatar">{initials(review.name || 'C')}</div>}<div><strong>{review.name || 'Customer'}</strong><small>{review.date || 'Verified customer'}</small></div></div><div className="stars" style={{marginTop:'13px'}}>★★★★★</div><p>{review.text}</p></article>)}</div> : <div className="public-review"><strong>No reviews added yet.</strong><p>Customer reviews added from Administrator → Settings will appear here.</p></div>}</section>
       <section className="gym-cta"><div className="public-contact-panel"><div><div className="gym-section-kicker">READY TO START?</div><h2>Show up. Put in the work. Track the progress.</h2><p>Contact the gym using your preferred channel.</p></div><div className="public-socials">
         {phone&&<a className="social-icon-btn" href={`tel:${phone}`} aria-label="Call gym" title="Call gym"><Phone size={23} /></a>}
@@ -3738,9 +4337,103 @@ function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
         {facebook&&<a className="social-icon-btn" href={normalizeExternalUrl(facebook)} target="_blank" rel="noreferrer" aria-label="Facebook" title="Facebook"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13.4 21v-8h2.7l.4-3h-3.1V8.1c0-.9.3-1.5 1.6-1.5h1.7V4a22 22 0 0 0-2.5-.1c-2.5 0-4.2 1.5-4.2 4.3V10H7.3v3h2.7v8h3.4Z"/></svg></a>}
         {website&&<a className="social-icon-btn" href={normalizeExternalUrl(website)} target="_blank" rel="noreferrer" aria-label="Website" title="Website"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2"/><path d="M3 12h18M12 3c2.3 2.5 3.5 5.5 3.5 9S14.3 18.5 12 21c-2.3-2.5-3.5-5.5-3.5-9S9.7 5.5 12 3Z" stroke="currentColor" strokeWidth="2"/></svg></a>}
       </div></div></section>
+      <section className="gym-enquiry-section" id="contact-enquiry">
+        <div className="gym-enquiry-card">
+          <div className="gym-enquiry-copy">
+            <span className="gym-enquiry-eyebrow">LET'S GET YOU STARTED</span>
+            <h2>Have questions? Talk to our team.</h2>
+            <p>Share your details and what you are looking for. Our team will get in touch with you soon.</p>
+            <div className="gym-enquiry-points"><span><CheckCircle2 size={17}/> Membership guidance</span><span><CheckCircle2 size={17}/> Personal training options</span><span><CheckCircle2 size={17}/> No obligation to join</span></div>
+          </div>
+          <form className="gym-enquiry-form" onSubmit={submitEnquiry}>
+            <div className="gym-enquiry-form-heading"><strong>Send an enquiry</strong><span>Fields marked * are required</span></div>
+            <div className="gym-enquiry-fields">
+              <label>Full name *<input required maxLength={100} autoComplete="name" value={enquiryForm.name} onChange={(e) => setEnquiryForm((f) => ({...f, name:e.target.value}))} placeholder="Your name"/></label>
+              <label>Phone number *<input required maxLength={20} inputMode="tel" autoComplete="tel" value={enquiryForm.phone} onChange={(e) => setEnquiryForm((f) => ({...f, phone:e.target.value}))} placeholder="Your contact number"/></label>
+              <label>Email address<input type="email" maxLength={160} autoComplete="email" value={enquiryForm.email} onChange={(e) => setEnquiryForm((f) => ({...f, email:e.target.value}))} placeholder="you@example.com"/></label>
+              <label>Interested in<select value={enquiryForm.interestedPlan} onChange={(e) => setEnquiryForm((f) => ({...f, interestedPlan:e.target.value}))}><option value="">Select an option</option>{packages.map((pkg, index) => <option key={`${pkg.name}-${index}`} value={pkg.name}>{pkg.name} membership</option>)}<option value="Personal Training">Personal training</option><option value="General Enquiry">General enquiry</option></select></label>
+              <label className="gym-enquiry-message">Message<textarea rows={3} maxLength={1500} value={enquiryForm.message} onChange={(e) => setEnquiryForm((f) => ({...f, message:e.target.value}))} placeholder="Tell us what you would like to know (optional)"/></label>
+            </div>
+            {enquiryResult && <div className={`gym-enquiry-result ${enquiryResult.type}`} role="status" aria-live="polite">{enquiryResult.message}</div>}
+            <button className="gym-enquiry-submit" type="submit" disabled={enquirySubmitting}>{enquirySubmitting ? 'Sending enquiry…' : 'Submit enquiry'} <ArrowUpRight size={18}/></button>
+            <small className="gym-enquiry-privacy">Your details will only be used by the gym team to respond to this enquiry.</small>
+          </form>
+        </div>
+      </section>
       <footer className="gym-public-footer"><div><strong>{gymName}</strong><span>{publicSettings.gymAddress || 'Fitness • Strength • Wellness'}</span></div><div>{phone}{email ? ` • ${email}` : ''}</div></footer>
       <div className="public-developer-footer"><DeveloperContactBar /></div>
       </>}
+    </div>
+  );
+}
+
+
+function parseWebsiteEnquiry(item) {
+  const raw = String(item?.feedback || '');
+  const readLine = (label) => {
+    const match = raw.match(new RegExp('(?:^|\\n)' + label + ':\\s*([^\\n]*)', 'i'));
+    return match ? match[1].trim() : '';
+  };
+  const messageMatch = raw.match(/(?:^|\n)Message:\s*([\s\S]*)$/i);
+  return {
+    name: item?.memberName || 'Website visitor',
+    phone: readLine('Phone'),
+    email: readLine('Email'),
+    interestedPlan: readLine('Interested in'),
+    message: messageMatch ? messageMatch[1].trim() : raw,
+  };
+}
+
+function WebsiteEnquiriesPage({ enquiries: websiteEnquiries = [], onUpdateStatus }) {
+  const [search, setSearch] = useState('');
+  const enquiries = websiteEnquiries
+    .map((item) => ({ ...item, details: parseWebsiteEnquiry(item) }))
+    .filter((item) => {
+      const q = search.trim().toLowerCase();
+      return !q || [item.details.name, item.details.phone, item.details.email, item.details.interestedPlan, item.details.message].join(' ').toLowerCase().includes(q);
+    })
+    .sort((a, b) => new Date(b.createdAt || b.date || 0) - new Date(a.createdAt || a.date || 0));
+  const allEnquiries = websiteEnquiries;
+  const todayCount = allEnquiries.filter((item) => String(item.createdAt || item.date || '').slice(0, 10) === today).length;
+  const openCount = allEnquiries.filter((item) => !['Resolved', 'Closed'].includes(item.status)).length;
+
+  return (
+    <div className="page website-enquiries-page">
+      <PageTitle title="Website Enquiries" subtitle="Customer enquiries submitted through the public Preface Fitness website." />
+      <div className="member-summary">
+        <MetricBox label="Total enquiries" value={allEnquiries.length} tone="green" />
+        <MetricBox label="Needs follow-up" value={openCount} tone="amber" />
+        <MetricBox label="Received today" value={todayCount} tone="teal" />
+      </div>
+      <section className="panel">
+        <div className="panel-header">
+          <div><div className="panel-title"><div className="panel-icon"><Mail size={17} /></div><div><h3>Customer enquiry inbox</h3><span>Contact customers and follow up on membership or training questions.</span></div></div></div>
+          <div className="search-box compact-search"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, phone, email..." /></div>
+        </div>
+        {enquiries.length === 0 ? (
+          <div className="feedback-empty"><Mail size={30} /><strong>{allEnquiries.length ? 'No matching enquiries' : 'No website enquiries yet'}</strong><span>When a customer submits the public website contact form, their enquiry will appear here.</span></div>
+        ) : (
+          <div className="website-enquiry-list">
+            {enquiries.map((item) => {
+              const dateLabel = item.createdAt || item.date ? new Date(item.createdAt || item.date).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Date unavailable';
+              const digits = item.details.phone.replace(/\D/g, '');
+              return (
+                <article className="website-enquiry-card" key={item.cloudId || item.id}>
+                  <div className="website-enquiry-card-head"><div><strong>{item.details.name}</strong><span>{dateLabel}</span></div><label className="website-enquiry-status-control"><span>Status</span><select value={item.status || 'Open'} onChange={(event) => onUpdateStatus?.(item, event.target.value)}><option>Open</option><option>In progress</option><option>Resolved</option></select></label></div>
+                  <div className="website-enquiry-contact">
+                    {item.details.phone && <a href={`tel:${item.details.phone}`}><Phone size={15} />{item.details.phone}</a>}
+                    {item.details.email && <a href={`mailto:${item.details.email}`}><Mail size={15} />{item.details.email}</a>}
+                    {digits.length >= 10 && <a href={`https://wa.me/${digits.length === 10 ? `91${digits}` : digits}`} target="_blank" rel="noreferrer"><MessageCircle size={15} />WhatsApp</a>}
+                  </div>
+                  {item.details.interestedPlan && <p className="website-enquiry-interest"><strong>Interested in:</strong> {item.details.interestedPlan}</p>}
+                  {item.details.message && <p className="website-enquiry-message-text">{item.details.message}</p>}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+      <style>{`.website-enquiries-page .website-enquiry-list{display:grid;gap:12px;padding:18px}.website-enquiries-page .website-enquiry-card{border:1px solid #e6e9f2;border-radius:16px;padding:17px;background:linear-gradient(135deg,#fff,#faf9ff);box-shadow:0 5px 18px rgba(49,43,96,.045)}.website-enquiries-page .website-enquiry-card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.website-enquiries-page .website-enquiry-card-head strong{display:block;color:#1d2940;font-size:16px;font-weight:850}.website-enquiries-page .website-enquiry-card-head span{display:block;margin-top:4px;color:#7b879a;font-size:11px}.website-enquiries-page .website-enquiry-status-control{display:flex;align-items:center;gap:7px;color:#7b879a;font-size:11px;font-weight:750}.website-enquiries-page .website-enquiry-status-control select{border:1px solid #e2e5ef;border-radius:9px;padding:7px 9px;background:#fff;color:#5744bc;font-size:11px;font-weight:800}.website-enquiries-page .website-enquiry-contact{display:flex;flex-wrap:wrap;gap:8px;margin-top:13px}.website-enquiries-page .website-enquiry-contact a{display:inline-flex;align-items:center;gap:6px;padding:8px 10px;border:1px solid #e5e8f1;border-radius:9px;background:#fff;color:#5542bd;text-decoration:none;font-size:12px;font-weight:750}.website-enquiries-page .website-enquiry-interest{margin:13px 0 0;color:#354158;font-size:13px}.website-enquiries-page .website-enquiry-message-text{margin:10px 0 0;padding:11px 12px;border-radius:10px;background:#f4f5fa;color:#4b566b;font-size:13px;white-space:pre-wrap;line-height:1.6}@media(max-width:650px){.website-enquiries-page .website-enquiry-card-head{flex-direction:column}.website-enquiries-page .panel-header{align-items:stretch;flex-direction:column}}`}</style>
     </div>
   );
 }
@@ -5352,8 +6045,14 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
               <div><span>Weight</span><strong>{member.weight ? `${member.weight} kg` : 'Not provided'}</strong></div>
               <div><span>Body fat</span><strong>{member.bodyFat ? `${member.bodyFat}%` : 'Not provided'}</strong></div>
               <div><span>Trainer</span><strong>{member.trainer || 'Not assigned'}</strong></div>
-              <div><span>Referral source</span><strong>{member.referral || 'Not provided'}</strong></div>
+              <div><span>Referral type</span><strong>{String(member.referral || 'None / Walk-In').startsWith('Others:') ? 'Others' : (member.referredBy ? 'Customer' : (member.referral || 'None / Walk-In'))}</strong></div>
+              {String(member.referral || '').startsWith('Others:') && <div><span>Referral details</span><strong>{String(member.referral).slice(7).trim()}</strong></div>}
             </div>
+          </div>
+
+          <div className="profile-card" style={cardStyle}>
+            <PanelHeader title="Medical conditions & injuries" subtitle="Health information reported by the member" icon={Activity} />
+            {(() => { const meta = readMemberMeta(member.notes); const conditions = Array.isArray(meta.medicalConditions) ? meta.medicalConditions : (Array.isArray(member.medicalConditions) ? member.medicalConditions : []); return conditions.length ? <><div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: meta.medicalOther ? '12px' : 0 }}>{conditions.map((condition) => <span key={condition} style={{ background: '#fff1f2', color: '#be123c', border: '1px solid #fecdd3', borderRadius: '999px', padding: '6px 10px', fontSize: '12px', fontWeight: 700 }}>{condition}</span>)}</div>{conditions.includes('Other') && meta.medicalOther && <p style={{ margin: '0 0 10px', color: '#475569', lineHeight: 1.6 }}><strong>Other condition:</strong> {meta.medicalOther}</p>}{meta.surgeryDetails && <p style={{ margin: '8px 0 0', color: '#475569', lineHeight: 1.6 }}><strong>Surgery (last 5 years):</strong> {meta.surgeryDetails}</p>}{meta.additionalMedicalNotes && <p style={{ margin: '8px 0 0', color: '#475569', lineHeight: 1.6 }}><strong>Additional details:</strong> {meta.additionalMedicalNotes}</p>}</> : <p style={{ margin: 0, color: '#718096' }}>No medical conditions or injuries recorded.</p>; })()}
           </div>
 
           <div className="profile-card" style={cardStyle}>
@@ -5380,15 +6079,10 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
             <PanelHeader title="Quick actions" subtitle="Common front-desk actions" icon={Sparkles} />
             <div className="profile-actions">
               <button className="quick-action" onClick={() => setModal({ type:'editMember', member })}><span><Settings size={18} /></span><strong>Edit member</strong><ArrowUpRight size={15} /></button>
-              <button className="quick-action" onClick={() => markAttendance(member.name)}><span><CheckCircle2 size={18} /></span><strong>Mark attendance</strong><ArrowUpRight size={15} /></button>
+              <button className="quick-action" onClick={() => markAttendance(member.id)}><span><CheckCircle2 size={18} /></span><strong>Mark attendance</strong><ArrowUpRight size={15} /></button>
               <button className="quick-action" onClick={() => window.open(`https://wa.me/91${member.phone}`, '_blank')}><span><MessageCircle size={18} /></span><strong>WhatsApp member</strong><ArrowUpRight size={15} /></button>
               <button className="quick-action" onClick={() => window.location.href = `mailto:${member.email || ''}`}><span><MessageCircle size={18} /></span><strong>Send email</strong><ArrowUpRight size={15} /></button>
             </div>
-          </div>
-
-          <div className="profile-card" style={cardStyle}>
-            <PanelHeader title="Notes" subtitle="Internal notes for staff" icon={ClipboardList} />
-            <p className="member-notes">{member.notes || 'No notes added for this member.'}</p>
           </div>
 
           <div className="profile-card" style={cardStyle}>
@@ -5660,7 +6354,7 @@ function PublicAttendancePage({ data, setData }) {
   );
 }
 
-function AttendancePage({ attendance, members, markAttendance }) {
+function AttendancePage({ attendance, members, markAttendance, isOwner = false, removeAttendanceRecord }) {
   const [selectedDate, setSelectedDate] = useState(today);
   const [search, setSearch] = useState('');
 
@@ -5668,9 +6362,17 @@ function AttendancePage({ attendance, members, markAttendance }) {
     (record) => record.date === selectedDate
   );
 
-  const presentNames = new Set(
-    dayAttendance.map((record) => record.member)
-  );
+  const isMemberPresent = (member) => dayAttendance.some((record) => {
+    if (record.memberId !== undefined && record.memberId !== null && record.memberId !== '') {
+      return String(record.memberId) === String(member.id);
+    }
+    // Legacy records without an ID can only be safely matched by name when that name is unique.
+    const sameNameMembers = members.filter((item) =>
+      String(item.name || '').trim().toLowerCase() === String(member.name || '').trim().toLowerCase()
+    );
+    return sameNameMembers.length === 1 &&
+      String(record.member || '').trim().toLowerCase() === String(member.name || '').trim().toLowerCase();
+  });
 
   const filteredMembers = members.filter((member) => {
     const q = search.trim().toLowerCase();
@@ -5784,7 +6486,7 @@ function AttendancePage({ attendance, members, markAttendance }) {
 
             <tbody>
               {filteredMembers.map((member) => {
-                const present = presentNames.has(member.name);
+                const present = isMemberPresent(member);
 
                 return (
                   <tr key={member.id}>
@@ -5818,24 +6520,61 @@ function AttendancePage({ attendance, members, markAttendance }) {
 
                     <td>
                       {present ? (
-                        <span
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                            fontWeight: 700,
-                            color: '#159b8d',
-                          }}
-                        >
-                          <CheckCircle2 size={16} />
-                          Present
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              fontWeight: 700,
+                              color: '#159b8d',
+                            }}
+                          >
+                            <CheckCircle2 size={16} />
+                            Present
+                          </span>
+                          {isOwner && (() => {
+                            const attendanceRecord = dayAttendance.find((record) => {
+                              if (record.memberId !== undefined && record.memberId !== null && record.memberId !== '') {
+                                return String(record.memberId) === String(member.id);
+                              }
+                              const sameNameMembers = members.filter((item) =>
+                                String(item.name || '').trim().toLowerCase() === String(member.name || '').trim().toLowerCase()
+                              );
+                              return sameNameMembers.length === 1 &&
+                                String(record.member || '').trim().toLowerCase() === String(member.name || '').trim().toLowerCase();
+                            });
+                            return attendanceRecord ? (
+                              <button
+                                type="button"
+                                className="btn btn-danger btn-sm"
+                                onClick={() => removeAttendanceRecord?.(attendanceRecord)}
+                                title={`Remove attendance for ${member.name}`}
+                                aria-label={`Remove attendance for ${member.name}`}
+                                style={{
+                                  marginLeft: 12,
+                                  width: 36,
+                                  minWidth: 36,
+                                  height: 36,
+                                  padding: 0,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  borderRadius: 10,
+                                  flexShrink: 0,
+                                }}
+                              >
+                                <X size={17} />
+                              </button>
+                            ) : null;
+                          })()}
+                        </div>
                       ) : (
                         <button
                           className="btn btn-primary btn-sm"
                           onClick={() =>
                             markAttendance(
-                              member.name,
+                              member.id,
                               selectedDate
                             )
                           }
@@ -7368,7 +8107,7 @@ function PaymentsPage({ payments, overdue, setModal, deletePayment, members = []
   </div>;
 }
 
-function MembershipsPage({ members, setModal, planPrices, setData, setToast, onRenewMembership }) {
+function MembershipsPage({ members, data, setModal, planPrices, setData, setToast, onRenewMembership }) {
   const [renewingMember, setRenewingMember] = useState(null);
   const [planFilter, setPlanFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -7399,49 +8138,34 @@ function MembershipsPage({ members, setModal, planPrices, setData, setToast, onR
     });
 
     try {
-      const currentPublicPage = data.settings?.publicPage || {};
-      const currentPackages = Array.isArray(currentPublicPage.packages)
-        ? currentPublicPage.packages
-        : [];
-
-      const syncedPackages = (currentPackages.length ? currentPackages : MEMBERSHIP_PLANS.map((plan) => ({ name: plan.name, months: plan.months, price: cleaned[plan.name], description: plan.description }))).map((pkg) => {
-        const standardPlan = MEMBERSHIP_PLANS.find(
-          (plan) => String(plan.name).trim().toLowerCase() === String(pkg?.name || '').trim().toLowerCase()
-        );
-
-        return standardPlan
-          ? {
-              ...pkg,
-              months: standardPlan.months,
-              price: cleaned[standardPlan.name],
-            }
-          : pkg;
-      });
-
-      const nextPublicPage = {
-        ...currentPublicPage,
-        packages: syncedPackages,
-        updatedAt: new Date().toISOString(),
-      };
-
-      const nextSettings = {
-        ...(data.settings || {}),
+      // Memberships page prices are independent from public-page package prices.
+      // Only update the internal membershipPrices setting here; never mutate publicPage.
+      const pricePatch = {
         membershipPrices: cleaned,
-        publicPage: nextPublicPage,
       };
 
       setData((current) => ({
         ...current,
-        settings: nextSettings,
+        settings: {
+          ...(current.settings || {}),
+          ...pricePatch,
+        },
       }));
 
-      await saveCloudSettings({
-        membershipPrices: cleaned,
-        publicPage: nextPublicPage,
-      });
+      await saveCloudSettings(pricePatch);
+
+      // Re-apply the saved values after the async cloud write, so a stale
+      // component snapshot cannot put the previous prices back into the UI.
+      setData((current) => ({
+        ...current,
+        settings: {
+          ...(current.settings || {}),
+          ...pricePatch,
+        },
+      }));
 
       setEditingPrices(false);
-      setToast('Membership plan prices updated and synced to the public page');
+      setToast('Membership plan prices updated');
     } catch (error) {
       console.error('Membership price save failed:', error);
       setToast(error?.message || 'Unable to save membership prices');
@@ -7685,7 +8409,11 @@ function openPrintWindow(title, html) {
   const printWindow = window.open('', '_blank', 'width=900,height=800');
   if (!printWindow) return false;
   printWindow.document.open();
-  printWindow.document.write(`<!doctype html><html><head><title>${escapeHtml(title)}</title><meta charset="utf-8"><style>body{margin:0;background:#eef1f4;font-family:Arial,Helvetica,sans-serif;color:#152238}*{box-sizing:border-box}.invoice-page{width:900px;max-width:calc(100vw - 30px);margin:24px auto;background:#fff;box-shadow:0 10px 35px rgba(15,35,60,.10);padding:34px 38px}.invoice-top-rule{height:5px;background:#10233f;margin:-34px -38px 28px}.invoice-header{display:flex;justify-content:space-between;gap:28px;padding-bottom:22px;border-bottom:2px solid #10233f}.brand-row{display:flex;align-items:center;gap:14px}.brand-row img{width:58px;height:58px;object-fit:contain;border:1px solid #e0e5ea;border-radius:9px;padding:4px}.seller-name{font-size:25px;font-weight:800;color:#10233f}.seller-tag{font-size:10px;letter-spacing:.16em;color:#718096;margin-top:3px}.seller-address,.seller-contact,.seller-gstin{font-size:11px;color:#5e6c7b;line-height:1.6}.seller-address{margin-top:12px}.seller-gstin{margin-top:5px}.invoice-meta{text-align:right;min-width:245px}.invoice-title{font-size:24px;font-weight:900;color:#10233f;letter-spacing:.03em}.invoice-status{display:inline-block;margin:7px 0 14px;padding:5px 9px;border-radius:999px;background:#eef7f6;color:#087f76;font-size:9px;font-weight:800;letter-spacing:.08em}.invoice-meta>div:not(.invoice-title):not(.invoice-status){display:flex;justify-content:space-between;gap:18px;font-size:11px;margin-top:6px;color:#6d7a89}.invoice-meta strong{color:#152238}.invoice-parties{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:22px 0}.party-box{border:1px solid #e1e7ed;border-radius:10px;padding:15px;background:#fafbfd;font-size:11px;line-height:1.7;color:#5f6c7a}.party-box strong{display:block;color:#172335;font-size:15px;margin-bottom:4px}.party-label{font-size:9px;font-weight:900;letter-spacing:.12em;color:#758395;margin-bottom:7px}.invoice-table{width:100%;border-collapse:collapse;font-size:10px}.invoice-table th{background:#10233f;color:#fff;text-align:left;padding:10px 9px;font-size:9px;letter-spacing:.04em}.invoice-table td{padding:13px 9px;border-bottom:1px solid #e2e7ec;color:#4f5d6c;vertical-align:top}.invoice-table td strong{display:block;color:#182537;font-size:11px}.invoice-table td small{display:block;color:#8995a3;margin-top:3px}.invoice-table .right{text-align:right}.invoice-lower{display:grid;grid-template-columns:1fr 330px;gap:18px;margin-top:22px}.payment-summary,.amount-summary{border:1px solid #dfe6ed;border-radius:12px;padding:17px 18px;background:#fff;box-shadow:0 4px 16px rgba(15,35,60,.035)}.payment-summary{border-top:3px solid #0f9d8f}.amount-summary{border-top:3px solid #10233f}.summary-title{font-size:9px;font-weight:900;letter-spacing:.14em;color:#647487;margin-bottom:11px;text-transform:uppercase}.summary-row{display:flex;justify-content:space-between;align-items:center;gap:15px;padding:9px 0;border-bottom:1px solid #edf0f3;font-size:10.5px;color:#667486}.summary-row span{color:#657386}.summary-row strong{color:#172335;font-weight:800}.summary-row.grand{border-top:2px solid #10233f;border-bottom:0;margin-top:7px;padding-top:13px;font-size:13px;color:#172335}.summary-row.grand strong{font-size:16px;color:#0b6f68}.payment-chip{display:inline-flex;align-items:center;margin-top:13px;background:#eef8f6;color:#167d75;border:1px solid #d5ebe7;border-radius:999px;padding:6px 10px;font-size:8.5px;font-weight:800;letter-spacing:.02em}.schedule-section{margin-top:18px;border:1px solid #dfe6ed;border-radius:12px;overflow:hidden;background:#fff}.schedule-title{padding:11px 14px;background:#f6f8fa;border-bottom:1px solid #dfe6ed;color:#10233f;font-size:9px;font-weight:900;letter-spacing:.13em;text-transform:uppercase}.schedule-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:9.5px}.schedule-table th{padding:9px 10px;background:#10233f;color:#fff;text-align:left;font-size:8px;font-weight:800;letter-spacing:.04em;text-transform:uppercase}.schedule-table th:nth-child(1){width:26%}.schedule-table th:nth-child(2){width:19%;text-align:right}.schedule-table th:nth-child(3){width:22%}.schedule-table th:nth-child(4){width:33%;text-align:center}.schedule-table td{padding:10px;border-bottom:1px solid #edf0f3;color:#4f5d6c;vertical-align:middle}.schedule-table tr:last-child td{border-bottom:0}.schedule-table td:nth-child(2){text-align:right;font-weight:800;color:#172335}.schedule-table td:nth-child(4){text-align:center}.paid-status,.due-status{display:inline-flex;align-items:center;justify-content:center;min-width:94px;padding:5px 8px;border-radius:999px;font-size:7.5px;font-weight:900;letter-spacing:.06em}.paid-status{background:#eaf7f4;color:#167d75;border:1px solid #cfe9e3}.due-status{background:#fff7e8;color:#93621b;border:1px solid #f0dfbf}.invoice-note{margin-top:16px;padding:12px 14px;background:#f7f9fb;border:1px solid #e1e7ed;border-left:3px solid #0f9d8f;border-radius:0 9px 9px 0;font-size:9.5px;color:#596879;line-height:1.5}.invoice-note strong{color:#344256}.invoice-terms{display:flex;justify-content:space-between;gap:30px;margin-top:20px;padding-top:17px;border-top:1px solid #e1e7ed;font-size:9px;color:#687687;line-height:1.55}.invoice-terms ul{margin:7px 0 0;padding-left:17px}.signature{min-width:190px;text-align:center;padding-top:28px;color:#526274}.signature-line{border-top:1px solid #8995a3;margin:35px 0 7px}.invoice-footer{display:flex;justify-content:space-between;margin-top:20px;padding-top:10px;border-top:1px solid #e1e7ed;font-size:8px;color:#8a95a2}@media(max-width:700px){.invoice-page{padding:20px}.invoice-top-rule{margin:-20px -20px 20px}.invoice-header,.invoice-parties,.invoice-lower,.invoice-terms{grid-template-columns:1fr;display:grid}.invoice-meta{text-align:left}.invoice-meta>div:not(.invoice-title):not(.invoice-status){justify-content:flex-start}.invoice-table{font-size:8px}.invoice-table th,.invoice-table td{padding:7px 5px}.schedule-table{font-size:8px}.schedule-table th,.schedule-table td{padding:7px 6px}.paid-status,.due-status{min-width:76px;font-size:6.5px}}@media print{body{background:#fff}.invoice-page{width:100%;max-width:none;margin:0;box-shadow:none}.no-print{display:none!important}}</style></head><body>${html}<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),350));</script></body></html>`);
+  printWindow.document.write(`<!doctype html><html><head><title>${escapeHtml(title)}</title><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>
+  @page{size:A4 portrait;margin:5mm}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#edf0f8;color:#151743;font-family:Arial,Helvetica,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}.invoice-page{width:100%;max-width:820px;margin:18px auto;background:#fff;border:0;border-radius:12px;overflow:hidden;box-shadow:0 4px 18px rgba(24,24,70,.07);font-size:10px}.invoice-hero{height:132px;position:relative;overflow:hidden;background:linear-gradient(110deg,#171343 0%,#28206f 68%,#4b35b8 100%);color:#fff;padding:22px 25px;display:flex;align-items:center;justify-content:space-between;gap:16px}.invoice-hero:after{content:"";position:absolute;right:-30px;bottom:-57px;width:320px;height:105px;border-radius:50%;border:14px solid rgba(255,255,255,.12);transform:rotate(-9deg)}.hero-brand{display:flex;align-items:center;gap:12px;position:relative;z-index:1}.hero-logo{width:54px;height:54px;object-fit:contain;background:#fff;border-radius:13px;padding:4px}.hero-name{font-size:25px;line-height:1;font-weight:900;letter-spacing:.02em}.hero-tag{font-size:9px;letter-spacing:.2em;color:#f6d77a;margin-top:8px;font-weight:800}.hero-invoice{position:relative;z-index:1;text-align:right}.invoice-title{font-size:26px;letter-spacing:.04em;font-weight:900}.invoice-status{display:inline-block;margin-top:8px;background:#fff;color:#4524c9;padding:5px 10px;border-radius:20px;font-size:8px;font-weight:900;letter-spacing:.08em}.invoice-meta{font-size:9px;line-height:1.7;margin-top:8px;color:#f0edff}.invoice-meta strong{color:#fff}.seller-details{padding:10px 23px;background:#f7f6ff;border-bottom:1px solid #e7e4ff;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;font-size:9px;color:#55577a;line-height:1.55}.seller-details strong{color:#171746}.invoice-parties{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:14px 20px 12px}.party-box{border:1px solid #e5e3fb;border-radius:10px;padding:12px 13px;background:#fbfaff;font-size:9px;line-height:1.65;color:#5c5e7b;min-width:0}.party-label{display:flex;align-items:center;gap:7px;font-size:9px;font-weight:900;letter-spacing:.09em;color:#4d2ed2;margin-bottom:6px;text-transform:uppercase}.party-box strong{display:block;color:#191944;font-size:13px;margin-bottom:3px}.invoice-table-wrap{padding:0 20px}.invoice-table{width:100%;border-collapse:separate;border-spacing:0;font-size:9px;border:1px solid #dcd9f7;border-radius:8px;overflow:hidden}.invoice-table th{background:#3f2a9d;color:#fff;text-align:left;padding:10px 8px;font-size:8px;letter-spacing:.02em}.invoice-table td{padding:11px 8px;border-bottom:1px solid #e8e7f5;color:#505271;vertical-align:top}.invoice-table tr:last-child td{border-bottom:0}.invoice-table td strong{display:block;color:#1b1b48;font-size:10px}.invoice-table td small{display:block;color:#77799b;margin-top:3px}.right{text-align:right}.invoice-lower{display:grid;grid-template-columns:1fr 270px;gap:12px;padding:12px 20px 0;align-items:start}.payment-summary,.amount-summary{border:1px solid #e2e0f8;border-radius:10px;overflow:hidden;background:#fff}.summary-title{padding:9px 11px;background:#f1efff;color:#4a2bc7;font-size:8px;font-weight:900;letter-spacing:.1em}.summary-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid #eeedf8;font-size:9px;color:#626382}.summary-row strong{color:#191944;font-size:9px;text-align:right}.summary-row.grand{background:#4b35b8;color:#fff;border:0;padding:10px}.summary-row.grand span,.summary-row.grand strong{color:#fff;font-weight:900}.summary-row.grand strong{font-size:13px}.payment-chip{display:inline-block;margin:9px 10px;background:#eafaf6;color:#087f70;border:1px solid #c9f0e7;border-radius:30px;padding:5px 8px;font-size:8px;font-weight:800}.invoice-note{margin:11px 20px 0;padding:9px 12px;background:#f1efff;border-radius:8px;color:#25205e;font-size:9px;line-height:1.5}.invoice-note strong{color:#4b2acb}.invoice-bottom{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px 20px 0}.qr-card,.terms-card{border:1px solid #dfdcfb;border-radius:10px;padding:11px;background:#fff;min-width:0}.bottom-title{font-size:9px;font-weight:900;color:#3820a6;margin-bottom:8px;letter-spacing:.03em}.qr-row{display:flex;align-items:center;gap:12px}.qr-frame{position:relative;width:104px;height:104px;flex:0 0 104px;padding:0;border-radius:0;background:transparent;box-shadow:none}.qr-frame .qr-code{width:100%;height:100%;display:block;object-fit:contain;background:white;border-radius:0;border:0;box-shadow:none}.qr-center-logo{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:23px;height:23px;object-fit:contain;background:#fff;border:0;border-radius:5px;padding:2px;box-shadow:0 0 0 3px #fff}.qr-copy{font-size:8px;color:#666887;line-height:1.55;overflow-wrap:anywhere}.qr-copy strong{display:block;color:#24205e;font-size:10px;margin-bottom:4px}.public-link{display:inline-block;margin-top:5px;background:#5c35e8;color:#fff!important;padding:5px 8px;border-radius:20px;font-weight:800;text-decoration:none;font-size:8px}.terms-card ol{margin:7px 0 0;padding-left:15px;color:#626382;font-size:8px;line-height:1.6}.terms-card li{padding-left:2px;margin-bottom:3px}.signature{margin-top:8px;text-align:right;color:#565779;font-size:8px}.signature-line{border-top:1px solid #a8a3d2;width:135px;margin:17px 0 5px auto}.invoice-footer{position:relative;margin-top:14px;padding:28px 22px 15px;color:#fff;background:#15113f;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:8px;line-height:1.5;overflow:hidden}.invoice-footer:before{content:"";position:absolute;left:-3%;top:-35px;width:106%;height:64px;background:#fff;border-bottom:6px solid #e8c65b;border-radius:0 0 50% 50%/0 0 72% 72%;transform:rotate(-.5deg)}.invoice-footer:after{content:"";position:absolute;left:0;right:0;top:25px;height:3px;background:#6d4ce5;clip-path:polygon(0 0,25% 45%,50% 100%,75% 45%,100% 0,100% 100%,0 100%)}.footer-contact,.footer-slogan{position:relative;z-index:1}.footer-slogan{text-align:right;color:#f6d77a;font-weight:900;letter-spacing:.12em}.footer-contact{display:flex;gap:12px;flex-wrap:wrap}.small-muted{color:#9291bd}
+  @media screen{.invoice-page{min-height:0}}
+  @media print{html,body{width:100%;height:auto;background:#fff!important;margin:0!important;padding:0!important;overflow:visible!important}.invoice-page{width:100%;max-width:none;margin:0;border:0;border-radius:0;box-shadow:none;overflow:hidden;break-inside:avoid;page-break-inside:avoid}.invoice-hero{height:112px;padding:16px 20px}.hero-name{font-size:22px}.hero-logo{width:46px;height:46px}.invoice-parties{padding:10px 15px 9px;gap:9px}.party-box{padding:9px 10px}.invoice-table-wrap{padding:0 15px}.invoice-table th{padding:8px 6px}.invoice-table td{padding:8px 6px}.invoice-lower{padding:9px 15px 0;grid-template-columns:1fr 245px;gap:9px}.summary-row{padding:6px 8px}.invoice-note{margin:8px 15px 0;padding:7px 10px}.invoice-bottom{padding:9px 15px 0;gap:9px}.qr-card,.terms-card{padding:8px}.qr-frame{width:86px;height:86px;flex-basis:86px}.qr-center-logo{width:20px;height:20px}.invoice-footer{margin-top:9px;padding:24px 16px 10px}.seller-details{padding:8px 18px}.party-box,.invoice-table,.invoice-lower,.invoice-note,.invoice-bottom,.invoice-footer{break-inside:avoid;page-break-inside:avoid}a{color:inherit;text-decoration:none}}
+  </style></head><body>${html}<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),500));</script></body></html>`);
   printWindow.document.close();
   return true;
 }
@@ -7735,7 +8463,7 @@ function shareMemberWhatsApp(member) {
 function printPaymentInvoice(member, payment, settings, overrideGstMode = null) {
   const gymName = settings?.gymName || 'Preface Fitness';
   const gstMode = overrideGstMode || (payment?.gstApplicable ? 'gst' : 'without');
-  const invoiceAmount = Number(payment?.invoiceAmount || (payment?.type === 'Membership' ? member.amount : payment?.amount) || member.amount || 0);
+  const invoiceAmount = Number(payment?.invoiceAmount ?? (payment?.type === 'Membership' ? member.amount : payment?.amount) ?? member.amount ?? 0);
   const rate = gstMode === 'gst' ? Number(payment?.gstRate || settings?.defaultGstRate || 5) : 0;
   const gst = calculateGstBreakdown(invoiceAmount, rate);
   const invoiceNumber = makeInvoiceNumber(payment, settings);
@@ -7745,53 +8473,33 @@ function printPaymentInvoice(member, payment, settings, overrideGstMode = null) 
   const serviceDescription = payment?.description || `${member.plan || 'Membership'} membership`;
   const paymentAmount = Number(payment?.amount || 0);
   const isGst = gstMode === 'gst';
+  const publicUrl = String(settings?.publicPage?.publicUrl || settings?.publicPage?.websiteUrl || settings?.publicPage?.url || 'https://noscodera.github.io/preface-fitness/#gym').trim();
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=2&color=271080&bgcolor=FFFFFF&data=${encodeURIComponent(publicUrl)}`;
+  const currency = (value) => `₹${Number(value || 0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
   const html = `
   <div class="invoice-page">
-    <div class="invoice-top-rule"></div>
-    <header class="invoice-header">
-      <div class="seller">
-        <div class="brand-row"><img src="${LOGO_URL}" alt="Logo"/><div><div class="seller-name">${escapeHtml(gymName)}</div><div class="seller-tag">GYM & FITNESS SERVICES</div></div></div>
-        <div class="seller-address">${escapeHtml(settings?.gymAddress || '')}</div>
-        <div class="seller-contact">${escapeHtml(settings?.gymPhone || '')}${settings?.gymEmail ? ` · ${escapeHtml(settings.gymEmail)}` : ''}</div>
-        ${isGst && settings?.gstin ? `<div class="seller-gstin">GSTIN: <strong>${escapeHtml(settings.gstin)}</strong></div>` : ''}
-      </div>
-      <div class="invoice-meta">
-        <div class="invoice-title">${isGst ? 'TAX INVOICE' : 'INVOICE / BILL'}</div>
-        <div class="invoice-status">${isGst ? 'GST APPLICABLE' : 'NON-GST BILL'}</div>
-        <div><span>Invoice No.</span><strong>${escapeHtml(invoiceNumber)}</strong></div>
-        <div><span>Invoice Date</span><strong>${escapeHtml(formatDate(invoiceDate))}</strong></div>
-      </div>
+    <header class="invoice-hero">
+      <div class="hero-brand"><img class="hero-logo" src="${LOGO_URL}" alt="Preface Fitness logo"/><div><div class="hero-name">PREFACE<br/>FITNESS</div><div class="hero-tag">FIT BODY · BETTER YOU</div></div></div>
+      <div class="hero-invoice"><div class="invoice-title">${isGst ? 'TAX INVOICE' : 'INVOICE'}</div><div class="invoice-status">${isGst ? 'GST INVOICE' : 'PAYMENT RECEIPT'}</div><div class="invoice-meta">Invoice No. <strong>${escapeHtml(invoiceNumber)}</strong><br/>Date <strong>${escapeHtml(formatDate(invoiceDate))}</strong><br/>Payment <strong>${escapeHtml(payment?.mode || '—')}</strong></div></div>
     </header>
-
+    <div class="seller-details"><span>${settings?.gymAddress ? `<strong>Address:</strong> ${escapeHtml(settings.gymAddress)}` : '<strong>Stronger Today · Stronger Tomorrow</strong>'}</span><span>${settings?.gymPhone ? `<strong>Phone:</strong> ${escapeHtml(settings.gymPhone)}` : ''}${settings?.gymEmail ? ` &nbsp; <strong>Email:</strong> ${escapeHtml(settings.gymEmail)}` : ''}${isGst && settings?.gstin ? ` &nbsp; <strong>GSTIN:</strong> ${escapeHtml(settings.gstin)}` : ''}</span></div>
     <section class="invoice-parties">
-      <div class="party-box"><div class="party-label">BILL TO</div><strong>${escapeHtml(member.name)}</strong><div>Member ID: ${escapeHtml(member.id)}</div><div>Phone: ${escapeHtml(member.phone || '—')}</div>${member.email ? `<div>Email: ${escapeHtml(member.email)}</div>` : ''}${member.address ? `<div>Address: ${escapeHtml(member.address)}</div>` : ''}</div>
-      <div class="party-box"><div class="party-label">MEMBERSHIP DETAILS</div><strong>${escapeHtml(member.plan || 'Membership')}</strong><div>Service period: ${escapeHtml(formatDate(member.start))} to ${escapeHtml(formatDate(member.expiry))}</div><div>Trainer: ${escapeHtml(member.trainer || 'Not assigned')}</div><div>Payment mode: ${escapeHtml(payment?.mode || '—')}</div></div>
+      <div class="party-box"><div class="party-label">● Customer Details</div><strong>${escapeHtml(member.name)}</strong><div>Member ID: <b>${escapeHtml(member.id)}</b></div><div>Phone: ${escapeHtml(member.phone || '—')}</div>${member.email ? `<div>Email: ${escapeHtml(member.email)}</div>` : ''}${member.address ? `<div>Address: ${escapeHtml(member.address)}</div>` : ''}</div>
+      <div class="party-box"><div class="party-label">▣ Membership Details</div><strong>${escapeHtml(member.plan || 'Membership')}</strong><div>Duration: ${escapeHtml(member.start && member.expiry ? `${formatDate(member.start)} – ${formatDate(member.expiry)}` : 'As per membership')}</div><div>Trainer: ${escapeHtml(member.trainer || 'Not assigned')}</div><div>Payment status: ${balance > 0 ? 'Part payment' : 'Paid'}</div></div>
     </section>
-
-    <table class="invoice-table"><thead><tr><th>#</th><th>Description</th><th>Service Period</th><th class="right">Qty</th><th class="right">Rate</th><th class="right">Amount</th></tr></thead><tbody>
-      <tr><td>01</td><td><strong>${escapeHtml(serviceDescription)}</strong><small>Membership / fitness service</small></td><td>${escapeHtml(formatDate(member.start))} – ${escapeHtml(formatDate(member.expiry))}</td><td class="right">1</td><td class="right">₹${invoiceAmount.toLocaleString('en-IN',{minimumFractionDigits:2})}</td><td class="right">₹${invoiceAmount.toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>
-    </tbody></table>
-
+    <div class="invoice-table-wrap"><table class="invoice-table"><thead><tr><th style="width:7%">Sr.</th><th>Description</th>${isGst ? '<th>HSN/SAC</th>' : ''}<th class="right">Qty</th><th class="right">Rate (₹)</th><th class="right">Amount (₹)</th></tr></thead><tbody>
+      <tr><td>01</td><td><strong>${escapeHtml(serviceDescription)}</strong><small>Membership / fitness services</small></td>${isGst ? '<td>999799</td>' : ''}<td class="right">1</td><td class="right">${Number(gst.taxable).toLocaleString('en-IN',{minimumFractionDigits:2})}</td><td class="right">${Number(gst.taxable).toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>
+    </tbody></table></div>
     <section class="invoice-lower">
-      <div class="payment-summary">
-        <div class="summary-title">PAYMENT DETAILS</div>
-        <div class="summary-row"><span>Payment received</span><strong>₹${paymentAmount.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div>
-        <div class="summary-row"><span>Total paid to date</span><strong>₹${received.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div>
-        <div class="summary-row"><span>Outstanding balance</span><strong>₹${balance.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div>
-        <div class="payment-chip">${escapeHtml(payment?.mode || 'Payment')} · ${escapeHtml(formatDate(invoiceDate))}</div>
-      </div>
-      <div class="amount-summary">
-        <div class="summary-row"><span>Subtotal / Taxable value</span><strong>₹${gst.taxable.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div>
-        ${isGst ? `<div class="summary-row"><span>CGST (${(rate/2).toFixed(2)}%)</span><strong>₹${gst.cgst.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div><div class="summary-row"><span>SGST (${(rate/2).toFixed(2)}%)</span><strong>₹${gst.sgst.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div>` : '<div class="summary-row"><span>GST</span><strong>₹0.00</strong></div>'}
-        <div class="summary-row grand"><span>Total invoice value</span><strong>₹${invoiceAmount.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div>
-      </div>
+      <div class="payment-summary"><div class="summary-title">PAYMENT DETAILS</div><div class="summary-row"><span>This payment received</span><strong>${currency(paymentAmount)}</strong></div><div class="summary-row"><span>Total paid to date</span><strong>${currency(received)}</strong></div><div class="summary-row"><span>Outstanding balance</span><strong>${currency(balance)}</strong></div><div class="payment-chip">✓ ${escapeHtml(payment?.mode || 'Payment')} · ${escapeHtml(formatDate(invoiceDate))}</div></div>
+      <div class="amount-summary"><div class="summary-title">INVOICE SUMMARY</div><div class="summary-row"><span>Taxable value</span><strong>${currency(gst.taxable)}</strong></div>${isGst ? `<div class="summary-row"><span>CGST (${(rate/2).toFixed(2)}%)</span><strong>${currency(gst.cgst)}</strong></div><div class="summary-row"><span>SGST (${(rate/2).toFixed(2)}%)</span><strong>${currency(gst.sgst)}</strong></div>` : `<div class="summary-row"><span>GST</span><strong>${currency(0)}</strong></div>`}<div class="summary-row grand"><span>Total invoice</span><strong>${currency(invoiceAmount)}</strong></div></div>
     </section>
-
-    <section class="schedule-section"><div class="schedule-title">PAYMENT SCHEDULE</div><table class="schedule-table"><thead><tr><th>Due / Payment Date</th><th>Amount</th><th>Payment Mode</th><th>Status</th></tr></thead><tbody><tr><td>${escapeHtml(formatDate(invoiceDate))}</td><td>₹${paymentAmount.toLocaleString('en-IN',{minimumFractionDigits:2})}</td><td>${escapeHtml(payment?.mode || '—')}</td><td><strong class="paid-status">PAID / RECEIVED</strong></td></tr>${balance > 0 ? `<tr><td>${escapeHtml(formatDate(member.expiry))}</td><td>₹${balance.toLocaleString('en-IN',{minimumFractionDigits:2})}</td><td>—</td><td><strong class="due-status">PENDING</strong></td></tr>` : ''}</tbody></table></section>
-
     <section class="invoice-note"><strong>Amount in words:</strong> ${escapeHtml(amountInWordsIndian(invoiceAmount))}</section>
-    <section class="invoice-terms"><div><strong>Notes & terms</strong><ul><li>This document records the membership / fitness service billed by ${escapeHtml(gymName)}.</li><li>Please retain this invoice for your records.</li><li>For GST invoices, the GSTIN and tax breakup shown above should match the billing details configured by the gym.</li></ul></div><div class="signature"><div>For ${escapeHtml(gymName)}</div><div class="signature-line"></div><strong>Authorised Signatory</strong></div></section>
-    <footer class="invoice-footer"><span>Thank you for choosing ${escapeHtml(gymName)}.</span><span>${escapeHtml(invoiceNumber)}</span></footer>
+    <section class="invoice-bottom">
+      <div class="qr-card"><div class="bottom-title">SCAN TO VISIT OUR GYM</div><div class="qr-row"><div class="qr-frame"><img class="qr-code" src="${qrUrl}" alt="QR code linking to Preface Fitness public page" /><img class="qr-center-logo" src="${LOGO_URL}" alt="Preface Fitness logo" /></div><div class="qr-copy"><strong>Visit Preface Fitness</strong>Scan this designer QR code to open our public gym page.<br/><a class="public-link" href="${escapeHtml(publicUrl)}">prefacefitness.in ↗</a><div style="margin-top:6px">${escapeHtml(settings?.gymPhone || '')}</div></div></div></div>
+      <div class="terms-card"><div class="bottom-title">TERMS & CONDITIONS</div><ol><li>Membership is non-transferable.</li><li>Fees once paid are non-refundable, subject to applicable law.</li><li>Members must follow gym rules and safety guidelines.</li><li>Keep this invoice for your records.</li></ol><div class="signature"><div>For ${escapeHtml(gymName)}</div><div class="signature-line"></div><strong>Authorised Signatory</strong></div></div>
+    </section>
+    <footer class="invoice-footer"><div class="footer-contact"><span>☎ ${escapeHtml(settings?.gymPhone || 'Preface Fitness')}</span>${settings?.gymEmail ? `<span>✉ ${escapeHtml(settings.gymEmail)}</span>` : ''}<span>◎ preface_fitness</span></div><div class="footer-slogan">STRONGER PEOPLE<br/>STRONGER COMMUNITY</div></footer>
   </div>`;
   return openPrintWindow(`${gymName} - ${invoiceNumber}`, html);
 }
@@ -7894,6 +8602,10 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
 
   const [form, setForm] = useState(() => member ? {
     ...member,
+    ...readMemberMeta(member.notes),
+    notes: cleanMemberNotes(member.notes),
+    referral: member.referredBy ? 'Customer' : (String(member.referral || '').startsWith('Others') ? 'Others' : (['Customer', 'Others', 'None / Walk-In'].includes(member.referral) ? member.referral : 'None / Walk-In')),
+    referralOther: readMemberMeta(member.notes).referralOther || (String(member.referral || '').startsWith('Others:') ? String(member.referral).slice(7).trim() : ''),
     id: member.id || '',
     due: member.due ?? 0,
     amount: member.amount ?? 0,
@@ -7901,10 +8613,14 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
     paymentMode: member.paymentMode || 'Cash',
     gstMode: member.gstMode || 'without',
     gstRate: Number(member.gstRate || 5),
+    medicalConditions: readMemberMeta(member.notes).medicalConditions || [],
+    medicalOther: readMemberMeta(member.notes).medicalOther || '',
+    surgeryDetails: readMemberMeta(member.notes).surgeryDetails || '',
+    additionalMedicalNotes: readMemberMeta(member.notes).additionalMedicalNotes || '',
   } : {
     id: '', attendanceNumber: '', name: '', phone: '', email: '', dob: '', gender: 'Prefer not to say', address: '',
     emergencyContact: '', dietPreference: 'Veg', referredBy: '', plan: 'Monthly', start: today, expiry: addMonthsToDate(today, MEMBERSHIP_PLANS.find((item) => item.name === 'Monthly')?.months || 1), amount: Number(planPrices?.Monthly || 0), paid: 0,
-    due: 0, paymentMode: 'Cash', gstMode: 'without', gstRate: 5, height: '', weight: '', bodyFat: '', trainer: '', referral: 'Walk-in', notes: '',
+    due: 0, paymentMode: 'Cash', gstMode: 'without', gstRate: 5, height: '', weight: '', bodyFat: '', trainer: '', referral: 'None / Walk-In', referralOther: '', medicalConditions: [], medicalOther: '', surgeryDetails: '', additionalMedicalNotes: '', notes: '',
   });
 
   const update = (key, value) => {
@@ -7933,7 +8649,7 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
 
   const normalizedId = String(form.id || '').trim().toLowerCase();
   const duplicateId = normalizedId && existingMemberIds.some((id) => String(id).toLowerCase() === normalizedId && (!member || String(member.id).toLowerCase() !== normalizedId));
-  const submit = () => onSave({ ...form, id: String(form.id || '').trim(), amount: Number(form.amount || 0), paid: Number(form.paid || 0), due: Number(form.due || 0) });
+  const submit = () => onSave({ ...form, referral: form.referral === 'Others' ? `Others: ${String(form.referralOther || '').trim()}` : (form.referral === 'Customer' ? 'Customer' : 'None / Walk-In'), referredBy: form.referral === 'Customer' ? (form.referredBy || '') : '', id: String(form.id || '').trim(), amount: Number(form.amount || 0), paid: Number(form.paid || 0), due: Number(form.due || 0) });
   const valid = form.name.trim() && /^[0-9]{10}$/.test(form.phone.replace(/\D/g, '')) && form.expiry && !duplicateId;
 
   return <Modal title={member ? 'Edit member' : 'Add member'} onClose={onClose} wide>
@@ -8077,7 +8793,9 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
     </div>
     <div className="form-grid two">
       <FormField label="Diet preference"><select value={form.dietPreference || ''} onChange={(e) => update('dietPreference', e.target.value)}><option value="">Not specified</option><option>Veg</option><option>Eggetarian</option><option>Non-veg</option></select></FormField>
-      <FormField label="Referred by member"><select value={form.referredBy || ''} onChange={(e) => { const value = e.target.value; update('referredBy', value); if (value) update('referral', 'Referral'); }}><option value="">None / Walk-in</option>{members.filter((item) => !member || item.id !== member.id).map((item) => <option key={item.id} value={item.id}>{item.name} · {item.id}</option>)}</select></FormField>
+      <FormField label="Referral type"><select value={form.referral || 'None / Walk-In'} onChange={(e) => { const value = e.target.value; update('referral', value); if (value !== 'Customer') update('referredBy', ''); if (value !== 'Others') update('referralOther', ''); }}><option>None / Walk-In</option><option>Customer</option><option>Others</option></select></FormField>
+      {form.referral === 'Customer' && <FormField label="Select referring customer"><select value={form.referredBy || ''} onChange={(e) => update('referredBy', e.target.value)}><option value="">Select customer</option>{members.filter((item) => !member || item.id !== member.id).map((item) => <option key={item.id} value={item.id}>{item.name} · {item.id}</option>)}</select></FormField>}
+      {form.referral === 'Others' && <FormField label="Referral details"><input value={form.referralOther || ''} onChange={(e) => update('referralOther', e.target.value)} placeholder="e.g. Friend, banner, local event" /></FormField>}
     </div>
     <FormField label="Address"><textarea rows="2" value={form.address} onChange={(e) => update('address', e.target.value)} placeholder="Member address" /></FormField>
 
@@ -8105,11 +8823,16 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
       <FormField label="Body fat %"><input type="number" min="0" max="100" step="0.1" value={form.bodyFat} onChange={(e) => update('bodyFat', e.target.value)} placeholder="20" /></FormField>
       <FormField label="Trainer"><select value={form.trainer || ''} onChange={(e) => update('trainer', e.target.value)}><option value="">Not assigned</option>{trainers.filter((item) => item.status !== 'Inactive').map((trainer) => <option key={trainer.id} value={trainer.name}>{trainer.name}</option>)}</select></FormField>
     </div>
-    <div className="form-grid two">
-      <FormField label="Referral source"><select value={form.referral} onChange={(e) => update('referral', e.target.value)}><option>Walk-in</option><option>Instagram</option><option>Facebook</option><option>Google</option><option>Referral</option><option>Website</option><option>Other</option></select></FormField>
-      <FormField label="Internal notes"><textarea rows="2" value={form.notes} onChange={(e) => update('notes', e.target.value)} placeholder="Anything staff should know..." /></FormField>
+    <div className="form-section-title">Medical questionnaire</div>
+    <div style={{ border: '1px solid #e2e8f0', borderRadius: '14px', padding: '16px', marginBottom: '16px', background: '#fbfdff' }}>
+      <p style={{ margin: '0 0 12px', color: '#64748b', fontSize: '13px' }}>Select any conditions or injuries the member reports. This information is for gym safety and training awareness, not a medical diagnosis.</p>
+      <div className="form-grid three">
+        {MEMBER_MEDICAL_OPTIONS.map((condition) => <label key={condition} style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '8px 10px', border: '1px solid #e2e8f0', borderRadius: '9px', background: (form.medicalConditions || []).includes(condition) ? '#e9fbf6' : '#fff', fontSize: '13px', fontWeight: 600 }}><input type="checkbox" checked={(form.medicalConditions || []).includes(condition)} onChange={(e) => update('medicalConditions', e.target.checked ? [...(form.medicalConditions || []), condition] : (form.medicalConditions || []).filter((item) => item !== condition))} />{condition}</label>)}
+      </div>
+      {(form.medicalConditions || []).includes('Other') && <FormField label="Other medical condition / injury details"><textarea rows="2" value={form.medicalOther || ''} onChange={(e) => update('medicalOther', e.target.value)} placeholder="Describe the condition or injury" /></FormField>}
+      <FormField label="Surgery in the last 5 years? If yes, when and what type?"><textarea rows="2" value={form.surgeryDetails || ''} onChange={(e) => update('surgeryDetails', e.target.value)} placeholder="Write details, or leave blank if none" /></FormField>
+      <FormField label="Anything else we should know?"><textarea rows="2" value={form.additionalMedicalNotes || ''} onChange={(e) => update('additionalMedicalNotes', e.target.value)} placeholder="Any other health, injury or training-safety details" /></FormField>
     </div>
-
     {!valid && <div className="form-hint">Enter a name, a valid 10-digit phone number and an expiry date to continue.{duplicateId ? ' This Member ID is already in use.' : ''}</div>}
     <ModalActions onClose={onClose} disabled={!valid} onSave={submit} saveLabel={member ? 'Save changes' : 'Add member'} />
   </Modal>;
@@ -8741,49 +9464,126 @@ function PerformancePage({ data }) {
 }
 
 function ReportsPage({ data, revenue }) {
+  const [period, setPeriod] = useState('6m');
+  const [chartMode, setChartMode] = useState('revenue');
+  const [activeMembership, setActiveMembership] = useState('All');
   const members = data.members || [];
   const payments = data.payments || [];
   const attendance = data.attendance || [];
   const leads = data.leads || [];
   const trainers = data.trainers || [];
   const sessions = data.ptSessions || [];
-
+  const money = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
   const collected = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
   const dues = members.reduce((sum, m) => sum + Number(m.due || 0), 0);
   const active = members.filter((m) => getMembershipStatus(m.expiry) === 'Active').length;
   const expiring = members.filter((m) => getMembershipStatus(m.expiry) === 'Expiring').length;
   const expired = members.filter((m) => getMembershipStatus(m.expiry) === 'Expired').length;
   const completedPT = sessions.filter((s) => s.status === 'Completed').length;
+  const now = new Date();
+  const monthCount = period === '12m' ? 12 : period === '3m' ? 3 : 6;
+  const months = Array.from({ length: monthCount }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - (monthCount - 1 - i), 1);
+    return { key: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`, label: d.toLocaleDateString('en-IN', { month: 'short' }), amount: 0, visits: 0 };
+  });
+  payments.forEach((p) => {
+    const raw = p.date || p.paymentDate || p.createdAt;
+    if (!raw) return;
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return;
+    const bucket = months.find((m) => m.key === `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+    if (bucket) bucket.amount += Number(p.amount || 0);
+  });
+  attendance.forEach((a) => {
+    const raw = a.date || a.attendanceDate || a.createdAt;
+    if (!raw) return;
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return;
+    const bucket = months.find((m) => m.key === `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+    if (bucket) bucket.visits += 1;
+  });
+  const chartValues = months.map((m) => chartMode === 'revenue' ? m.amount : m.visits);
+  const maxValue = Math.max(1, ...chartValues);
+  const membershipRows = [
+    { label: 'Active', count: active, color: '#13b981' },
+    { label: 'Expiring soon', count: expiring, color: '#f59e0b' },
+    { label: 'Expired', count: expired, color: '#fb7185' },
+  ];
+  const totalMemberships = Math.max(1, active + expiring + expired);
+  const donutStops = (() => { let cursor = 0; return membershipRows.map((r) => { const from = cursor; cursor += r.count / totalMemberships * 100; return `${r.color} ${from}% ${cursor}%`; }).join(', '); })();
+  const planCounts = Object.entries(members.reduce((acc, m) => { const name = m.plan || 'Unspecified'; acc[name] = (acc[name] || 0) + 1; return acc; }, {})).sort((a,b) => b[1]-a[1]).slice(0,5);
+  const stageCounts = Object.entries(leads.reduce((acc, l) => { const stage = l.stage || 'New'; acc[stage] = (acc[stage] || 0) + 1; return acc; }, {})).sort((a,b) => b[1]-a[1]).slice(0,5);
+  const todayStr = new Date().toISOString().slice(0,10);
+  const todayAttendance = attendance.filter((a) => String(a.date || a.attendanceDate || '').slice(0,10) === todayStr).length;
+  const [showDetails, setShowDetails] = useState(false);
 
   return (
-    <div className="page">
-      <PageTitle title="Reports & Analytics" subtitle="A quick overview of your gym's business and operations." />
-      <div className="member-summary">
-        <MetricBox label="Total members" value={members.length} tone="green" />
-        <MetricBox label="Active members" value={active} />
-        <MetricBox label="Revenue collected" value={`₹${collected.toLocaleString('en-IN')}`} tone="teal" />
-        <MetricBox label="Outstanding dues" value={`₹${dues.toLocaleString('en-IN')}`} tone="amber" />
+    <div className="page report-dashboard">
+      <style>{`
+        .report-dashboard{--rp-ink:#17233d;--rp-muted:#77839b;--rp-line:#e7eaf3;color:var(--rp-ink)}
+        .report-dashboard .report-head{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;flex-wrap:wrap;margin-bottom:22px}
+        .report-dashboard .report-eyebrow{font-size:11px;letter-spacing:1.7px;font-weight:900;color:#8994aa;margin-bottom:7px}
+        .report-dashboard .report-head h1{font-size:clamp(26px,3vw,38px);line-height:1.1;margin:0;font-weight:900;letter-spacing:-1px}
+        .report-dashboard .report-head p{margin:8px 0 0;color:var(--rp-muted);font-size:15px}
+        .report-dashboard .report-actions{display:flex;gap:8px;flex-wrap:wrap}
+        .report-dashboard .report-pill{border:1px solid var(--rp-line);background:#fff;color:#66728b;padding:10px 14px;border-radius:12px;font-weight:800;cursor:pointer}
+        .report-dashboard .report-pill.active{background:#7047ff;color:white;border-color:#7047ff;box-shadow:0 7px 18px #7047ff2c}
+        .report-dashboard .report-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:18px}
+        .report-dashboard .report-kpi{background:#fff;border:1px solid var(--rp-line);border-radius:18px;padding:19px;position:relative;overflow:hidden;box-shadow:0 8px 24px #28385b08;min-height:132px}
+        .report-dashboard .report-kpi:after{content:'';position:absolute;right:-22px;top:-30px;width:105px;height:105px;border-radius:50%;background:var(--kpi-tint);opacity:.8}
+        .report-dashboard .report-kpi-top{display:flex;align-items:center;gap:8px;color:var(--rp-muted);font-weight:800;font-size:12px;position:relative;z-index:1}
+        .report-dashboard .report-kpi-icon{width:34px;height:34px;display:grid;place-items:center;border-radius:11px;background:var(--kpi-tint);color:var(--kpi-color)}
+        .report-dashboard .report-kpi strong{display:block;font-size:clamp(22px,2.2vw,30px);letter-spacing:-.7px;margin-top:14px;position:relative;z-index:1}
+        .report-dashboard .report-kpi small{display:block;color:var(--rp-muted);margin-top:5px;font-size:11px;position:relative;z-index:1}
+        .report-dashboard .report-layout{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(300px,1fr);gap:16px;margin-bottom:16px}
+        .report-dashboard .report-card{background:#fff;border:1px solid var(--rp-line);border-radius:20px;padding:21px;box-shadow:0 8px 24px #28385b08;min-width:0}
+        .report-dashboard .report-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:20px}
+        .report-dashboard .report-card h3{font-size:17px;margin:0;font-weight:900;letter-spacing:-.3px}
+        .report-dashboard .report-card p{font-size:12px;color:var(--rp-muted);margin:6px 0 0}
+        .report-dashboard .report-chart{height:225px;display:flex;gap:10px;align-items:stretch;padding-top:10px}
+        .report-dashboard .report-ylabels{display:flex;flex-direction:column;justify-content:space-between;color:#9aa4b6;font-size:10px;padding-bottom:24px;min-width:42px;text-align:right}
+        .report-dashboard .report-bars{display:flex;align-items:stretch;gap:clamp(5px,1.3vw,15px);flex:1;min-width:0;border-bottom:1px solid var(--rp-line);background:repeating-linear-gradient(to bottom,transparent 0,transparent 54px,#edf0f7 55px,#edf0f7 56px)}
+        .report-dashboard .report-bar-wrap{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:8px}
+        .report-dashboard .report-bar-track{height:185px;width:100%;display:flex;align-items:flex-end;justify-content:center}
+        .report-dashboard .report-bar{width:min(34px,80%);min-height:4px;border-radius:8px 8px 3px 3px;background:linear-gradient(180deg,#9c7bff,#7047ff);transition:height .25s ease;position:relative;cursor:pointer}
+        .report-dashboard .report-bar:hover{filter:brightness(1.08);box-shadow:0 0 0 4px #7047ff18}
+        .report-dashboard .report-bar-label{font-size:10px;color:#8994aa;white-space:nowrap}
+        .report-dashboard .report-chart-legend{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:13px;color:var(--rp-muted);font-size:11px}
+        .report-dashboard .report-legend-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+        .report-dashboard .report-donut-row{display:flex;align-items:center;gap:24px;justify-content:center;min-height:205px;flex-wrap:wrap}
+        .report-dashboard .report-donut{width:158px;height:158px;border-radius:50%;background:conic-gradient(${donutStops});display:grid;place-items:center;position:relative;flex-shrink:0}
+        .report-dashboard .report-donut:before{content:'';position:absolute;inset:19px;background:white;border-radius:50%}
+        .report-dashboard .report-donut-center{position:relative;text-align:center}.report-dashboard .report-donut-center strong{display:block;font-size:27px}.report-dashboard .report-donut-center span{font-size:11px;color:var(--rp-muted)}
+        .report-dashboard .report-legend{display:grid;gap:13px;min-width:125px}.report-dashboard .report-legend button{border:0;background:transparent;padding:0;display:flex;align-items:center;gap:8px;justify-content:space-between;cursor:pointer;color:#596780;text-align:left;font-size:12px}.report-dashboard .report-legend button.selected{font-weight:900;color:#17233d}.report-dashboard .report-legend strong{margin-left:12px;color:#17233d}
+        .report-dashboard .report-progress-list{display:grid;gap:17px}.report-dashboard .report-progress-top{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:#66728b;margin-bottom:7px}.report-dashboard .report-progress-top strong{color:#17233d}.report-dashboard .report-progress-track{height:9px;background:#f0f2f8;border-radius:99px;overflow:hidden}.report-dashboard .report-progress-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,#16b98a,#5dd6b2)}
+        .report-dashboard .report-ops{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.report-dashboard .report-op{padding:16px;border-radius:15px;background:#f8f9fd;border:1px solid #edf0f7}.report-dashboard .report-op span{display:block;color:var(--rp-muted);font-size:11px;font-weight:800}.report-dashboard .report-op strong{display:block;font-size:23px;margin-top:9px}.report-dashboard .report-op small{font-size:10px;color:#8994aa}
+        .report-dashboard .report-detail-toggle{border:0;background:#f2efff;color:#7047ff;font-weight:900;border-radius:10px;padding:9px 12px;cursor:pointer}.report-dashboard .report-details{margin-top:14px;border:1px solid var(--rp-line);border-radius:14px;overflow:hidden}.report-dashboard .report-details-row{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--rp-line);font-size:12px}.report-dashboard .report-details-row:last-child{border-bottom:0}.report-dashboard .report-details-row span{color:var(--rp-muted)}
+        @media(max-width:1050px){.report-dashboard .report-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.report-dashboard .report-layout{grid-template-columns:1fr}}
+        @media(max-width:560px){.report-dashboard .report-kpis{grid-template-columns:1fr 1fr;gap:9px}.report-dashboard .report-kpi{padding:13px;min-height:115px}.report-dashboard .report-kpi strong{font-size:21px}.report-dashboard .report-card{padding:15px}.report-dashboard .report-chart{gap:5px}.report-dashboard .report-ylabels{min-width:30px;font-size:9px}.report-dashboard .report-bar-label{font-size:9px}.report-dashboard .report-ops{grid-template-columns:1fr 1fr}.report-dashboard .report-donut-row{gap:14px}}
+      `}</style>
+      <div className="report-head">
+        <div><div className="report-eyebrow">PREFACE FITNESS · BUSINESS INTELLIGENCE</div><h1>Reports & Analytics</h1><p>Explore your gym's performance with live, interactive insights.</p></div>
+        <div className="report-actions">{[{id:'3m',label:'3 months'},{id:'6m',label:'6 months'},{id:'12m',label:'12 months'}].map((p) => <button key={p.id} className={`report-pill ${period===p.id?'active':''}`} onClick={() => setPeriod(p.id)}>{p.label}</button>)}</div>
       </div>
-      <div className="grid-2">
-        <section className="card">
-          <div className="card-header"><div><h3>Membership overview</h3><p>Current membership status</p></div></div>
-          <div className="report-list">
-            <div><span>Active</span><strong>{active}</strong></div>
-            <div><span>Expiring within 30 days</span><strong>{expiring}</strong></div>
-            <div><span>Expired</span><strong>{expired}</strong></div>
-          </div>
-        </section>
-        <section className="card">
-          <div className="card-header"><div><h3>Operations</h3><p>Current activity summary</p></div></div>
-          <div className="report-list">
-            <div><span>Attendance records</span><strong>{attendance.length}</strong></div>
-            <div><span>Leads</span><strong>{leads.length}</strong></div>
-            <div><span>Trainers</span><strong>{trainers.length}</strong></div>
-            <div><span>Completed PT sessions</span><strong>{completedPT}</strong></div>
-            <div><span>PT revenue</span><strong>₹{Number(revenue || 0).toLocaleString('en-IN')}</strong></div>
-          </div>
-        </section>
+      <div className="report-kpis">
+        <div className="report-kpi" style={{'--kpi-tint':'#d8f8ec','--kpi-color':'#0aa778'}}><div className="report-kpi-top"><span className="report-kpi-icon"><Users size={17}/></span>Total members</div><strong>{members.length}</strong><small>All registered gym members</small></div>
+        <div className="report-kpi" style={{'--kpi-tint':'#dff8ed','--kpi-color':'#0aa778'}}><div className="report-kpi-top"><span className="report-kpi-icon"><UserCheck size={17}/></span>Active members</div><strong>{active}</strong><small>{members.length ? Math.round(active/members.length*100) : 0}% of total members</small></div>
+        <div className="report-kpi" style={{'--kpi-tint':'#e9e1ff','--kpi-color':'#7047ff'}}><div className="report-kpi-top"><span className="report-kpi-icon"><CircleDollarSign size={17}/></span>Revenue collected</div><strong>{money(collected)}</strong><small>Across recorded payments</small></div>
+        <div className="report-kpi" style={{'--kpi-tint':'#fff0c7','--kpi-color':'#d99409'}}><div className="report-kpi-top"><span className="report-kpi-icon"><CreditCard size={17}/></span>Outstanding dues</div><strong>{money(dues)}</strong><small>Pending member balances</small></div>
       </div>
+      <div className="report-layout">
+        <section className="report-card">
+          <div className="report-card-head"><div><h3>{chartMode === 'revenue' ? 'Revenue trend' : 'Attendance trend'}</h3><p>{chartMode === 'revenue' ? 'Monthly collections based on payment dates' : 'Monthly check-ins recorded in the system'}</p></div><div className="report-actions"><button className={`report-pill ${chartMode==='revenue'?'active':''}`} onClick={() => setChartMode('revenue')}>Revenue</button><button className={`report-pill ${chartMode==='attendance'?'active':''}`} onClick={() => setChartMode('attendance')}>Attendance</button></div></div>
+          <div className="report-chart"><div className="report-ylabels"><span>{chartMode==='revenue'?money(maxValue):maxValue}</span><span>{chartMode==='revenue'?money(maxValue*.66):Math.round(maxValue*.66)}</span><span>{chartMode==='revenue'?money(maxValue*.33):Math.round(maxValue*.33)}</span><span>0</span></div><div className="report-bars">{months.map((m,i) => <div className="report-bar-wrap" key={m.key}><div className="report-bar-track"><div className="report-bar" title={`${m.label}: ${chartMode==='revenue'?money(m.amount):m.visits+' visits'}`} style={{height:`${Math.max(2,chartValues[i]/maxValue*100)}%`,background:chartMode==='revenue'?'linear-gradient(180deg,#9c7bff,#7047ff)':'linear-gradient(180deg,#5ee2bd,#0aa778)'}} /></div><span className="report-bar-label">{m.label}</span></div>)}</div></div>
+          <div className="report-chart-legend"><span><i className="report-legend-dot" style={{background:chartMode==='revenue'?'#7047ff':'#0aa778'}}/>{chartMode==='revenue'?'Collected payments':'Attendance check-ins'}</span><strong>{chartMode==='revenue'?money(months.reduce((s,m)=>s+m.amount,0)):`${months.reduce((s,m)=>s+m.visits,0)} visits`} in selected period</strong></div>
+        </section>
+        <section className="report-card"><div className="report-card-head"><div><h3>Membership health</h3><p>Click a category to inspect the counts</p></div><ShieldCheck size={21} color="#7047ff"/></div><div className="report-donut-row"><div className="report-donut" style={{background:`conic-gradient(${donutStops})`}}><div className="report-donut-center"><strong>{members.length}</strong><span>members</span></div></div><div className="report-legend">{membershipRows.map((r) => <button key={r.label} className={activeMembership===r.label?'selected':''} onClick={() => setActiveMembership(activeMembership===r.label?'All':r.label)}><span><i className="report-legend-dot" style={{background:r.color}}/>{r.label}</span><strong>{r.count}</strong></button>)}</div></div>{activeMembership!=='All'&&<div className="report-details">{members.filter(m=>getMembershipStatus(m.expiry)===(activeMembership==='Expiring soon'?'Expiring':activeMembership)).map(m=><div className="report-details-row" key={m.id}><strong>{m.name||'Member'}</strong><span>{m.expiry?`Expires ${m.expiry}`:'No expiry date'}</span></div>)}{members.filter(m=>getMembershipStatus(m.expiry)===(activeMembership==='Expiring soon'?'Expiring':activeMembership)).length===0&&<div className="report-details-row"><span>No members in this category.</span></div>}</div>}</section>
+      </div>
+      <div className="report-layout">
+        <section className="report-card"><div className="report-card-head"><div><h3>Membership plan mix</h3><p>Most popular plans in your member base</p></div><Target size={21} color="#0aa778"/></div><div className="report-progress-list">{planCounts.length?planCounts.map(([name,count])=><div key={name}><div className="report-progress-top"><span>{name}</span><strong>{count} member{count===1?'':'s'}</strong></div><div className="report-progress-track"><div className="report-progress-fill" style={{width:`${count/Math.max(1,...planCounts.map(p=>p[1]))*100}%`}}/></div></div>):<p>No membership plan data available yet.</p>}</div></section>
+        <section className="report-card"><div className="report-card-head"><div><h3>Lead pipeline</h3><p>Enquiry-to-conversion overview</p></div><TrendingUp size={21} color="#7047ff"/></div><div className="report-progress-list">{stageCounts.length?stageCounts.map(([stage,count],i)=><div key={stage}><div className="report-progress-top"><span>{stage}</span><strong>{count} lead{count===1?'':'s'}</strong></div><div className="report-progress-track"><div className="report-progress-fill" style={{width:`${count/Math.max(1,...stageCounts.map(p=>p[1]))*100}%`,background:i%2?'linear-gradient(90deg,#9c7bff,#7047ff)':'linear-gradient(90deg,#16b98a,#5dd6b2)'}}/></div></div>):<p>No leads recorded yet.</p>}</div></section>
+      </div>
+      <section className="report-card"><div className="report-card-head"><div><h3>Operations snapshot</h3><p>Activity across your gym management system</p></div><button className="report-detail-toggle" onClick={() => setShowDetails(!showDetails)}>{showDetails?'Hide details':'View details'} <ArrowUpRight size={14}/></button></div><div className="report-ops"><div className="report-op"><span>Today's attendance</span><strong>{todayAttendance}</strong><small>check-ins today</small></div><div className="report-op"><span>Total leads</span><strong>{leads.length}</strong><small>all pipeline stages</small></div><div className="report-op"><span>Trainers</span><strong>{trainers.length}</strong><small>registered trainers</small></div><div className="report-op"><span>PT sessions completed</span><strong>{completedPT}</strong><small>completed sessions</small></div><div className="report-op"><span>PT revenue</span><strong>{money(revenue)}</strong><small>recorded PT collection</small></div><div className="report-op"><span>Attendance records</span><strong>{attendance.length}</strong><small>all recorded visits</small></div></div>{showDetails&&<div className="report-details"><div className="report-details-row"><span>Active memberships</span><strong>{active}</strong></div><div className="report-details-row"><span>Expiring within 30 days</span><strong>{expiring}</strong></div><div className="report-details-row"><span>Expired memberships</span><strong>{expired}</strong></div><div className="report-details-row"><span>Revenue in selected chart period</span><strong>{money(months.reduce((s,m)=>s+m.amount,0))}</strong></div></div>}</section>
     </div>
   );
 }
@@ -9089,7 +9889,7 @@ function StaffAccessPage() {
   );
 }
 
-function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, resetData }) {
+function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel, data, setData, dbReady, resetData }) {
   const current = data.settings || {};
   const [form, setForm] = useState({
     gymName: current.gymName || 'Preface Fitness',
@@ -9104,9 +9904,9 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
     gymLongitude: current.gymLongitude || '',
     publicPage: {
       whatsappNumber: current.publicPage?.whatsappNumber || '', instagramUrl: current.publicPage?.instagramUrl || '', facebookUrl: current.publicPage?.facebookUrl || '', websiteUrl: current.publicPage?.websiteUrl || '',
-      googleRating: current.publicPage?.googleRating || '5.0', googleReviewCount: (current.publicPage?.googleReviewCount && String(current.publicPage.googleReviewCount) !== '2') ? current.publicPage.googleReviewCount : '94', googleMapsUrl: current.publicPage?.googleMapsUrl || '', googleSearchUrl: current.publicPage?.googleSearchUrl || 'https://www.google.com/search?q=preface+fitness', googlePlaceName: current.publicPage?.googlePlaceName || current.gymName || 'Preface Fitness', googlePhone: current.publicPage?.googlePhone || '093692 79056', googleAddress: current.publicPage?.googleAddress || current.gymAddress || 'Preface Fitness, Nadan Mahal Rd. above Hdfc Bank, Yahiyaganj, Lucknow, Uttar Pradesh 226003', hoursText: current.publicPage?.hoursText || 'Mon-Sun · 6 AM - 11 PM',
+      googleRating: current.publicPage?.googleRating || '5.0', googleReviewCount: (current.publicPage?.googleReviewCount && String(current.publicPage.googleReviewCount) !== '2') ? current.publicPage.googleReviewCount : '94', googleMapsUrl: current.publicPage?.googleMapsUrl || '', googleSearchUrl: current.publicPage?.googleSearchUrl || 'https://www.google.com/search?q=preface+fitness', googlePlaceName: current.publicPage?.googlePlaceName || current.gymName || 'Preface Fitness', googlePhone: current.publicPage?.googlePhone || '093692 79056', googleAddress: current.publicPage?.googleAddress || current.gymAddress || 'Preface Fitness, Nadan Mahal Rd. above Hdfc Bank, Yahiyaganj, Lucknow, Uttar Pradesh 226003', hoursText: current.publicPage?.hoursText || '6 AM - 11 PM', openingDays: Array.isArray(current.publicPage?.openingDays) ? current.publicPage.openingDays : ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
       trainers: Array.isArray(current.publicPage?.trainers) ? current.publicPage.trainers : [],
-      packages: Array.isArray(current.publicPage?.packages) && current.publicPage.packages.length ? current.publicPage.packages : MEMBERSHIP_PLANS.map((plan) => ({ name: plan.name, months: plan.months, price: Number(current.membershipPrices?.[plan.name] || plan.price), description: plan.description })),
+      packages: Array.isArray(current.publicPage?.packages) && current.publicPage.packages.length ? current.publicPage.packages : MEMBERSHIP_PLANS.map((plan) => ({ name: plan.name, months: plan.months, price: plan.price, description: plan.description })),
       reviews: Array.isArray(current.publicPage?.reviews) ? current.publicPage.reviews : [],
     },
   });
@@ -9141,9 +9941,9 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
       gymLongitude: current.gymLongitude || '',
       publicPage: {
         whatsappNumber: current.publicPage?.whatsappNumber || '', instagramUrl: current.publicPage?.instagramUrl || '', facebookUrl: current.publicPage?.facebookUrl || '', websiteUrl: current.publicPage?.websiteUrl || '',
-        googleRating: current.publicPage?.googleRating || '5.0', googleReviewCount: (current.publicPage?.googleReviewCount && String(current.publicPage.googleReviewCount) !== '2') ? current.publicPage.googleReviewCount : '94', googleMapsUrl: current.publicPage?.googleMapsUrl || '', googleSearchUrl: current.publicPage?.googleSearchUrl || 'https://www.google.com/search?q=preface+fitness', googlePlaceName: current.publicPage?.googlePlaceName || current.gymName || 'Preface Fitness', googlePhone: current.publicPage?.googlePhone || '093692 79056', googleAddress: current.publicPage?.googleAddress || current.gymAddress || 'Preface Fitness, Nadan Mahal Rd. above Hdfc Bank, Yahiyaganj, Lucknow, Uttar Pradesh 226003', hoursText: current.publicPage?.hoursText || 'Mon-Sun · 6 AM - 11 PM',
+        googleRating: current.publicPage?.googleRating || '5.0', googleReviewCount: (current.publicPage?.googleReviewCount && String(current.publicPage.googleReviewCount) !== '2') ? current.publicPage.googleReviewCount : '94', googleMapsUrl: current.publicPage?.googleMapsUrl || '', googleSearchUrl: current.publicPage?.googleSearchUrl || 'https://www.google.com/search?q=preface+fitness', googlePlaceName: current.publicPage?.googlePlaceName || current.gymName || 'Preface Fitness', googlePhone: current.publicPage?.googlePhone || '093692 79056', googleAddress: current.publicPage?.googleAddress || current.gymAddress || 'Preface Fitness, Nadan Mahal Rd. above Hdfc Bank, Yahiyaganj, Lucknow, Uttar Pradesh 226003', hoursText: current.publicPage?.hoursText || '6 AM - 11 PM', openingDays: Array.isArray(current.publicPage?.openingDays) ? current.publicPage.openingDays : ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
         trainers: Array.isArray(current.publicPage?.trainers) ? current.publicPage.trainers : [],
-        packages: Array.isArray(current.publicPage?.packages) && current.publicPage.packages.length ? current.publicPage.packages : MEMBERSHIP_PLANS.map((plan) => ({ name: plan.name, months: plan.months, price: Number(current.membershipPrices?.[plan.name] || plan.price), description: plan.description })),
+        packages: Array.isArray(current.publicPage?.packages) && current.publicPage.packages.length ? current.publicPage.packages : MEMBERSHIP_PLANS.map((plan) => ({ name: plan.name, months: plan.months, price: plan.price, description: plan.description })),
         reviews: Array.isArray(current.publicPage?.reviews) ? current.publicPage.reviews : [],
       },
     });
@@ -9433,31 +10233,45 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
   const removePublicReview = (index) => { updatePublicPage('reviews', (form.publicPage?.reviews || []).filter((_, i) => i !== index)); showActionFeedback('Review removed from the draft.'); };
 
   const savePublicPageOnly = async () => {
+    // Treat the edited package form as the source of truth. Previously this
+    // preferred data.settings.membershipPrices over the form value, so a user
+    // could edit a price but the old value was written back on Save.
+    const cleanedPackages = (form.publicPage?.packages || [])
+      .filter((p) => String(p.name || '').trim())
+      .map((p) => {
+        const standardPlan = MEMBERSHIP_PLANS.find(
+          (plan) => String(plan.name).trim().toLowerCase() === String(p.name || '').trim().toLowerCase()
+        );
+        return {
+          ...p,
+          months: Math.max(1, Number(p.months || standardPlan?.months || 1)),
+          price: Math.max(0, Number(p.price ?? standardPlan?.price ?? 0)),
+        };
+      });
+
     const publicPage = {
       ...(form.publicPage || {}),
       trainers: (form.publicPage?.trainers || [])
         .filter((t) => String(t.name || '').trim())
-        .map((t) => ({
-          ...t,
-          photo: String(t.photo || ''),
-        })),
-      packages: (form.publicPage?.packages || []).filter((p) => String(p.name || '').trim()).map((p) => {
-        const standardPlan = MEMBERSHIP_PLANS.find((plan) => String(plan.name).trim().toLowerCase() === String(p.name || '').trim().toLowerCase());
-        const currentPrice = standardPlan ? Number(data.settings?.membershipPrices?.[standardPlan.name] ?? p.price ?? standardPlan.price) : Number(p.price || 0);
-        return { ...p, months: Math.max(1, Number(p.months || standardPlan?.months || 1)), price: Math.max(0, currentPrice) };
-      }),
+        .map((t) => ({ ...t, photo: String(t.photo || '') })),
+      packages: cleanedPackages,
       reviews: (form.publicPage?.reviews || []).filter((r) => String(r.name || r.text || '').trim()),
     };
-    const patch = { publicPage: { ...publicPage, updatedAt: new Date().toISOString() } };
-    setForm((f) => ({ ...f, publicPage }));
+    const patch = {
+      publicPage: { ...publicPage, updatedAt: new Date().toISOString() },
+    };
+
+    setForm((f) => ({ ...f, publicPage: patch.publicPage }));
     setData((d) => ({ ...d, settings: { ...(d.settings || {}), ...patch } }));
+
     try {
       await saveCloudSettings(patch);
-      setAuthMessage('Public gym page settings saved successfully.');
-      showActionFeedback('Public gym page saved successfully.');
+      setAuthMessage('Public page settings saved successfully.');
+      showActionFeedback('Public page settings saved successfully.');
     } catch (error) {
-      console.error('Public page settings save failed:', error);
-      setAuthMessage(error?.message || 'Public page saved locally, but cloud save failed.');
+      console.error('Membership/public page settings save failed:', error);
+      setAuthMessage(error?.message || 'Changes are visible locally, but cloud save failed.');
+      showActionFeedback(error?.message || 'Unable to save public page settings.', 'error');
     }
   };
 
@@ -9606,8 +10420,17 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
             <FormField label="Google Maps URL"><input value={form.publicPage?.googleMapsUrl || ''} onChange={(e) => updatePublicPage('googleMapsUrl', e.target.value)} placeholder="https://maps.google.com/..." /></FormField>
             <FormField label="Google Search URL"><input value={form.publicPage?.googleSearchUrl || ''} onChange={(e) => updatePublicPage('googleSearchUrl', e.target.value)} placeholder="Google business search/listing URL" /></FormField>
             <FormField label="Google address"><input value={form.publicPage?.googleAddress || ''} onChange={(e) => updatePublicPage('googleAddress', e.target.value)} placeholder="Full Google business address" /></FormField>
-            <FormField label="Opening hours"><input value={form.publicPage?.hoursText || ''} onChange={(e) => updatePublicPage('hoursText', e.target.value)} placeholder="Mon-Sun · 6 AM - 11 PM" /></FormField>
+            <FormField label="Opening hours"><input value={form.publicPage?.hoursText || ''} onChange={(e) => updatePublicPage('hoursText', e.target.value)} placeholder="6 AM - 11 PM" /></FormField>
           </div>
+          <div className="form-section-title">Opening days</div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(125px,1fr))',gap:'10px',padding:'14px',border:'1px solid #e1e7ef',borderRadius:'14px',background:'#fafcff'}}>
+            {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day) => {
+              const selectedDays = Array.isArray(form.publicPage?.openingDays) ? form.publicPage.openingDays : ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+              const checked = selectedDays.includes(day);
+              return <label key={day} style={{display:'flex',alignItems:'center',gap:'9px',fontSize:'13px',fontWeight:700,color:'#334155',cursor:'pointer',padding:'8px 10px',border:'1px solid '+(checked ? '#b8aaff' : '#e1e7ef'),borderRadius:'10px',background:checked ? '#f1edff' : '#fff'}}><input type="checkbox" checked={checked} onChange={(e) => updatePublicPage('openingDays', e.target.checked ? [...selectedDays, day].filter((d, i, arr) => arr.indexOf(d) === i) : selectedDays.filter((d) => d !== day))} />{day}</label>;
+            })}
+          </div>
+          <p style={{fontSize:'12px',color:'#718096',marginTop:'8px'}}>Select all days the gym is open. These days will be shown on the public gym page after you click Save public page.</p>
 
           <div className="form-section-title" style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:'12px'}}><span>Trainer profiles</span><button className="btn btn-secondary btn-sm" onClick={addPublicTrainer}><Plus size={15}/> Add trainer</button></div>
           <div style={{display:'grid',gap:'14px'}}>
@@ -9808,12 +10631,13 @@ function SettingsPage({ exportBackup, importBackup, data, setData, dbReady, rese
             </section>
 
             <section className="card">
-              <div className="card-header"><div><h3>Backup & restore</h3><p>Download a JSON backup or restore one later.</p></div></div>
+              <div className="card-header"><div><h3>Excel import & export</h3><p>Import member lists from an Excel workbook with separate sheets for Monthly, Quarterly, Half-yearly, Annual or other plans. Export current members to Excel.</p></div></div>
               <div style={{display:'flex',gap:'10px',flexWrap:'wrap'}}>
-                <button className="btn btn-primary" onClick={() => { exportBackup(); showActionFeedback('Backup export started.'); }}><FileDown size={17}/> Export backup</button>
-                <label className="btn btn-secondary" style={{cursor:'pointer'}}><FileUp size={17}/> Import backup<input type="file" accept=".json,application/json" onChange={(event) => { importBackup(event); showActionFeedback('Backup import started.'); }} style={{display:'none'}} /></label>
+                <button className="btn btn-primary" onClick={onExportExcel}><FileDown size={17}/> Export Excel</button>
+                <label className="btn btn-secondary" style={{cursor:'pointer'}}><FileUp size={17}/> Import Excel<input type="file" accept=".xlsx,.xls,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" onChange={onImportExcel} style={{display:'none'}} /></label>
                 <button className="btn btn-danger" onClick={() => { resetData(); showActionFeedback('Demo data reset action completed.'); }}>Reset demo data</button>
               </div>
+              <p style={{fontSize:'13px',color:'#687789',lineHeight:1.6,marginTop:'12px'}}>Required columns: Member Name and Phone. Recommended: Membership Plan, Joining Date, Expiry Date, Membership Amount, Amount Paid and Due Amount. If Membership Plan is blank, the sheet name is used as the plan. Duplicate phone numbers/member IDs and invalid rows are skipped during import.</p>
             </section>
           </div>
         )}
