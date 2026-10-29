@@ -2309,6 +2309,11 @@ function App() {
   const getMemberStatus = getMembershipStatus;
 
   const addMember = async (member) => {
+    const requestedPin = String(member.portalPin || '');
+    if (!/^\d{6}$/.test(requestedPin)) {
+      setToast('Enter a valid 6-digit Member Portal PIN.');
+      return;
+    }
     const requestedId = String(member.id || '').trim();
     const id = requestedId || nextSystemMemberId(data.members);
 
@@ -2372,7 +2377,23 @@ function App() {
         referred_by_member_id: referredMember?.cloudId || null,
       });
 
+      // Portal PIN is stored only as a server-side hash via a restricted RPC.
+      // Never include the PIN in the members row or local app state.
+      const pinValue = String(member.portalPin || '');
+      if (!/^\d{6}$/.test(pinValue)) {
+        throw new Error('Enter a valid 6-digit Member Portal PIN.');
+      }
+      const { error: pinError } = await supabase.rpc('set_member_portal_pin', {
+        p_member_id: row.id,
+        p_pin: pinValue,
+      });
+      if (pinError) {
+        console.error('Member Portal PIN setup failed:', pinError);
+        throw new Error(`Member was created, but PIN setup failed. Ask the admin to set the PIN from the member profile. Details: ${pinError.message}`);
+      }
+
       const saved = { ...clean, cloudId: row.id, id: row.member_code || clean.id };
+      delete saved.portalPin;
 
       let initialPayment = null;
       if (Number(clean.paid || 0) > 0) {
@@ -2489,9 +2510,22 @@ function App() {
         referred_by_member_id: referredMember?.cloudId || null,
       });
 
+      const requestedPin = String(updated.portalPin || '').trim();
+      if (requestedPin) {
+        if (!isOwner) throw new Error('Only an Admin can change or reset a member portal PIN.');
+        if (!/^\d{6}$/.test(requestedPin)) throw new Error('PIN must be exactly 6 digits.');
+        const { error: pinError } = await supabase.rpc('set_member_portal_pin', {
+          p_member_id: existing.cloudId,
+          p_pin: requestedPin,
+        });
+        if (pinError) throw new Error(`Member details saved, but PIN update failed: ${pinError.message}`);
+      }
+
+      const safeClean = { ...clean };
+      delete safeClean.portalPin;
       setData((d) => ({
         ...d,
-        members: d.members.map((m) => m.id === updated.id ? { ...clean, cloudId: existing.cloudId } : m),
+        members: d.members.map((m) => m.id === updated.id ? { ...safeClean, cloudId: existing.cloudId } : m),
       }));
       setModal(null);
       setToast('Member updated successfully');
@@ -4035,8 +4069,8 @@ function App() {
         <DeveloperContactBar app />
       </main>
 
-      {modal === 'member' && <MemberModal onClose={() => setModal(null)} onSave={addMember} planPrices={planPrices} members={data.members} trainers={data.trainers || []} existingMemberIds={data.members.map((m) => m.id)} />}
-      {modal?.type === 'editMember' && <MemberModal member={modal.member} onClose={() => setModal(null)} onSave={updateMember} planPrices={planPrices} members={data.members} trainers={data.trainers || []} existingMemberIds={data.members.map((m) => m.id)} />}
+      {modal === 'member' && <MemberModal onClose={() => setModal(null)} onSave={addMember} planPrices={planPrices} members={data.members} trainers={data.trainers || []} existingMemberIds={data.members.map((m) => m.id)} isOwner={isOwner} />}
+      {modal?.type === 'editMember' && <MemberModal member={modal.member} onClose={() => setModal(null)} onSave={updateMember} planPrices={planPrices} members={data.members} trainers={data.trainers || []} existingMemberIds={data.members.map((m) => m.id)} isOwner={isOwner} />}
       {modal === 'lead' && <LeadModal onClose={() => setModal(null)} onSave={addLead} />}
       {modal?.type === 'editLead' && <LeadModal lead={modal.lead} onClose={() => setModal(null)} onSave={updateLeadDetails} />}
       {modal === 'trainer' && <TrainerModal onClose={() => setModal(null)} onSave={addTrainer} />}
@@ -9371,7 +9405,7 @@ function shareBillWhatsApp(member, settings, payment = null) {
   window.open(`https://wa.me/${target}?text=${encodeURIComponent(text)}`, '_blank');
 }
 
-function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = [], members = [], trainers = [] }) {
+function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = [], members = [], trainers = [], isOwner = false }) {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState('');
   const videoRef = useRef(null);
@@ -9458,7 +9492,7 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
     surgeryDetails: readMemberMeta(member.notes).surgeryDetails || '',
     additionalMedicalNotes: readMemberMeta(member.notes).additionalMedicalNotes || '',
   } : {
-    id: '', attendanceNumber: '', name: '', phone: '', email: '', dob: '', gender: 'Prefer not to say', address: '',
+    id: '', attendanceNumber: '', portalPin: '', name: '', phone: '', email: '', dob: '', gender: 'Prefer not to say', address: '',
     emergencyContact: '', dietPreference: 'Veg', gstinAadhaar: '', billingState: 'UTTAR PRADESH', billingStateCode: '09', referredBy: '', plan: 'Monthly', start: today, expiry: addMonthsToDate(today, MEMBERSHIP_PLANS.find((item) => item.name === 'Monthly')?.months || 1), amount: Number(planPrices?.Monthly || 0), paid: 0,
     due: 0, paymentMode: 'Cash', gstMode: 'without', gstRate: 5, height: '', weight: '', bodyFat: '', chest: '', shoulder: '', biceps: '', forearms: '', waist: '', hips: '', thighs: '', calves: '', neck: '', trainer: '', referral: 'None / Walk-In', referralOther: '', medicalConditions: [], medicalOther: '', surgeryDetails: '', additionalMedicalNotes: '', notes: '',
   });
@@ -9490,9 +9524,31 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
   const normalizedId = String(form.id || '').trim().toLowerCase();
   const duplicateId = normalizedId && existingMemberIds.some((id) => String(id).toLowerCase() === normalizedId && (!member || String(member.id).toLowerCase() !== normalizedId));
   const submit = () => onSave({ ...form, referral: form.referral === 'Others' ? `Others: ${String(form.referralOther || '').trim()}` : (form.referral === 'Customer' ? 'Customer' : 'None / Walk-In'), referredBy: form.referral === 'Customer' ? (form.referredBy || '') : '', id: String(form.id || '').trim(), amount: Number(form.amount || 0), paid: Number(form.paid || 0), due: Number(form.due || 0) });
-  const valid = form.name.trim() && /^[0-9]{10}$/.test(form.phone.replace(/\D/g, '')) && form.expiry && !duplicateId;
+  const valid = form.name.trim() && /^[0-9]{10}$/.test(form.phone.replace(/\D/g, '')) && form.expiry && !duplicateId && (member ? (!form.portalPin || /^\d{6}$/.test(form.portalPin)) : /^\d{6}$/.test(form.portalPin));
 
   return <Modal title={member ? 'Edit member' : 'Add member'} onClose={onClose} wide>
+    <div className="form-section-title">Member Portal PIN</div>
+    <div className="form-grid two">
+      <FormField label={member ? 'Change / Reset 6-digit PIN (Admin only)' : 'Set 6-digit Member Portal PIN'}>
+        <input
+          type="password"
+          inputMode="numeric"
+          autoComplete="new-password"
+          maxLength={6}
+          pattern="[0-9]{6}"
+          value={form.portalPin || ''}
+          onChange={(e) => update('portalPin', e.target.value.replace(/\\D/g, '').slice(0, 6))}
+          placeholder={member ? (isOwner ? 'Leave blank to keep current PIN' : 'Admin only') : 'Enter 6 digits'}
+          disabled={Boolean(member) && !isOwner}
+          required={!member}
+        />
+      </FormField>
+      <div style={{ display: 'flex', alignItems: 'center', color: '#64748b', fontSize: '12px', lineHeight: 1.5 }}>
+        {member
+          ? (isOwner ? 'Only an Admin can change or reset this PIN. Leave blank to keep the existing PIN.' : 'Only an Admin can change or reset the member portal PIN.')
+          : 'Admin or authorized staff sets this PIN while adding the member. OTP is not used.'}
+      </div>
+    </div>
     {cameraOpen && (
       <div
         role="dialog"
@@ -10916,6 +10972,10 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&data=${encodeURIComponent(qrUrl)}`;
   const feedbackQrUrl = getFeedbackUrl(data.gym?.id || '', form.gymName || 'Preface Fitness');
   const feedbackQrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&data=${encodeURIComponent(feedbackQrUrl)}`;
+  const memberPortalUrl = `${PRODUCTION_APP_URL}?gym=${encodeURIComponent(data.gym?.id || PRODUCTION_GYM_ID)}#member-portal`;
+  const memberPortalQrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&data=${encodeURIComponent(memberPortalUrl)}`;
+  const openMemberPortalQr = () => { window.open(memberPortalQrImageUrl, '_blank', 'noopener,noreferrer'); showActionFeedback('Member Portal QR opened in a new tab.'); };
+  const printMemberPortalQr = () => { const w = window.open('', '_blank', 'width=700,height=900'); if (!w) { showActionFeedback('Popup was blocked. Allow popups to print the Member Portal QR.', 'error'); return; } w.document.write(`<!doctype html><html><head><title>Member Portal QR</title><style>body{font-family:Arial,sans-serif;text-align:center;padding:40px;color:#17263b}img{width:360px;max-width:90vw}h1{font-size:28px}p{font-size:16px;color:#64748b}</style></head><body><h1>${String(form.gymName || 'Preface Fitness')}</h1><p>Scan to log in to your Member Portal</p><img src="${memberPortalQrImageUrl}" alt="Member Portal QR"/><p>Use your registered mobile/member ID and 6-digit PIN</p></body></html>`); w.document.close(); w.focus(); setTimeout(()=>w.print(),250); };
 
   const openQr = () => { window.open(qrImageUrl, '_blank', 'noopener,noreferrer'); showActionFeedback('Attendance QR opened in a new tab.'); };
   const openFeedbackQr = () => { window.open(feedbackQrImageUrl, '_blank', 'noopener,noreferrer'); showActionFeedback('Feedback QR opened in a new tab.'); };
@@ -11542,6 +11602,13 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
         {activeSettingsTab === 'qr' && (
           <div className="settings-tab-panel">
 <section className="card">
+          <div className="card-header"><div><h3>Member Portal QR Code</h3><p>Members scan this QR to open their private portal and sign in with their registered mobile/member ID and 6-digit PIN.</p></div><QrCode size={21}/></div>
+          <div style={{display:'grid',gridTemplateColumns:'180px 1fr',gap:'22px',alignItems:'center'}}>
+            <div style={{border:'1px solid #dce5eb',borderRadius:'16px',padding:'12px',background:'#fff',textAlign:'center'}}><img src={memberPortalQrImageUrl} alt="Member Portal QR" style={{width:'100%',maxWidth:'180px',display:'block',margin:'0 auto'}} /></div>
+            <div><div style={{fontSize:'15px',fontWeight:800,color:'#25364b'}}>Scan → Enter member ID/mobile → Enter 6-digit PIN</div><p style={{fontSize:'13px',lineHeight:1.6,color:'#687789',margin:'8px 0'}}>The QR contains only the portal URL and gym identifier; it does not contain a member's PIN or personal details. Give each member their PIN separately.</p><div style={{fontSize:'12px',color:'#64748b',wordBreak:'break-all',padding:'10px',borderRadius:9,background:'#f7fafc'}}>{memberPortalUrl}</div><div style={{display:'flex',gap:'10px',flexWrap:'wrap',marginTop:'12px'}}><button className="btn btn-primary" onClick={openMemberPortalQr}><QrCode size={17}/> Open Member Portal QR</button><button className="btn btn-secondary" onClick={printMemberPortalQr}><Printer size={17}/> Print Member Portal QR</button></div></div>
+          </div>
+        </section>
+<section className="card">
           <div className="card-header"><div><h3>Attendance QR code</h3><p>This QR opens the password-free member check-in page.</p></div></div>
           <div style={{padding:'12px 14px',borderRadius:'12px',background:'#f7fafc',border:'1px solid #e5ebf0',fontSize:'12px',color:'#64748b',wordBreak:'break-all',lineHeight:1.5}}>{qrUrl}</div>
           <div style={{display:'flex',gap:'10px',flexWrap:'wrap',marginTop:'12px'}}>
@@ -11597,8 +11664,70 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
   );
 }
 
+
+function MemberPortalPage() {
+  const gymId = new URLSearchParams(window.location.search).get('gym') || '';
+  const [identifier, setIdentifier] = useState('');
+  const [pin, setPin] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [portalData, setPortalData] = useState(null);
+  const [showPin, setShowPin] = useState(false);
+  const gymName = 'Preface Fitness';
+
+  const login = async (event) => {
+    event.preventDefault();
+    setError('');
+    if (!gymId) { setError('Gym link is missing. Please scan the Member Portal QR provided by your gym.'); return; }
+    if (!identifier.trim() || !/^\d{6}$/.test(pin)) { setError('Enter your registered mobile/member ID and the 6-digit PIN provided by the gym.'); return; }
+    setBusy(true);
+    try {
+      const { data, error: rpcError } = await supabase.rpc('member_portal_login', {
+        p_gym_id: gymId,
+        p_identifier: identifier.trim(),
+        p_pin: pin,
+      });
+      if (rpcError) throw rpcError;
+      if (!data || data.ok !== true || !data.member) throw new Error('Login failed. Check your details and try again.');
+      setPortalData(data);
+      setPin('');
+    } catch (e) {
+      console.error('Member portal login failed:', e);
+      setError(e?.message?.toLowerCase().includes('locked') ? 'Too many failed attempts. Please wait 15 minutes before trying again.' : 'Login failed. Check your registered mobile/member ID and 6-digit PIN. If the problem continues, contact the gym admin.');
+    } finally { setBusy(false); }
+  };
+  const logout = () => { setPortalData(null); setIdentifier(''); setPin(''); setError(''); };
+  const card = { background:'#fff', border:'1px solid #e4eaf2', borderRadius:18, padding:20, boxShadow:'0 12px 34px rgba(20,36,68,.06)' };
+  const label = { display:'block', fontSize:13, fontWeight:700, color:'#34445c', marginBottom:7 };
+  const input = { width:'100%', boxSizing:'border-box', padding:'13px 14px', border:'1px solid #d7dfeb', borderRadius:11, fontSize:16, outlineColor:'#7654ef', background:'#fff' };
+  const moneyText = (v) => `₹${Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits:2 })}`;
+  return <div style={{minHeight:'100vh',background:'linear-gradient(135deg,#f5f7ff 0%,#f8fbff 48%,#f1f8f7 100%)',padding:'24px 14px 44px',fontFamily:'Inter,system-ui,-apple-system,Segoe UI,sans-serif',color:'#1d2b42'}}>
+    <div style={{maxWidth:860,margin:'0 auto'}}>
+      <header style={{display:'flex',alignItems:'center',gap:13,margin:'8px 0 22px'}}><img src={LOGO_URL} alt="Preface Fitness" style={{width:56,height:56,objectFit:'contain',borderRadius:14,background:'#fff',padding:5,boxShadow:'0 6px 18px #18284812'}}/><div><div style={{fontSize:22,fontWeight:900,letterSpacing:-.4}}>Preface Fitness</div><div style={{fontSize:13,color:'#748198'}}>Member self-service portal</div></div></header>
+      {!portalData ? <section style={{...card,maxWidth:460,margin:'0 auto'}}>
+        <div style={{width:54,height:54,borderRadius:16,background:'#eee9ff',color:'#6846df',display:'grid',placeItems:'center',marginBottom:16}}><UserCheck size={26}/></div>
+        <h1 style={{fontSize:25,margin:'0 0 7px',letterSpacing:-.5}}>Member Login</h1><p style={{fontSize:14,color:'#6e7c91',lineHeight:1.6,margin:'0 0 22px'}}>Use your registered mobile number or member ID and the 6-digit PIN provided by the gym.</p>
+        <form onSubmit={login} style={{display:'grid',gap:16}}>
+          <div><label style={label}>Registered mobile number / Member ID</label><input style={input} autoComplete="username" value={identifier} onChange={e=>setIdentifier(e.target.value)} placeholder="Enter mobile number or member ID" maxLength={80} required /></div>
+          <div><label style={label}>6-digit PIN</label><div style={{position:'relative'}}><input style={{...input,paddingRight:70,letterSpacing:showPin?2:5}} type={showPin?'text':'password'} inputMode="numeric" autoComplete="current-password" pattern="[0-9]{6}" maxLength={6} value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,'').slice(0,6))} placeholder="••••••" required/><button type="button" onClick={()=>setShowPin(v=>!v)} style={{position:'absolute',right:10,top:'50%',transform:'translateY(-50%)',border:0,background:'transparent',color:'#6846df',fontWeight:800,cursor:'pointer'}}>{showPin?'Hide':'Show'}</button></div></div>
+          {error && <div role="alert" style={{padding:'11px 12px',borderRadius:10,background:'#fff0f0',border:'1px solid #ffd5d5',color:'#a82c38',fontSize:13,lineHeight:1.5}}>{error}</div>}
+          <button type="submit" disabled={busy} style={{border:0,borderRadius:12,padding:'14px 16px',background:busy?'#9c8be9':'linear-gradient(100deg,#6944e5,#8a5cf6)',color:'#fff',fontWeight:800,fontSize:15,cursor:busy?'wait':'pointer',boxShadow:'0 8px 18px #7047ff30'}}>{busy?'Verifying…':'Login to Member Portal'}</button>
+        </form>
+        <p style={{fontSize:12,color:'#8590a3',lineHeight:1.6,margin:'18px 0 0'}}>Forgot your PIN? Contact the gym admin. PIN reset is handled by the admin; no OTP is used.</p>
+      </section> : <>
+        <section style={{...card,marginBottom:16,background:'linear-gradient(120deg,#fff 0%,#f8f5ff 100%)'}}><div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,flexWrap:'wrap'}}><div><div style={{fontSize:12,fontWeight:800,color:'#7654e8',textTransform:'uppercase',letterSpacing:1}}>Welcome back</div><h1 style={{fontSize:28,margin:'6px 0 5px'}}>{portalData.member.name || 'Member'}</h1><div style={{fontSize:13,color:'#758198'}}>Member ID: {portalData.member.member_code || '—'}</div></div><button onClick={logout} className="btn btn-secondary" style={{display:'inline-flex',alignItems:'center',gap:7}}><LogOut size={16}/> Logout</button></div></section>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:12,marginBottom:16}}>{[{label:'Membership plan',value:portalData.member.plan_name||'—'},{label:'Membership status',value:portalData.member.status||'—'},{label:'Valid until',value:portalData.member.expiry_date||'—'},{label:'Outstanding due',value:moneyText(portalData.member.due_amount)}].map(x=><div key={x.label} style={{...card,padding:16}}><div style={{fontSize:12,color:'#7b8798',fontWeight:700,marginBottom:8}}>{x.label}</div><div style={{fontSize:18,fontWeight:850,overflowWrap:'anywhere'}}>{x.value}</div></div>)}</div>
+        <section style={{...card,marginBottom:16}}><h2 style={{fontSize:19,margin:'0 0 14px'}}>Membership details</h2><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:14,fontSize:14}}><div><div style={{color:'#7b8798',marginBottom:4}}>Registered phone</div><strong>{portalData.member.phone||'—'}</strong></div><div><div style={{color:'#7b8798',marginBottom:4}}>Membership start</div><strong>{portalData.member.start_date||'—'}</strong></div><div><div style={{color:'#7b8798',marginBottom:4}}>Membership amount</div><strong>{moneyText(portalData.member.membership_amount)}</strong></div><div><div style={{color:'#7b8798',marginBottom:4}}>Amount paid</div><strong>{moneyText(portalData.member.paid_amount)}</strong></div></div></section>
+        <section style={{...card,marginBottom:16}}><h2 style={{fontSize:19,margin:'0 0 14px'}}>Payment history</h2>{!portalData.payments?.length?<p style={{color:'#778398',fontSize:14,margin:0}}>No payment records available yet.</p>:<div style={{overflowX:'auto'}}><table style={{width:'100%',borderCollapse:'collapse',fontSize:13,minWidth:440}}><thead><tr>{['Date','Type','Mode','Amount','Receipt'].map(t=><th key={t} style={{textAlign:'left',padding:'10px 8px',borderBottom:'1px solid #e8edf4',color:'#758198'}}>{t}</th>)}</tr></thead><tbody>{portalData.payments.map((p,i)=><tr key={p.id||i}>{[p.payment_date||p.date||'—',p.payment_type||'Payment',p.payment_mode||'—',moneyText(p.amount),p.invoice_number||'—'].map((v,j)=><td key={j} style={{padding:'11px 8px',borderBottom:'1px solid #f0f3f7',whiteSpace:'nowrap'}}>{v}</td>)}</tr>)}</tbody></table></div>}</section>
+        <section style={card}><h2 style={{fontSize:19,margin:'0 0 14px'}}>Recent attendance</h2>{!portalData.attendance?.length?<p style={{color:'#778398',fontSize:14,margin:0}}>No attendance records available yet.</p>:<div style={{display:'grid',gap:9}}>{portalData.attendance.map((a,i)=><div key={a.id||i} style={{display:'flex',justifyContent:'space-between',gap:12,padding:'11px 12px',borderRadius:10,background:'#f7f9fc',fontSize:13}}><strong>{a.date||a.attendance_date||a.check_in_date||a.created_at?.slice(0,10)||'Attendance'}</strong><span style={{color:'#718096'}}>{a.source||a.status||'Checked in'}</span></div>)}</div>}</section>
+      </>}
+      <footer style={{textAlign:'center',fontSize:12,color:'#8a95a7',marginTop:22}}>Preface Fitness · Keep your 6-digit PIN private.</footer>
+    </div>
+  </div>;
+}
+
 const initialRoute = window.location.hash;
-createRoot(document.getElementById('root')).render(initialRoute === '#feedback' ? <PublicFeedbackPage /> : <App />);
+createRoot(document.getElementById('root')).render(initialRoute === '#feedback' ? <PublicFeedbackPage /> : initialRoute === '#member-portal' ? <MemberPortalPage /> : <App />);
 
 /* =========================================================
    FINAL NAV SPLIT: sidebar-only items stay out of top navbar
