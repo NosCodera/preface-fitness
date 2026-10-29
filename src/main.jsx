@@ -10,6 +10,7 @@ import {
   CalendarDays,
   CheckCircle2,
   ChevronDown,
+  ChevronUp,
   CircleDollarSign,
   ClipboardList,
   CreditCard,
@@ -40,6 +41,8 @@ import {
   Users,
   X,
   QrCode,
+  Printer,
+  History,
 } from 'lucide-react';
 import './styles.css';
 import { readState, writeState, clearState } from './db';
@@ -64,6 +67,48 @@ import {
   updateStaffPermissions,
   setStaffActive,
 } from './cloudData';
+
+const PT_HISTORY_MARKER = '<!--PREFACE_PT_HISTORY:';
+function getPTSessionHistory(notes) {
+  const value = String(notes || '');
+  const index = value.lastIndexOf(PT_HISTORY_MARKER);
+  if (index < 0) return [];
+  try {
+    const raw = value.slice(index + PT_HISTORY_MARKER.length).split('-->')[0];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+}
+function cleanPTSessionNotes(notes) {
+  const value = String(notes || '');
+  const index = value.lastIndexOf(PT_HISTORY_MARKER);
+  return (index < 0 ? value : value.slice(0, index)).trim();
+}
+function withPTSessionHistory(notes, history) {
+  const clean = cleanPTSessionNotes(notes);
+  return `${clean}${clean ? '\\n\\n' : ''}${PT_HISTORY_MARKER}${JSON.stringify(history || [])}-->`;
+}
+function printPTMasterRecord({ member, sessions, trainers, settings = {} }) {
+  const rows = (sessions || []).flatMap((pkg) => {
+    const history = getPTSessionHistory(pkg.notes);
+    return history.map((entry, index) => ({ ...entry, packageId: pkg.id, planName: pkg.planName || pkg.type || 'Personal Training', trainerName: trainers.find((t) => t.id === pkg.trainerId)?.name || pkg.trainer || '—', fee: pkg.fee, packageIndex: index + 1 }));
+  }).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.time || '').localeCompare(String(a.time || '')));
+  const packages = [...(sessions || [])].sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')));
+  const completed = rows.length;
+  const money = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
+  const esc = (v) => String(v ?? '—').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const win = window.open('', '_blank', 'width=1000,height=800');
+  if (!win) { alert('Please allow pop-ups to print the PT record.'); return; }
+  win.document.write(`<!doctype html><html><head><title>PT Master Record - ${esc(member?.name || 'Member')}</title><meta charset="utf-8"><style>
+    *{box-sizing:border-box}body{font:13px Arial,sans-serif;color:#17243b;margin:28px}header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #6d4aff;padding-bottom:16px;margin-bottom:18px}h1{margin:0 0 5px;font-size:25px}h2{font-size:17px;margin:24px 0 10px}.muted{color:#64748b}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:16px 0}.metric{padding:12px;border:1px solid #e2e8f0;border-radius:9px}.metric span{display:block;color:#64748b;font-size:11px}.metric strong{display:block;font-size:19px;margin-top:5px}table{width:100%;border-collapse:collapse;margin-top:10px}th,td{padding:9px 8px;border:1px solid #dbe2ec;text-align:left;vertical-align:top}th{background:#f2efff;font-size:11px;text-transform:uppercase;letter-spacing:.03em}.notes{max-width:240px;white-space:pre-wrap;word-break:break-word}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:80px;margin-top:60px}.signatures div{border-top:1px solid #64748b;padding-top:8px;text-align:center}.print-btn{background:#6d4aff;color:#fff;border:0;padding:10px 16px;border-radius:7px;cursor:pointer}@media print{body{margin:12mm}.print-btn{display:none}tr{break-inside:avoid}header{break-after:avoid}}
+  </style></head><body><header><div><h1>${esc(settings?.gymName || 'Preface Fitness')}</h1><div class="muted">Personal Training · Client Master Record</div></div><button class="print-btn" onclick="window.print()">Print / Save PDF</button></header>
+  <h2>Client details</h2><div><strong>${esc(member?.name)}</strong> &nbsp; · &nbsp; Member ID: ${esc(member?.id)} &nbsp; · &nbsp; Phone: ${esc(member?.phone || '—')}</div>
+  <div class="summary"><div class="metric"><span>Completed sessions</span><strong>${completed}</strong></div><div class="metric"><span>PT packages</span><strong>${packages.length}</strong></div><div class="metric"><span>Sessions assigned</span><strong>${packages.reduce((n,p)=>n+Number(p.sessionsTotal||1),0)}</strong></div><div class="metric"><span>Sessions remaining</span><strong>${packages.reduce((n,p)=>n+Math.max(0,Number(p.sessionsTotal||1)-Number(p.sessionsCompleted||0)),0)}</strong></div></div>
+  <h2>Session history</h2>${rows.length ? `<table><thead><tr><th>#</th><th>Date</th><th>Time</th><th>Trainer</th><th>Package</th><th>Session note</th><th>Recorded by</th></tr></thead><tbody>${rows.map((r,i)=>`<tr><td>${rows.length-i}</td><td>${esc(r.date)}</td><td>${esc(r.time || '—')}</td><td>${esc(r.trainerName)}</td><td>${esc(r.planName)}</td><td class="notes">${esc(r.notes || '—')}</td><td>${esc(r.recordedBy || 'Staff')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">No individual completed-session history has been recorded yet. Older package counts may exist without per-session dates.</p>'}
+  <h2>PT packages</h2><table><thead><tr><th>Package start</th><th>Plan</th><th>Trainer</th><th>Completed / Total</th><th>Expiry</th><th>Fee</th><th>Status</th></tr></thead><tbody>${packages.map(p=>`<tr><td>${esc(p.date)}</td><td>${esc(p.planName||p.type||'Personal Training')}</td><td>${esc(trainers.find(t=>t.id===p.trainerId)?.name||p.trainer||'—')}</td><td>${Number(p.sessionsCompleted||0)} / ${Number(p.sessionsTotal||1)}</td><td>${esc(p.expiryDate||'—')}</td><td>${money(p.fee)}</td><td>${esc(p.status)}</td></tr>`).join('')}</tbody></table>
+  <div class="signatures"><div>Client signature</div><div>Trainer / Gym representative</div></div><script>window.onload=()=>{};</script></body></html>`);
+  win.document.close();
+}
 
 const LOGO_URL = `${import.meta.env.BASE_URL}preface-logo.jpg`;
 
@@ -122,7 +167,8 @@ function encodeMemberNotes(notes, meta = {}) {
     neck: String(meta.neck ?? ''),
     gstinAadhaar: String(meta.gstinAadhaar ?? ''),
     billingState: String(meta.billingState ?? ''),
-    billingStateCode: String(meta.billingStateCode ?? '')
+    billingStateCode: String(meta.billingStateCode ?? ''),
+    memberInvoiceNumber: String(meta.memberInvoiceNumber ?? '')
   });
   return `${clean}${clean ? '\n\n' : ''}${MEMBER_META_MARKER}${payload}-->`;
 }
@@ -1150,7 +1196,7 @@ const seed = {
   ],
 
   settings: {
-    gymName: 'Preface Fitness', currency: '₹', gymAddress: '', gymPhone: '', gymEmail: '', gstin: '', invoicePrefix: 'PF-INV', defaultGstRate: 5, referralPointsPerReferral: 10, gymLatitude: '', gymLongitude: '',
+    gymName: 'Preface Fitness', currency: '₹', gymAddress: '', gymPhone: '', gymEmail: '', gstin: '', invoicePrefix: 'PO', invoiceSeriesA: { prefix: 'PO', numberLength: 6, financialYear: '2026-27', nextNumber: 138, yearlyNext: { '2026-27': 138 } }, invoiceSeriesB: { prefix: 'PO', numberLength: 6, financialYear: '2026-27', nextNumber: 138, yearlyNext: { '2026-27': 138 } }, defaultGstRate: 5, referralPointsPerReferral: 10, gymLatitude: '', gymLongitude: '',
     notice: { enabled: false, dashboardEnabled: false, text: '', priority: 'medium', id: '', createdAt: '' },
     noticeHistory: [],
     gymIntro: { description: 'A modern fitness destination focused on strength, conditioning, personal training and sustainable results.', facilities: ['Strength & cardio zone', 'Personal training', 'Functional training', 'Locker & changing facilities', 'Member progress tracking', 'Diet & nutrition guidance'] },
@@ -2202,9 +2248,15 @@ function App() {
           progressRecords: Array.isArray(cloud.progressRecords)
             ? cloud.progressRecords
             : (current.progressRecords || []),
-          workoutPlans: Array.isArray(cloud.workoutPlans)
+          // Workout plans are stored inside the gym settings JSON because this
+          // app does not have a dedicated workout_plans table wired into cloudData.
+          // Prefer the dedicated cloud collection only when it contains records;
+          // otherwise restore plans from the persisted settings payload.
+          workoutPlans: (Array.isArray(cloud.workoutPlans) && cloud.workoutPlans.length > 0)
             ? cloud.workoutPlans
-            : (current.workoutPlans || []),
+            : (Array.isArray(cloud.settings?.workoutPlans)
+              ? cloud.settings.workoutPlans
+              : (Array.isArray(current.workoutPlans) ? current.workoutPlans : [])),
           dietPlans: Array.isArray(cloud.dietPlans)
             ? cloud.dietPlans
             : (current.dietPlans || []),
@@ -2265,20 +2317,28 @@ function App() {
       return;
     }
 
+    const cleanAmount = Math.max(0, Number(member.amount ?? planPrices[member.plan] ?? 0) || 0);
+    const cleanPaid = Math.max(0, Number(member.paid || 0) || 0);
+    // Always derive the outstanding balance from the agreed membership fee and
+    // actual amount received. Do not trust a stale/empty form `due` value.
+    const cleanDue = Math.max(0, cleanAmount - cleanPaid);
     const clean = {
       ...member,
       id,
       visits: 0,
-      due: Number(member.due || 0),
-      amount: Number(member.amount || planPrices[member.plan] || 0),
-      paid: Number(member.paid || 0),
+      due: cleanDue,
+      amount: cleanAmount,
+      paid: cleanPaid,
       status: getMemberStatus(member.expiry),
       paymentMode: member.paymentMode || 'Cash',
       gstMode: member.gstMode || 'without',
       gstRate: Number(member.gstRate || data.settings?.defaultGstRate || 5),
       createdAt: new Date().toISOString(),
     };
+    const memberInvoiceAllocation = allocateMemberInvoiceNumber(data.settings || {}, clean.gstMode === 'gst', today);
+    clean.memberInvoiceNumber = memberInvoiceAllocation.invoiceNumber;
     clean.notes = encodeMemberNotes(clean.notes, clean);
+    let invoiceSettingsAfterMember = memberInvoiceAllocation.settings;
 
     try {
       const referredMember = data.members.find((item) => String(item.id) === String(clean.referredBy || ''));
@@ -2318,7 +2378,9 @@ function App() {
       if (Number(clean.paid || 0) > 0) {
         const paymentId = `PAY-${Date.now()}`;
         const gst = clean.gstMode === 'gst' ? calculateGstBreakdown(clean.amount, clean.gstRate) : calculateGstBreakdown(clean.amount, 0);
-        const invoiceNumber = `${data.settings?.invoicePrefix || 'PF-INV'}-${paymentId}`;
+        const invoiceAllocation = allocateInvoiceNumber(invoiceSettingsAfterMember, clean.gstMode === 'gst', today);
+        const invoiceNumber = clean.memberInvoiceNumber;
+        invoiceSettingsAfterMember = invoiceAllocation.settings;
         const paymentRow = await insertRecord('payments', {
           member_id: row.id,
           legacy_id: paymentId,
@@ -2338,6 +2400,8 @@ function App() {
           balance_at_invoice: Number(clean.due || 0),
           description: `${clean.plan || 'Membership'} membership`,
         });
+        setData((d) => ({ ...d, settings: invoiceAllocation.settings }));
+        saveCloudSettings({ invoiceSeriesA: invoiceAllocation.settings.invoiceSeriesA, invoiceSeriesB: invoiceAllocation.settings.invoiceSeriesB }).catch((error) => console.error('Invoice series sync failed:', error));
         initialPayment = {
           id: paymentRow.legacy_id || paymentId,
           cloudId: paymentRow.id,
@@ -2363,9 +2427,11 @@ function App() {
 
       setData((d) => ({
         ...d,
+        settings: invoiceSettingsAfterMember,
         members: [saved, ...d.members],
         payments: initialPayment ? [initialPayment, ...d.payments] : d.payments,
       }));
+      saveCloudSettings({ invoiceSeriesA: invoiceSettingsAfterMember.invoiceSeriesA, invoiceSeriesB: invoiceSettingsAfterMember.invoiceSeriesB }).catch((error) => console.error('Member invoice series sync failed:', error));
       setModal(null);
       setToast(initialPayment ? 'Member added and payment recorded successfully' : 'Member added successfully');
     } catch (error) {
@@ -2597,7 +2663,13 @@ function App() {
       const gstApplicable = payment.gstMode === 'gst';
       const invoiceAmount = amount; // Invoice only the amount actually received in this transaction.
       const gst = calculateGstBreakdown(invoiceAmount, gstApplicable ? Number(payment.gstRate || data.settings?.defaultGstRate || 5) : 0);
-      const invoiceNumber = `${data.settings?.invoicePrefix || 'PF-INV'}-${paymentId}`;
+      const invoiceAllocation = allocateInvoiceNumber(data.settings || {}, gstApplicable, payment.date || today);
+      const existingMemberPayments = data.payments.filter((p) => p.memberId === member.id || (p.member && p.member === member.name));
+      const memberBaseInvoiceNumber = getMemberMasterInvoiceNumber(member, data.settings || {});
+      const paymentSuffixIndex = existingMemberPayments.length;
+      const invoiceNumber = paymentSuffixIndex > 0
+        ? `${memberBaseInvoiceNumber}-${romanPaymentSuffix(paymentSuffixIndex)}`
+        : memberBaseInvoiceNumber;
 
       await insertRecord('payments', {
         member_id: dbMemberId,
@@ -2618,6 +2690,9 @@ function App() {
         balance_at_invoice: payment.type === 'Membership' ? nextDue : 0,
         description: payment.type === 'Membership' ? `${member.plan || 'Membership'} membership` : `${payment.type || 'Payment'} payment`,
       });
+
+      setData((d) => ({ ...d, settings: invoiceAllocation.settings }));
+      saveCloudSettings({ invoiceSeriesA: invoiceAllocation.settings.invoiceSeriesA, invoiceSeriesB: invoiceAllocation.settings.invoiceSeriesB }).catch((error) => console.error('Invoice series sync failed:', error));
 
       if (payment.type === 'Membership') {
         await updateRecord('members', dbMemberId, {
@@ -2833,7 +2908,24 @@ function App() {
     }
   };
 
-  const createWorkoutPlan = (plan) => {
+  // Persist workout plans in the existing gym settings JSON so they survive
+  // reloads and sync across devices without requiring a new Supabase table.
+  const persistWorkoutPlans = async (nextPlans, successMessage) => {
+    setData((current) => ({ ...current, workoutPlans: nextPlans }));
+    try {
+      await saveCloudSettings({ workoutPlans: nextPlans });
+      setData((current) => ({
+        ...current,
+        settings: { ...(current.settings || {}), workoutPlans: nextPlans },
+      }));
+      setToast(successMessage);
+    } catch (error) {
+      console.error('Workout plan cloud save failed:', error);
+      setToast(`Workout plan saved locally, but cloud save failed: ${error?.message || 'Please check connection/permissions'}`);
+    }
+  };
+
+  const createWorkoutPlan = async (plan) => {
     const clean = {
       ...plan,
       id: `WP-${Date.now()}`,
@@ -2847,12 +2939,12 @@ function App() {
       createdAt: new Date().toISOString(),
     };
 
-    setData((d) => ({ ...d, workoutPlans: [clean, ...(d.workoutPlans || [])] }));
+    const nextPlans = [clean, ...(data.workoutPlans || [])];
     setModal(null);
-    setToast('Workout plan created');
+    await persistWorkoutPlans(nextPlans, 'Workout plan created and synced');
   };
 
-  const updateWorkoutPlan = (plan) => {
+  const updateWorkoutPlan = async (plan) => {
     const clean = {
       ...plan,
       durationWeeks: Number(plan.durationWeeks || 1),
@@ -2864,21 +2956,15 @@ function App() {
       })),
     };
 
-    setData((d) => ({
-      ...d,
-      workoutPlans: (d.workoutPlans || []).map((item) => item.id === clean.id ? clean : item),
-    }));
+    const nextPlans = (data.workoutPlans || []).map((item) => item.id === clean.id ? clean : item);
     setModal(null);
-    setToast('Workout plan updated');
+    await persistWorkoutPlans(nextPlans, 'Workout plan updated and synced');
   };
 
-  const deleteWorkoutPlan = (id) => {
+  const deleteWorkoutPlan = async (id) => {
     if (!window.confirm('Delete this workout plan?')) return;
-    setData((d) => ({
-      ...d,
-      workoutPlans: (d.workoutPlans || []).filter((plan) => plan.id !== id),
-    }));
-    setToast('Workout plan deleted');
+    const nextPlans = (data.workoutPlans || []).filter((plan) => plan.id !== id);
+    await persistWorkoutPlans(nextPlans, 'Workout plan deleted');
   };
 
   const createDietPlan = (plan) => {
@@ -3054,9 +3140,12 @@ function App() {
     if (!session?.cloudId) { setToast('This PT package is not linked to Supabase yet'); return; }
     const nextCount = status === 'Completed' ? Math.min(Number(session.sessionsTotal || 1), Number(session.sessionsCompleted || 0) + 1) : Number(session.sessionsCompleted || 0);
     const nextStatus = status === 'Completed' && nextCount >= Number(session.sessionsTotal || 1) ? 'Completed' : status === 'Completed' ? 'Scheduled' : status;
+    const priorHistory = getPTSessionHistory(session.notes);
+    const sessionHistory = status === 'Completed' ? [...priorHistory, { id: `PTH-${Date.now()}`, date: today, time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }), trainerId: session.trainerId, notes: cleanPTSessionNotes(session.notes), recordedBy: 'Gym staff', recordedAt: new Date().toISOString() }] : priorHistory;
+    const nextNotes = withPTSessionHistory(session.notes, sessionHistory);
     try {
-      await updateRecord('pt_sessions', session.cloudId, { status: nextStatus, sessions_completed: nextCount });
-      setData((d) => ({ ...d, ptSessions: (d.ptSessions || []).map((item) => item.id === id ? { ...item, status: nextStatus, sessionsCompleted: nextCount } : item) }));
+      await updateRecord('pt_sessions', session.cloudId, { status: nextStatus, sessions_completed: nextCount, notes: nextNotes });
+      setData((d) => ({ ...d, ptSessions: (d.ptSessions || []).map((item) => item.id === id ? { ...item, status: nextStatus, sessionsCompleted: nextCount, notes: nextNotes } : item) }));
       setToast(status === 'Completed' ? `Session recorded · ${nextCount}/${session.sessionsTotal || 1} used` : `Package marked ${status.toLowerCase()}`);
     } catch (error) { console.error('Supabase PT package update failed:', error); setToast(error?.message || 'Unable to update PT package'); }
   };
@@ -3914,7 +4003,7 @@ function App() {
             <>
           {active === 'Performance' && <PerformancePage data={data} />}
           {active === 'Dashboard' && <Dashboard {...{ activeMembers, expiringMembers, overdue, revenue, data, navigate, setModal, markAttendance, isReadOnlyStaff }} />}
-          {active === 'Members' && <MembersPage members={data.members} query={query} setQuery={setQuery} setModal={setModal} markAttendance={markAttendance} deleteMember={deleteMember} settings={data.settings || {}} payments={data.payments || []} />}
+          {active === 'Members' && <MembersPage members={data.members} query={query} setQuery={setQuery} setModal={setModal} markAttendance={markAttendance} deleteMember={deleteMember} settings={data.settings || {}} payments={data.payments || []} ptSessions={data.ptSessions || []} trainers={data.trainers || []} workoutPlans={data.workoutPlans || []} />}
           {active === 'Leads' && <LeadsPage leads={data.leads} members={data.members} setModal={setModal} updateLeadStage={updateLeadStage} updateLeadDetails={updateLeadDetails} deleteLead={deleteLead} convertLeadToMember={convertLeadToMember} />}
           {active === 'Website Enquiries' && <WebsiteEnquiriesPage enquiries={data.websiteEnquiries || []} onUpdateStatus={updateWebsiteEnquiryStatus} />}
           {active === 'Memberships' && <MembershipsPage members={data.members} data={data} setModal={setModal} planPrices={planPrices} setData={setData} setToast={setToast} onRenewMembership={renewMembership} />}
@@ -3922,7 +4011,7 @@ function App() {
           {active === 'Payments' && <PaymentsPage payments={data.payments} overdue={overdue} setModal={setModal} deletePayment={deletePayment} members={data.members} settings={data.settings || {}} />}
           {active === 'Progress' && <ProgressPage progressRecords={data.progressRecords || []} members={data.members} setModal={setModal} deleteProgressRecord={deleteProgressRecord} />}
           {active === 'Trainers & PT' && <TrainersPTPage trainers={data.trainers || []} sessions={data.ptSessions || []} members={data.members} setModal={setModal} updatePTSessionStatus={updatePTSessionStatus} deletePTSession={deletePTSession} deleteTrainer={deleteTrainer} />}
-          {active === 'Training' && <TrainingPage plans={data.workoutPlans || []} members={data.members} setModal={setModal} deleteWorkoutPlan={deleteWorkoutPlan} />}
+          {active === 'Training' && <TrainingPage plans={data.workoutPlans || []} members={data.members} setModal={setModal} deleteWorkoutPlan={deleteWorkoutPlan} updateWorkoutPlan={updateWorkoutPlan} />}
           {active === 'Diet & Nutrition' && <DietPage plans={data.dietPlans || []} members={data.members} setModal={setModal} deleteDietPlan={deleteDietPlan} />}
           {active === 'Communication' && <CommunicationPage members={data.members} logs={data.communicationLogs || []} setModal={setModal} deleteCommunicationLog={deleteCommunicationLog} />}
           {active === 'Customer Feedback' && <FeedbackPage feedbacks={data.feedbacks || []} members={data.members || []} setModal={setModal} deleteFeedback={deleteFeedback} />}
@@ -3956,7 +4045,19 @@ function App() {
       {modal === 'communication' && <CommunicationModal members={data.members} onClose={() => setModal(null)} onSave={addCommunicationLog} />}
       {modal === 'progress' && <ProgressModal members={data.members} onClose={() => setModal(null)} onSave={addProgressRecord} />}
       {modal === 'payment' && <PaymentModal members={data.members} settings={data.settings || {}} onClose={() => setModal(null)} onSave={addPayment} />}
-      {(modal === 'workoutPlan' || modal?.type === 'editWorkoutPlan') && <WorkoutPlanModal members={data.members} plan={modal?.type === 'editWorkoutPlan' ? modal.plan : null} onClose={() => setModal(null)} onSave={modal?.type === 'editWorkoutPlan' ? updateWorkoutPlan : createWorkoutPlan} />}
+      {(modal === 'workoutPlan' || modal?.type === 'editWorkoutPlan') && <WorkoutPlanModal members={data.members} muscleGroups={data.settings?.workoutMuscleGroups || []} onRemoveMuscleGroup={(group) => {
+        const cleanGroup = String(group || '').trim();
+        if (!cleanGroup) return;
+        setData((d) => ({ ...d, settings: { ...(d.settings || {}), workoutMuscleGroups: (Array.isArray(d.settings?.workoutMuscleGroups) ? d.settings.workoutMuscleGroups : []).filter((item) => String(item).toLowerCase() !== cleanGroup.toLowerCase()) } }));
+      }} onAddMuscleGroup={(group) => {
+        const cleanGroup = String(group || '').trim();
+        if (!cleanGroup) return;
+        setData((d) => {
+          const existing = Array.isArray(d.settings?.workoutMuscleGroups) ? d.settings.workoutMuscleGroups : [];
+          if (existing.some((item) => String(item).toLowerCase() === cleanGroup.toLowerCase())) return d;
+          return { ...d, settings: { ...(d.settings || {}), workoutMuscleGroups: [...existing, cleanGroup] } };
+        });
+      }} plan={modal?.type === 'editWorkoutPlan' ? modal.plan : null} onClose={() => setModal(null)} onSave={modal?.type === 'editWorkoutPlan' ? updateWorkoutPlan : createWorkoutPlan} />}
       {(modal === 'dietPlan' || modal?.type === 'editDietPlan') && <DietPlanModal members={data.members} plan={modal?.type === 'editDietPlan' ? modal.plan : null} onClose={() => setModal(null)} onSave={modal?.type === 'editDietPlan' ? updateDietPlan : createDietPlan} />}
       {modal === 'feedback' && <FeedbackModal members={data.members || []} onClose={() => setModal(null)} onSave={addFeedback} />}
       {modal?.type === 'invoiceOptions' && <InvoiceOptionsModal member={modal.member} payment={modal.payment} payments={data.payments || []} mode={modal.source === 'member' ? 'member' : 'single'} settings={data.settings || {}} onClose={() => setModal(null)} onPrint={(mode, rate, selected) => {
@@ -5052,6 +5153,23 @@ function CommunicationModal({ members, onClose, onSave }) {
 }
 
 
+function PTMasterRecordModal({ member, sessions, trainers, onClose }) {
+  const history = (sessions || []).flatMap((pkg) => getPTSessionHistory(pkg.notes).map((entry) => ({ ...entry, pkg, trainerName: trainers.find((t) => t.id === pkg.trainerId)?.name || pkg.trainer || '—' }))).sort((a,b) => String(b.date||'').localeCompare(String(a.date||'')) || String(b.time||'').localeCompare(String(a.time||'')));
+  const completed = history.length;
+  const remaining = (sessions || []).reduce((n,p) => n + Math.max(0, Number(p.sessionsTotal||1)-Number(p.sessionsCompleted||0)), 0);
+  return <div className="modal-backdrop" onClick={onClose}><div className="modal modal-wide" onClick={(e)=>e.stopPropagation()} style={{padding:24}}>
+    <div className="modal-header"><div><h2>PT Master Record</h2><p>{member.name} · {member.id || 'Member'}</p></div><button className="icon-btn" onClick={onClose}><X size={18}/></button></div>
+    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(145px,1fr))',gap:12,margin:'18px 0'}}>
+      <div className="card" style={{padding:14}}><span style={{color:'#64748b',fontSize:12}}>Completed sessions</span><h2 style={{margin:'6px 0 0'}}>{completed}</h2></div>
+      <div className="card" style={{padding:14}}><span style={{color:'#64748b',fontSize:12}}>Packages</span><h2 style={{margin:'6px 0 0'}}>{sessions.length}</h2></div>
+      <div className="card" style={{padding:14}}><span style={{color:'#64748b',fontSize:12}}>Remaining sessions</span><h2 style={{margin:'6px 0 0'}}>{remaining}</h2></div>
+    </div>
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,flexWrap:'wrap',marginBottom:12}}><h3 style={{margin:0}}>Completed session timeline</h3><button className="btn btn-primary" onClick={()=>printPTMasterRecord({member,sessions,trainers})}><Printer size={16}/> Print PT record</button></div>
+    {history.length ? <div className="table-wrap"><table><thead><tr><th>Date</th><th>Time</th><th>Trainer</th><th>Package</th><th>Session notes</th></tr></thead><tbody>{history.map((item,i)=><tr key={item.id||`${item.date}-${i}`}><td><strong>{formatDate(item.date)}</strong></td><td>{item.time||'—'}</td><td>{item.trainerName}</td><td>{item.pkg.planName||item.pkg.type||'Personal Training'}</td><td>{cleanPTSessionNotes(item.notes)||'—'}</td></tr>)}</tbody></table></div> : <div className="empty-state" style={{padding:22,textAlign:'center'}}><History size={25}/><strong>No dated session history yet</strong><p>New sessions will appear here automatically when staff click Complete. Previously completed counts may not have individual dates recorded.</p></div>}
+    <h3 style={{marginTop:22}}>Assigned PT packages</h3><div className="table-wrap"><table><thead><tr><th>Start date</th><th>Plan</th><th>Trainer</th><th>Sessions</th><th>Expiry</th><th>Status</th></tr></thead><tbody>{sessions.map((pkg)=><tr key={pkg.id}><td>{formatDate(pkg.date)}</td><td>{pkg.planName||pkg.type||'Personal Training'}</td><td>{trainers.find(t=>t.id===pkg.trainerId)?.name||pkg.trainer||'—'}</td><td>{Number(pkg.sessionsCompleted||0)} / {Number(pkg.sessionsTotal||1)}</td><td>{formatDate(pkg.expiryDate)}</td><td><StatusBadge status={pkg.status}/></td></tr>)}</tbody></table></div>
+  </div></div>;
+}
+
 function TrainersPTPage({
   trainers,
   sessions,
@@ -5065,6 +5183,7 @@ function TrainersPTPage({
   const [search, setSearch] = useState('');
   const [trainerFilter, setTrainerFilter] = useState('All');
   const [profileTrainer, setProfileTrainer] = useState(null);
+  const [profileMember, setProfileMember] = useState(null);
   const tierStyle = (tier) => {
     const styles = {
       Silver: { background: 'linear-gradient(135deg,#f8fafc,#cbd5e1)', color: '#334155', border: '#94a3b8' },
@@ -5221,8 +5340,8 @@ function TrainersPTPage({
                           <div className="member-cell">
                             <div className="avatar soft">{initials(member?.name || 'Member')}</div>
                             <div>
-                              <strong>{member?.name || 'Unknown member'}</strong>
-                              <span>{member?.id || '—'}</span>
+                              <button type="button" onClick={() => setProfileMember(member || { id: session.memberId, name: 'Unknown member' })} style={{ border:0, padding:0, background:'transparent', color:'#5d45d8', fontWeight:900, cursor:'pointer', textAlign:'left' }} title="Open PT Master Record">{member?.name || 'Unknown member'}</button>
+                              <span>{member?.id || '—'} · <button type="button" onClick={() => setProfileMember(member || { id: session.memberId, name: 'Unknown member' })} style={{ border:0, padding:0, background:'transparent', color:'#64748b', cursor:'pointer', fontSize:11 }}>View PT history</button></span>
                             </div>
                           </div>
                         </td>
@@ -5413,6 +5532,7 @@ function TrainersPTPage({
           </div>
         </div>
       </div>}
+      {profileMember && <PTMasterRecordModal member={profileMember} sessions={sessions.filter((item) => item.memberId === profileMember.id)} trainers={trainers} onClose={() => setProfileMember(null)} />}
     </div>
   );
 }
@@ -5768,7 +5888,7 @@ function Dashboard({ activeMembers, expiringMembers, overdue, revenue, data, nav
     </div>
   );
 }
-function MembersPage({ members, query, setQuery, setModal, markAttendance, deleteMember, settings, payments = [] }) {
+function MembersPage({ members, query, setQuery, setModal, markAttendance, deleteMember, settings, payments = [], ptSessions = [], trainers = [], workoutPlans = [] }) {
   const [statusFilter, setStatusFilter] = useState('All');
   const [selectedMember, setSelectedMember] = useState(null);
 
@@ -5786,6 +5906,9 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
       return null;
     }
 
+    const memberPTPackages = ptSessions.filter((item) => item.memberId === member.id).sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')));
+    const memberWorkoutPlans = workoutPlans.filter((plan) => (plan.assignedMemberIds || []).some((id) => String(id) === String(member.id)));
+    const memberPTHistory = memberPTPackages.flatMap((pkg) => getPTSessionHistory(pkg.notes).map((entry) => ({ ...entry, pkg, trainerName: trainers.find((t) => t.id === pkg.trainerId)?.name || pkg.trainer || '—' }))).sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.time || '').localeCompare(String(a.time || '')));
     const referralCount = members.filter((item) => item.referredBy === member.id).length;
     const referralPointsPerClient = Number(settings?.referralPointsPerReferral || 0);
     const referralPoints = referralCount * referralPointsPerClient;
@@ -6160,10 +6283,27 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
 
           </div>
 
+          <div className="profile-card pt-profile-history-card" style={cardStyle}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,flexWrap:'wrap'}}>
+              <PanelHeader title="Personal Training Session History" subtitle="Detailed PT attendance and assigned package record" icon={Dumbbell} />
+              <button type="button" className="btn btn-secondary" onClick={() => printPTMasterRecord({ member, sessions: memberPTPackages, trainers, settings })} style={{display:'inline-flex',alignItems:'center',gap:7,flexShrink:0}}><Printer size={17}/> Print PT record</button>
+            </div>
+            <div className="membership-history-summary" style={{marginTop:16}}>
+              <div><span>Completed sessions</span><strong>{memberPTHistory.length}</strong></div>
+              <div><span>PT packages</span><strong>{memberPTPackages.length}</strong></div>
+              <div><span>Sessions assigned</span><strong>{memberPTPackages.reduce((n,p)=>n+Number(p.sessionsTotal||1),0)}</strong></div>
+              <div><span>Sessions remaining</span><strong>{memberPTPackages.reduce((n,p)=>n+Math.max(0,Number(p.sessionsTotal||1)-Number(p.sessionsCompleted||0)),0)}</strong></div>
+            </div>
+            <h3 style={{margin:'20px 0 10px',color:'#1b2942'}}>Completed session timeline</h3>
+            {memberPTHistory.length ? <div className="membership-history-table"><table><thead><tr><th>Date</th><th>Time</th><th>Trainer</th><th>Package</th><th>Session notes</th></tr></thead><tbody>{memberPTHistory.map((item,index)=><tr key={item.id||`${item.date}-${index}`}><td><strong>{formatDate(item.date)}</strong></td><td>{item.time||'—'}</td><td>{item.trainerName}</td><td>{item.pkg.planName||item.pkg.type||'Personal Training'}</td><td>{cleanPTSessionNotes(item.notes)||'—'}</td></tr>)}</tbody></table></div> : <div className="membership-activity-empty">No individual dated PT sessions recorded yet. Future sessions will appear here after staff mark them Complete.</div>}
+            <h3 style={{margin:'22px 0 10px',color:'#1b2942'}}>PT package history</h3>
+            {memberPTPackages.length ? <div className="membership-history-table"><table><thead><tr><th>Start date</th><th>Plan</th><th>Trainer</th><th>Sessions used</th><th>Expiry</th><th>Fee</th><th>Status</th></tr></thead><tbody>{memberPTPackages.map((pkg)=><tr key={pkg.id}><td>{formatDate(pkg.date)}</td><td><strong>{pkg.planName||pkg.type||'Personal Training'}</strong></td><td>{trainers.find(t=>t.id===pkg.trainerId)?.name||pkg.trainer||'—'}</td><td>{Number(pkg.sessionsCompleted||0)} / {Number(pkg.sessionsTotal||1)}</td><td>{formatDate(pkg.expiryDate)}</td><td>₹{Number(pkg.fee||0).toLocaleString('en-IN')}</td><td><StatusBadge status={pkg.status}/></td></tr>)}</tbody></table></div> : <div className="membership-activity-empty">No PT packages assigned to this member yet.</div>}
+          </div>
+
           <div className="profile-card" style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' }}>
               <PanelHeader title="Fitness, measurements & medical history" subtitle="Training baseline and health information reported by the member" icon={Activity} />
-              <button type="button" className="btn btn-secondary" onClick={() => printMemberFitnessMedical(member, settings)} style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', flexShrink: 0 }}>
+              <button type="button" className="btn btn-secondary" onClick={() => printMemberFitnessMedical(member, settings, memberWorkoutPlans)} style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', flexShrink: 0 }}>
                 <FileDown size={17} /> Print profile
               </button>
             </div>
@@ -6199,6 +6339,17 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
                   {conditions.includes('Other') && meta.medicalOther && <p style={{ margin: '8px 0 0', color: '#475569', lineHeight: 1.6 }}><strong>Other condition:</strong> {meta.medicalOther}</p>}
                   {meta.surgeryDetails && <p style={{ margin: '8px 0 0', color: '#475569', lineHeight: 1.6 }}><strong>Surgery (last 5 years):</strong> {meta.surgeryDetails}</p>}
                   {meta.additionalMedicalNotes && <p style={{ margin: '8px 0 0', color: '#475569', lineHeight: 1.6 }}><strong>Additional details:</strong> {meta.additionalMedicalNotes}</p>}
+                </section>
+                <section style={{ gridColumn: '1 / -1', marginTop: 4 }}>
+                  <h4 style={{ margin: '4px 0 10px', fontSize: '14px', color: '#64748b' }}>Assigned workout plans & exercises</h4>
+                  {memberWorkoutPlans.length ? <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 12 }}>
+                    {memberWorkoutPlans.map((plan) => <div key={plan.id} style={{ border: '1px solid #dce7f1', borderRadius: 12, padding: 13, background: '#f8fbff' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-start' }}><strong style={{ color: '#17365a', fontSize: 14 }}>{plan.name || 'Workout plan'}</strong><span style={{ fontSize: 11, color: '#64748b', whiteSpace: 'nowrap' }}>{Number(plan.durationWeeks || 0)} weeks</span></div>
+                      <div style={{ fontSize: 12, color: '#64748b', margin: '5px 0 10px' }}>{plan.goal || 'General Fitness'} · {plan.level || 'Beginner'}{plan.trainer ? ` · ${plan.trainer}` : ''}</div>
+                      {(plan.exercises || []).length ? <div style={{ display: 'grid', gap: 7 }}>{plan.exercises.map((exercise, index) => <div key={exercise.id || `${plan.id}-ex-${index}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, borderTop: '1px solid #e6edf5', paddingTop: 7 }}><div><strong style={{ color: '#243b53', fontSize: 12 }}>{index + 1}. {exercise.name || 'Exercise'}</strong><div style={{ fontSize: 11, color: '#718096', marginTop: 3 }}>{exercise.muscleGroup || exercise.muscle || 'Full Body'} · {exercise.sets || 3} sets · {exercise.reps || 15} reps · {exercise.rest || '60 sec'} rest</div></div></div>)}</div> : <span style={{ fontSize: 12, color: '#718096' }}>No exercises added to this plan.</span>}
+                      {plan.notes && <p style={{ margin: '9px 0 0', fontSize: 12, color: '#64748b' }}><strong>Notes:</strong> {plan.notes}</p>}
+                    </div>)}
+                  </div> : <p style={{ margin: 0, color: '#718096' }}>No workout plans have been assigned to this member.</p>}
                 </section>
               </div>;
             })()}
@@ -7379,9 +7530,14 @@ function ProgressModal({ members, onClose, onSave }) {
   );
 }
 
-function TrainingPage({ plans, members, setModal, deleteWorkoutPlan }) {
+function TrainingPage({ plans, members, setModal, deleteWorkoutPlan, updateWorkoutPlan }) {
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState(plans[0]?.id || null);
+  const [assignmentMode, setAssignmentMode] = useState(null);
+  const [assignmentSearch, setAssignmentSearch] = useState('');
+  const [checkedMemberIds, setCheckedMemberIds] = useState([]);
+  const [overviewExpanded, setOverviewExpanded] = useState(true);
+  const [overviewPage, setOverviewPage] = useState(1);
 
   useEffect(() => {
     if (selectedId && !plans.some((plan) => plan.id === selectedId)) {
@@ -7398,6 +7554,27 @@ function TrainingPage({ plans, members, setModal, deleteWorkoutPlan }) {
     return [plan.name, plan.goal, plan.level, plan.trainer].join(' ').toLowerCase().includes(q);
   });
   const selectedPlan = plans.find((plan) => plan.id === selectedId) || filteredPlans[0] || null;
+  const openAssignmentManager = (mode) => {
+    if (!selectedPlan) return;
+    setAssignmentMode(mode);
+    setAssignmentSearch('');
+    setCheckedMemberIds([]);
+  };
+  const toggleAssignmentMember = (id) => setCheckedMemberIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  const saveAssignments = () => {
+    if (!selectedPlan || typeof updateWorkoutPlan !== 'function') return;
+    const existing = selectedPlan.assignedMemberIds || [];
+    const nextIds = assignmentMode === 'remove' ? existing.filter((id) => !checkedMemberIds.includes(id)) : [...new Set([...existing, ...checkedMemberIds])];
+    updateWorkoutPlan({ ...selectedPlan, assignedMemberIds: nextIds });
+    setAssignmentMode(null);
+  };
+  const assignmentCandidates = members.filter((member) => {
+    const q = assignmentSearch.trim().toLowerCase();
+    const isAssigned = (selectedPlan?.assignedMemberIds || []).includes(member.id);
+    if (assignmentMode === 'remove' && !isAssigned) return false;
+    if (assignmentMode === 'add' && isAssigned) return false;
+    return !q || [member.name, member.id, member.phone, member.plan].filter(Boolean).join(' ').toLowerCase().includes(q);
+  });
 
   return (
     <div className="page">
@@ -7496,13 +7673,19 @@ function TrainingPage({ plans, members, setModal, deleteWorkoutPlan }) {
                       <span style={{ fontSize: 11, color: '#71808d' }}>{exercise.muscle || '—'}</span>
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 6, fontSize: 12, color: '#5e6c78' }}>
-                      <span>{exercise.sets || 0} sets</span><span>{exercise.reps || '—'} reps</span><span>{exercise.weight || 'Bodyweight'}</span><span>{exercise.rest || '—'} rest</span>
+                      <span>{exercise.sets || 0} sets</span><span>{exercise.reps || '—'} reps</span><span>{exercise.rest || '—'} rest</span>
                     </div>
                   </div>
                 ))}
               </div>
 
-              <div className="form-section-title">Assigned members</div>
+              <div className="form-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                <span>Assigned members</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <button type="button" className="icon-btn" title="Assign members" aria-label="Assign members" onClick={() => openAssignmentManager('add')} style={{ width: 30, height: 30, color: '#0d9488' }}><Plus size={17} /></button>
+                  <button type="button" className="icon-btn" title="Remove assigned members" aria-label="Remove assigned members" onClick={() => openAssignmentManager('remove')} style={{ width: 30, height: 30, color: '#d45d5d' }}><Trash2 size={15} /></button>
+                </div>
+              </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
                 {(selectedPlan.assignedMemberIds || []).map((memberId) => {
                   const member = members.find((item) => item.id === memberId);
@@ -7519,35 +7702,83 @@ function TrainingPage({ plans, members, setModal, deleteWorkoutPlan }) {
         </div>
       </div>
 
-      <section className="panel">
-        <PanelHeader title="Training overview" subtitle="Members currently assigned to workout plans" icon={UserCheck} />
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>Member</th><th>Membership</th><th>Workout plan</th><th>Level</th><th>Duration</th><th>Trainer</th></tr></thead>
-            <tbody>
-              {members.filter((member) => plans.some((plan) => (plan.assignedMemberIds || []).includes(member.id))).map((member) => {
-                const plan = plans.find((item) => (item.assignedMemberIds || []).includes(member.id));
-                return <tr key={member.id}>
-                  <td><div className="member-cell"><div className="avatar soft" style={{ overflow: 'hidden' }}>
-            {member.photo ? (
-              <img src={member.photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            ) : (
-              initials(member.name)
-            )}
-          </div><div><strong>{member.name}</strong><span>{member.id}</span></div></div></td>
-                  <td>{member.plan || '—'}</td><td>{plan?.name || '—'}</td><td>{plan?.level || '—'}</td><td>{plan?.durationWeeks || 1} weeks</td><td>{plan?.trainer || '—'}</td>
-                </tr>;
-              })}
-            </tbody>
-          </table>
-          {!members.some((member) => plans.some((plan) => (plan.assignedMemberIds || []).includes(member.id))) && <EmptyState title="No assignments yet" text="Assign members while creating or editing a workout plan." />}
+      <section className="panel" style={{ padding: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: overviewExpanded ? 8 : 0 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <PanelHeader title="Training overview" subtitle="Members currently assigned to workout plans" icon={UserCheck} />
+          </div>
+          <button type="button" className="icon-btn" aria-label={overviewExpanded ? 'Collapse training overview' : 'Expand training overview'} title={overviewExpanded ? 'Collapse section' : 'Expand section'} onClick={() => setOverviewExpanded((value) => !value)} style={{ flexShrink: 0, width: 34, height: 34 }}>
+            {overviewExpanded ? <ChevronUp size={17} /> : <ChevronDown size={17} />}
+          </button>
         </div>
+        {overviewExpanded && (() => {
+          const assignedMembers = members.filter((member) => plans.some((plan) => (plan.assignedMemberIds || []).includes(member.id)));
+          const pageSize = 10;
+          const totalPages = Math.max(1, Math.ceil(assignedMembers.length / pageSize));
+          const currentPage = Math.min(overviewPage, totalPages);
+          const visibleMembers = assignedMembers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+          return <>
+            <div className="table-wrap" style={{ overflowX: 'auto' }}>
+              <table style={{ fontSize: 12, lineHeight: 1.25, minWidth: 760 }}>
+                <thead><tr>
+                  <th style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>Member</th>
+                  <th style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>Membership</th>
+                  <th style={{ padding: '8px 10px', minWidth: 180 }}>Workout plans</th>
+                  <th style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>Level</th>
+                  <th style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>Duration</th>
+                  <th style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>Trainer</th>
+                </tr></thead>
+                <tbody>
+                  {visibleMembers.map((member) => {
+                    const memberPlans = plans.filter((plan) => (plan.assignedMemberIds || []).includes(member.id));
+                    return <tr key={member.id}>
+                      <td style={{ padding: '7px 10px' }}><div className="member-cell" style={{ gap: 8 }}><div className="avatar soft" style={{ width: 32, height: 32, minWidth: 32, overflow: 'hidden', fontSize: 11 }}>
+                        {member.photo ? <img src={member.photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : initials(member.name)}
+                      </div><div><strong style={{ fontSize: 12 }}>{member.name}</strong><span style={{ fontSize: 10 }}>{member.id}</span></div></div></td>
+                      <td style={{ padding: '7px 10px', whiteSpace: 'nowrap' }}>{member.plan || '—'}</td>
+                      <td style={{ padding: '7px 10px' }}><div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>{memberPlans.map((plan) => <span key={plan.id} style={{ display: 'inline-block', padding: '3px 7px', borderRadius: 6, background: '#f1f5f9', color: '#334155', fontSize: 11, whiteSpace: 'nowrap' }} title={`${plan.name} · ${plan.level || '—'} · ${plan.durationWeeks || 1} weeks`}>{plan.name}</span>)}</div></td>
+                      <td style={{ padding: '7px 10px', whiteSpace: 'nowrap' }}>{[...new Set(memberPlans.map((plan) => plan.level).filter(Boolean))].join(', ') || '—'}</td>
+                      <td style={{ padding: '7px 10px', whiteSpace: 'nowrap' }}>{[...new Set(memberPlans.map((plan) => `${plan.durationWeeks || 1} weeks`))].join(', ') || '—'}</td>
+                      <td style={{ padding: '7px 10px' }}>{[...new Set(memberPlans.map((plan) => plan.trainer).filter(Boolean))].join(', ') || '—'}</td>
+                    </tr>;
+                  })}
+                </tbody>
+              </table>
+              {!assignedMembers.length && <EmptyState title="No assignments yet" text="Assign members while creating or editing a workout plan." />}
+            </div>
+            {assignedMembers.length > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '10px 2px 0', fontSize: 12, color: '#718096' }}>
+              <span>Showing {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, assignedMembers.length)} of {assignedMembers.length} members</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button type="button" className="btn btn-secondary" style={{ padding: '5px 10px', minHeight: 30, fontSize: 12 }} disabled={currentPage <= 1} onClick={() => setOverviewPage((page) => Math.max(1, page - 1))}>Previous</button>
+                <span style={{ minWidth: 58, textAlign: 'center' }}>Page {currentPage} / {totalPages}</span>
+                <button type="button" className="btn btn-secondary" style={{ padding: '5px 10px', minHeight: 30, fontSize: 12 }} disabled={currentPage >= totalPages} onClick={() => setOverviewPage((page) => Math.min(totalPages, page + 1))}>Next</button>
+              </div>
+            </div>}
+          </>;
+        })()}
       </section>
+      {assignmentMode && selectedPlan && <Modal title={assignmentMode === 'add' ? `Assign members · ${selectedPlan.name}` : `Manage assigned members · ${selectedPlan.name}`} onClose={() => setAssignmentMode(null)} wide>
+        <div style={{ color: '#71808d', fontSize: 13, marginBottom: 12 }}>{assignmentMode === 'add' ? 'Select members to add to this workout plan.' : 'Select the members you want to remove from this workout plan.'}</div>
+        <div className="search-box" style={{ marginBottom: 12, maxWidth: '100%' }}><Search size={16} /><input value={assignmentSearch} onChange={(e) => setAssignmentSearch(e.target.value)} placeholder="Search by name, member ID or phone..." /></div>
+        <div style={{ maxHeight: 320, overflowY: 'auto', display: 'grid', gap: 8 }}>
+          {assignmentCandidates.map((member) => <label key={member.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 11, border: '1px solid #e7ebef', borderRadius: 10, cursor: 'pointer', background: checkedMemberIds.includes(member.id) ? '#f2fbf9' : '#fff' }}>
+            <input type="checkbox" checked={checkedMemberIds.includes(member.id)} onChange={() => toggleAssignmentMember(member.id)} />
+            <div style={{ minWidth: 0 }}><strong style={{ display: 'block', fontSize: 13 }}>{member.name}</strong><span style={{ fontSize: 11, color: '#71808d' }}>{member.id} · {member.phone || 'No phone'} · {member.plan || 'No plan'}</span></div>
+          </label>)}
+          {!assignmentCandidates.length && <div style={{ padding: 18, textAlign: 'center', color: '#71808d' }}>{assignmentMode === 'remove' ? 'No assigned members match your search.' : 'No unassigned members match your search.'}</div>}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginTop: 14 }}>
+          <span style={{ fontSize: 12, color: '#71808d' }}>{assignmentMode === 'add' ? `${checkedMemberIds.filter((id) => !(selectedPlan.assignedMemberIds || []).includes(id)).length} member(s) selected to add` : `${checkedMemberIds.filter((id) => (selectedPlan.assignedMemberIds || []).includes(id)).length} member(s) selected to remove`}</span>
+          <div style={{ display: 'flex', gap: 8 }}><button type="button" className="btn btn-secondary" onClick={() => setAssignmentMode(null)}>Cancel</button><button type="button" className="btn btn-primary" onClick={saveAssignments} disabled={!checkedMemberIds.length}>{assignmentMode === 'add' ? 'Assign selected' : 'Remove selected'}</button></div>
+        </div>
+      </Modal>}
     </div>
   );
 }
 
-function WorkoutPlanModal({ members, onClose, onSave, plan }) {
+function WorkoutPlanModal({ members, onClose, onSave, plan, muscleGroups = [], onAddMuscleGroup, onRemoveMuscleGroup }) {
+  const defaultMuscleGroups = ['Full Body', 'Chest', 'Back', 'Shoulders', 'Arms', 'Legs', 'Core', 'Cardio'];
+  const [memberSearch, setMemberSearch] = useState('');
   const [form, setForm] = useState(() => plan ? {
     ...plan,
     goal: plan.goal || 'General Fitness',
@@ -7556,19 +7787,50 @@ function WorkoutPlanModal({ members, onClose, onSave, plan }) {
     trainer: plan.trainer || 'Administrator',
     notes: plan.notes || '',
     assignedMemberIds: plan.assignedMemberIds || [],
-    exercises: plan.exercises?.length ? plan.exercises : [{ id: `EX-${Date.now()}`, name: '', muscle: 'Full Body', sets: 3, reps: '10', weight: '', rest: '60 sec' }],
+    exercises: plan.exercises?.length ? plan.exercises.map((exercise) => ({ ...exercise, muscle: exercise.muscle || 'Full Body' })) : [{ id: `EX-${Date.now()}`, name: '', muscle: 'Full Body', sets: 3, reps: '15', rest: '60 sec' }],
   } : {
     name: '', goal: 'General Fitness', level: 'Beginner', durationWeeks: 4, trainer: 'Administrator', notes: '', assignedMemberIds: [],
-    exercises: [{ id: `EX-${Date.now()}`, name: '', muscle: 'Full Body', sets: 3, reps: '10', weight: '', rest: '60 sec' }],
+    exercises: [{ id: `EX-${Date.now()}`, name: '', muscle: 'Full Body', sets: 3, reps: '15', rest: '60 sec' }],
   });
 
+  const allMuscleGroups = [...new Set([...defaultMuscleGroups, ...(muscleGroups || []).filter(Boolean), ...(form.exercises || []).map((exercise) => exercise.muscle).filter(Boolean)])];
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
   const updateExercise = (index, key, value) => setForm((current) => ({ ...current, exercises: current.exercises.map((exercise, i) => i === index ? { ...exercise, [key]: value } : exercise) }));
-  const addExercise = () => setForm((current) => ({ ...current, exercises: [...current.exercises, { id: `EX-${Date.now()}-${current.exercises.length}`, name: '', muscle: 'Full Body', sets: 3, reps: '10', weight: '', rest: '60 sec' }] }));
+  const addExercise = () => setForm((current) => ({ ...current, exercises: [...current.exercises, { id: `EX-${Date.now()}-${current.exercises.length}`, name: '', muscle: 'Full Body', sets: 3, reps: '15', rest: '60 sec' }] }));
   const removeExercise = (index) => setForm((current) => ({ ...current, exercises: current.exercises.filter((_, i) => i !== index) }));
   const toggleMember = (id) => setForm((current) => ({ ...current, assignedMemberIds: current.assignedMemberIds.includes(id) ? current.assignedMemberIds.filter((item) => item !== id) : [...current.assignedMemberIds, id] }));
+  const removeMuscleGroup = (exerciseIndex) => {
+    const selected = String(form.exercises[exerciseIndex]?.muscle || '').trim();
+    if (!selected) return;
+    if (defaultMuscleGroups.some((group) => group.toLowerCase() === selected.toLowerCase())) {
+      window.alert('Default muscle groups cannot be deleted. Select a custom group to remove it.');
+      return;
+    }
+    const savedCustomGroups = (muscleGroups || []).filter((group) => !defaultMuscleGroups.some((defaultGroup) => String(defaultGroup).toLowerCase() === String(group).toLowerCase()));
+    if (!savedCustomGroups.some((group) => String(group).toLowerCase() === selected.toLowerCase())) {
+      window.alert('Select a saved custom muscle group from the dropdown to delete it.');
+      return;
+    }
+    if (!window.confirm(`Delete the custom muscle group "${selected}"? It will be removed from the dropdown and exercises using it will switch to Full Body.`)) return;
+    if (typeof onRemoveMuscleGroup === 'function') onRemoveMuscleGroup(selected);
+    setForm((current) => ({ ...current, exercises: current.exercises.map((exercise) => String(exercise.muscle).toLowerCase() === selected.toLowerCase() ? { ...exercise, muscle: 'Full Body' } : exercise) }));
+  };
+  const addMuscleGroup = (exerciseIndex) => {
+    const value = window.prompt('Enter new muscle group name:');
+    const clean = String(value || '').trim();
+    if (!clean) return;
+    const existing = allMuscleGroups.find((item) => item.toLowerCase() === clean.toLowerCase());
+    if (existing) {
+      setForm((current) => ({ ...current, exercises: current.exercises.map((exercise, i) => i === exerciseIndex ? { ...exercise, muscle: existing } : exercise) }));
+      return;
+    }
+    if (typeof onAddMuscleGroup === 'function') onAddMuscleGroup(clean);
+    setForm((current) => ({ ...current, exercises: current.exercises.map((exercise, i) => i === exerciseIndex ? { ...exercise, muscle: clean } : exercise) }));
+  };
+  const query = memberSearch.trim().toLowerCase();
+  const filteredMembers = (members || []).filter((member) => !query || [member.name, member.id, member.phone, member.plan].filter(Boolean).join(' ').toLowerCase().includes(query));
   const valid = form.name.trim() && form.exercises.some((exercise) => exercise.name.trim());
-  const submit = () => onSave({ ...form, name: form.name.trim(), durationWeeks: Number(form.durationWeeks || 1), exercises: form.exercises.filter((exercise) => exercise.name.trim()).map((exercise) => ({ ...exercise, sets: Number(exercise.sets || 1) })) });
+  const submit = () => onSave({ ...form, name: form.name.trim(), durationWeeks: Number(form.durationWeeks || 1), exercises: form.exercises.filter((exercise) => exercise.name.trim()).map(({ weight, ...exercise }) => ({ ...exercise, sets: Number(exercise.sets || 1) })) });
 
   return <Modal title={plan ? 'Edit workout plan' : 'Create workout plan'} onClose={onClose} wide>
     <div className="form-section-title">Plan details</div>
@@ -7585,36 +7847,38 @@ function WorkoutPlanModal({ members, onClose, onSave, plan }) {
 
     <div className="form-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
       <span>Exercises</span>
-      <button className="btn btn-secondary btn-sm" onClick={addExercise}><Plus size={14} /> Add exercise</button>
+      <button type="button" className="btn btn-secondary btn-sm" onClick={addExercise}><Plus size={14} /> Add exercise</button>
     </div>
     <div style={{ display: 'grid', gap: 10 }}>
       {form.exercises.map((exercise, index) => <div key={exercise.id || index} style={{ border: '1px solid #e7ebef', borderRadius: 12, padding: 12 }}>
         <div className="form-grid three">
           <FormField label={`Exercise ${index + 1}`}><input value={exercise.name} onChange={(e) => updateExercise(index, 'name', e.target.value)} placeholder="Exercise name" /></FormField>
-          <FormField label="Muscle group"><select value={exercise.muscle} onChange={(e) => updateExercise(index, 'muscle', e.target.value)}><option>Full Body</option><option>Chest</option><option>Back</option><option>Shoulders</option><option>Arms</option><option>Legs</option><option>Core</option><option>Cardio</option></select></FormField>
+          <FormField label="Muscle group"><div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}><select style={{ flex: 1, minWidth: 0, minHeight: 48, padding: '0 14px', fontSize: 16 }} value={exercise.muscle} onChange={(e) => updateExercise(index, 'muscle', e.target.value)}>{allMuscleGroups.map((group) => <option key={group} value={group}>{group}</option>)}</select><button type="button" className="btn btn-secondary btn-sm" onClick={() => addMuscleGroup(index)} title="Add a muscle group" aria-label="Add muscle group" style={{ flex: '0 0 42px', width: 42, minWidth: 42, height: 48, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Plus size={18} /></button><button type="button" className="btn btn-secondary btn-sm" onClick={() => removeMuscleGroup(index)} title="Delete the selected custom muscle group" aria-label="Delete selected custom muscle group" style={{ flex: '0 0 42px', width: 42, minWidth: 42, height: 48, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#d45d5d' }}><Trash2 size={17} /></button></div></FormField>
           <FormField label="Sets"><input type="number" min="1" value={exercise.sets} onChange={(e) => updateExercise(index, 'sets', e.target.value)} /></FormField>
         </div>
         <div className="form-grid three">
           <FormField label="Reps"><input value={exercise.reps} onChange={(e) => updateExercise(index, 'reps', e.target.value)} placeholder="8-12" /></FormField>
-          <FormField label="Weight"><input value={exercise.weight} onChange={(e) => updateExercise(index, 'weight', e.target.value)} placeholder="20 kg / Bodyweight" /></FormField>
           <FormField label="Rest"><input value={exercise.rest} onChange={(e) => updateExercise(index, 'rest', e.target.value)} placeholder="60 sec" /></FormField>
+          <div />
         </div>
-        {form.exercises.length > 1 && <button className="link-btn" style={{ color: '#d45d5d' }} onClick={() => removeExercise(index)}><Trash2 size={14} /> Remove exercise</button>}
+        {form.exercises.length > 1 && <button type="button" className="link-btn" style={{ color: '#d45d5d' }} onClick={() => removeExercise(index)}><Trash2 size={14} /> Remove exercise</button>}
       </div>)}
     </div>
 
     <div className="form-section-title">Assign members</div>
+    <div className="search-box" style={{ marginBottom: 10, maxWidth: '100%' }}><Search size={16} /><input value={memberSearch} onChange={(e) => setMemberSearch(e.target.value)} placeholder="Search members by name, ID, phone or plan..." /></div>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, color: '#71808d', fontSize: 12 }}><span>{filteredMembers.length} member{filteredMembers.length === 1 ? '' : 's'} found</span><strong>{form.assignedMemberIds.length} selected</strong></div>
     <div style={{ maxHeight: 190, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
-      {members.map((member) => <label key={member.id} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 10px', border: '1px solid #e7ebef', borderRadius: 10, cursor: 'pointer', background: form.assignedMemberIds.includes(member.id) ? '#f2fbf9' : '#fff' }}>
+      {filteredMembers.map((member) => <label key={member.id} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 10px', border: '1px solid #e7ebef', borderRadius: 10, cursor: 'pointer', background: form.assignedMemberIds.includes(member.id) ? '#f2fbf9' : '#fff' }}>
         <input type="checkbox" checked={form.assignedMemberIds.includes(member.id)} onChange={() => toggleMember(member.id)} />
         <div><strong style={{ display: 'block', fontSize: 13 }}>{member.name}</strong><span style={{ fontSize: 11, color: '#71808d' }}>{member.id} · {member.plan || 'No plan'}</span></div>
       </label>)}
+      {!filteredMembers.length && <div style={{ gridColumn: '1 / -1', padding: 16, textAlign: 'center', color: '#71808d', border: '1px dashed #dce3ed', borderRadius: 10 }}>No members match your search.</div>}
     </div>
 
     <ModalActions onClose={onClose} disabled={!valid} onSave={submit} saveLabel={plan ? 'Save changes' : 'Create plan'} />
   </Modal>;
 }
-
 
 function DietPage({ plans, members, setModal, deleteDietPlan }) {
   const [search, setSearch] = useState('');
@@ -8223,6 +8487,28 @@ function PaymentsPage({ payments, overdue, setModal, deletePayment, members = []
     </section>
 
     <section className="panel">
+      <PanelHeader title="Pending member payments" subtitle="Members with an outstanding balance, including members added with no initial payment." />
+      <div className="table-wrap">
+        <table>
+          <thead><tr><th>Member</th><th>Plan</th><th>Membership amount</th><th>Paid</th><th>Outstanding due</th><th>Action</th></tr></thead>
+          <tbody>
+            {members.filter((member) => Number(member.due || 0) > 0).sort((a, b) => Number(b.due || 0) - Number(a.due || 0)).map((member) => (
+              <tr key={`due-${member.id}`}>
+                <td><strong>{member.name || 'Member'}</strong><div className="small-muted">{member.id}{member.phone ? ` · ${member.phone}` : ''}</div></td>
+                <td>{member.plan || 'Membership'}</td>
+                <td>₹{Number(member.amount || 0).toLocaleString('en-IN')}</td>
+                <td>₹{Number(member.paid || 0).toLocaleString('en-IN')}</td>
+                <td><strong className="danger-text">₹{Number(member.due || 0).toLocaleString('en-IN')}</strong></td>
+                <td><button className="btn btn-secondary btn-sm" onClick={() => setModal({ type: 'invoiceOptions', member, payment: null })}>View invoice</button></td>
+              </tr>
+            ))}
+            {!members.some((member) => Number(member.due || 0) > 0) && <tr><td colSpan="6"><EmptyState title="No pending member payments" text="Members with an outstanding balance will appear here." /></td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section className="panel">
       <div className="panel-header">
         <div>
           <h3>Payment ledger</h3>
@@ -8540,11 +8826,76 @@ function calculateGstBreakdown(totalAmount, rate = 5) {
   };
 }
 
+function currentFinancialYear(dateValue = today) {
+  const date = new Date(`${dateValue}T00:00:00`);
+  const year = date.getFullYear();
+  const start = date.getMonth() >= 3 ? year : year - 1;
+  return `${start}-${String(start + 1).slice(-2)}`;
+}
+
+function getInvoiceSeriesSettings(settings, seriesKey) {
+  const fallback = { prefix: String(settings?.invoicePrefix || 'PO').trim() || 'PO', numberLength: 6, financialYear: currentFinancialYear(), nextNumber: 1, yearlyNext: {} };
+  const saved = settings?.[seriesKey] || {};
+  return { ...fallback, ...saved, yearlyNext: { ...(saved.yearlyNext || {}) } };
+}
+
+// Series A is used for GST invoices; Series B for non-GST invoices.
+// Sequence allocation is persisted in gym settings after each successful payment.
+function allocateInvoiceNumber(settings, gstApplicable, dateValue = today) {
+  const seriesKey = gstApplicable ? 'invoiceSeriesA' : 'invoiceSeriesB';
+  const series = getInvoiceSeriesSettings(settings, seriesKey);
+  const fy = currentFinancialYear(dateValue);
+  const next = Math.max(1, Number(series.yearlyNext[fy] ?? (series.financialYear === fy ? series.nextNumber : 1)) || 1);
+  const width = Math.min(12, Math.max(1, Number(series.numberLength) || 6));
+  const prefix = String(series.prefix || 'PO').trim() || 'PO';
+  const invoiceNumber = `${prefix}/${fy}/${String(next).padStart(width, '0')}`;
+  const updatedSeries = { ...series, financialYear: fy, nextNumber: next + 1, yearlyNext: { ...series.yearlyNext, [fy]: next + 1 } };
+  return { invoiceNumber, settings: { ...(settings || {}), [seriesKey]: updatedSeries } };
+}
+
+// Each member receives one permanent master invoice number. This counter is
+// independent from individual payment numbering, so adding payments cannot
+// consume the next member's number.
+function allocateMemberInvoiceNumber(settings, gstApplicable, dateValue = today) {
+  const seriesKey = gstApplicable ? 'invoiceSeriesA' : 'invoiceSeriesB';
+  const series = getInvoiceSeriesSettings(settings, seriesKey);
+  const fy = currentFinancialYear(dateValue);
+  const memberYearlyNext = { ...(series.memberYearlyNext || {}) };
+  const next = Math.max(1, Number(memberYearlyNext[fy] ?? series.yearlyNext?.[fy] ?? (series.financialYear === fy ? series.nextNumber : 1)) || 1);
+  const width = Math.min(12, Math.max(1, Number(series.numberLength) || 6));
+  const prefix = String(series.prefix || 'PO').trim() || 'PO';
+  const invoiceNumber = `${prefix}/${fy}/${String(next).padStart(width, '0')}`;
+  const updatedSeries = { ...series, financialYear: fy, memberNextNumber: next + 1, memberYearlyNext: { ...memberYearlyNext, [fy]: next + 1 } };
+  return { invoiceNumber, settings: { ...(settings || {}), [seriesKey]: updatedSeries } };
+}
+
+function romanPaymentSuffix(value) {
+  let n = Math.max(1, Number(value) || 1);
+  const pairs = [[1000,'M'],[900,'CM'],[500,'D'],[400,'CD'],[100,'C'],[90,'XC'],[50,'L'],[40,'XL'],[10,'X'],[9,'IX'],[5,'V'],[4,'IV'],[1,'I']];
+  let result = '';
+  for (const [amount, symbol] of pairs) while (n >= amount) { result += symbol; n -= amount; }
+  return result;
+}
+
+function getMemberMasterInvoiceNumber(member, settings, group = null) {
+  const fromMember = member?.memberInvoiceNumber || readMemberMeta(member?.notes).memberInvoiceNumber;
+  if (fromMember) return String(fromMember);
+  // Legacy members: preserve an already-issued invoice number if available.
+  const existing = group?.payments?.find((p) => p.invoiceNumber)?.invoiceNumber;
+  if (existing) return String(existing).replace(/-(?:[IVXLCDM]+|P\d+)$/i, '');
+  const series = getInvoiceSeriesSettings(settings, member?.gstMode === 'gst' ? 'invoiceSeriesA' : 'invoiceSeriesB');
+  const fy = currentFinancialYear(group?.startDate || member?.start || today);
+  const number = Math.max(1, Number(series.memberYearlyNext?.[fy] ?? series.yearlyNext?.[fy] ?? series.nextNumber ?? 1));
+  return `${String(series.prefix || 'PO').trim() || 'PO'}/${fy}/${String(number).padStart(Math.min(12, Math.max(1, Number(series.numberLength) || 6)), '0')}`;
+}
+
 function makeInvoiceNumber(payment, settings) {
-  const prefix = String(settings?.invoicePrefix || 'PF-INV').trim() || 'PF-INV';
   if (payment?.invoiceNumber) return payment.invoiceNumber;
-  const raw = String(payment?.id || `PAY-${Date.now()}`).replace(/[^a-zA-Z0-9-]/g, '');
-  return `${prefix}-${raw}`;
+  const series = getInvoiceSeriesSettings(settings, payment?.gstApplicable ? 'invoiceSeriesA' : 'invoiceSeriesB');
+  const fy = currentFinancialYear(payment?.date || today);
+  const legacyDigits = String(payment?.id || '').match(/(\d+)$/);
+  const number = Math.max(1, Number(legacyDigits?.[1] || 1));
+  return `${String(series.prefix || 'PO').trim() || 'PO'}/${fy}/${String(number).padStart(Math.min(12, Math.max(1, Number(series.numberLength) || 6)), '0')}`;
 }
 
 function getInvoicePaymentForMember(member, payments = []) {
@@ -8706,7 +9057,7 @@ function openPrintWindow(title, html) {
   return true;
 }
 
-function printMemberFitnessMedical(member, settings) {
+function printMemberFitnessMedical(member, settings, workoutPlans = []) {
   const gymName = settings?.gymName || 'Preface Fitness';
   const meta = readMemberMeta(member?.notes);
   const conditions = Array.isArray(meta.medicalConditions) ? meta.medicalConditions : (Array.isArray(member?.medicalConditions) ? member.medicalConditions : []);
@@ -8721,6 +9072,11 @@ function printMemberFitnessMedical(member, settings) {
     ['Thighs', meta.thighs ?? member?.thighs], ['Calves', meta.calves ?? member?.calves],
     ['Neck', meta.neck ?? member?.neck]
   ];
+  const assignedPlans = (workoutPlans || []).filter((plan) => (plan.assignedMemberIds || []).some((id) => String(id) === String(member?.id)));
+  const assignedWorkoutHtml = assignedPlans.length ? `<table class="assigned-workout-table"><thead><tr><th>Workout plan</th><th>Exercise</th><th>Muscle group</th><th>Sets</th><th>Reps</th><th>Rest</th></tr></thead><tbody>${assignedPlans.flatMap((plan) => {
+    const exercises = (plan.exercises || []).length ? plan.exercises : [{ name: 'No exercises added', muscleGroup: '—', sets: '—', reps: '—', rest: '—' }];
+    return exercises.map((exercise, index) => `<tr><td>${index === 0 ? `<strong>${escapeHtml(plan.name || 'Workout plan')}</strong><div class="workout-plan-meta">${escapeHtml(plan.goal || 'General Fitness')} · ${escapeHtml(plan.level || 'Beginner')} · ${escapeHtml(plan.durationWeeks || 0)} weeks${plan.trainer ? ` · ${escapeHtml(plan.trainer)}` : ''}</div>${plan.notes ? `<div class="workout-plan-notes">${escapeHtml(plan.notes)}</div>` : ''}` : `<span class="workout-plan-repeat">${escapeHtml(plan.name || 'Workout plan')}</span>`}</td><td>${escapeHtml(exercise.name || 'Exercise')}</td><td>${escapeHtml(exercise.muscleGroup || exercise.muscle || 'Full Body')}</td><td>${escapeHtml(exercise.sets ?? 3)}</td><td>${escapeHtml(exercise.reps ?? 15)}</td><td>${escapeHtml(exercise.rest || '60 sec')}</td></tr>`);
+  }).join('')}</tbody></table>` : '<p class="empty">No workout plans have been assigned to this member.</p>';
   const measurementLabels = ['Chest','Shoulder','Biceps','Forearms','Waist','Hips','Thighs','Calves','Neck'];
   const measurementValues = rows.filter(([label, value]) => measurementLabels.includes(label) && value !== undefined && value !== null && String(value).trim() !== '');
   const measurementRows = measurementValues.map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)} cm</td></tr>`).join('');
@@ -8765,6 +9121,7 @@ function printMemberFitnessMedical(member, settings) {
       ${meta.surgeryDetails ? `<p class="detail-note"><b>Surgery (last 5 years):</b> ${escapeHtml(meta.surgeryDetails)}</p>` : ''}
       ${meta.additionalMedicalNotes ? `<p class="detail-note"><b>Additional details:</b> ${escapeHtml(meta.additionalMedicalNotes)}</p>` : ''}
     </section>
+    <section class="panel workouts"><div class="panel-head"><span class="panel-icon teal">04</span><h2>Assigned workout plans &amp; exercises</h2></div>${assignedWorkoutHtml}</section>
     <footer><span class="footer-mark">PF</span><span>This profile records information reported by the member for gym safety and training awareness. It is not a medical diagnosis.</span><b>${escapeHtml(gymName.toUpperCase())}</b></footer>
   </div>
   <style>
@@ -8815,11 +9172,25 @@ function printMemberFitnessMedical(member, settings) {
     .pills{display:flex;flex-wrap:wrap;gap:7px}
     .pill{border:1px solid #f4c8d5;background:#fff0f4;color:#a52d52;border-radius:30px;padding:5px 9px;font-size:9px;font-weight:800}
     .medical .empty{margin:0}
+    .workouts{margin:14px 22px 0;background:linear-gradient(110deg,#f5fbff,#fff);border-color:#d7e7f4}
+    .assigned-workout-table{table-layout:fixed;margin-top:2px}
+    .assigned-workout-table th,.assigned-workout-table td{font-size:8.5px;line-height:1.3;padding:5px 5px;overflow-wrap:anywhere}
+    .assigned-workout-table th{width:auto;background:#f2f7fc;color:#60758f;font-weight:800}
+    .assigned-workout-table th:nth-child(1){width:25%}.assigned-workout-table th:nth-child(2){width:25%}.assigned-workout-table th:nth-child(3){width:19%}.assigned-workout-table th:nth-child(4){width:7%}.assigned-workout-table th:nth-child(5){width:7%}.assigned-workout-table th:nth-child(6){width:17%}
+    .workout-plan-meta{font-size:7.5px;color:#64748b;margin-top:2px;font-weight:400}
+    .workout-plan-notes{font-size:7.5px;color:#64748b;margin-top:2px;font-weight:400}
+    .workout-plan-repeat{font-size:7.5px;color:#94a3b8}
+    .workout-plan{border:1px solid #dce7f1;border-radius:10px;padding:10px 12px;margin-top:9px;break-inside:avoid}
+    .workout-plan-head{display:flex;justify-content:space-between;gap:10px;align-items:center;color:#17365a;font-size:11px}
+    .workout-plan-head span{font-size:9px;color:#64748b;white-space:nowrap}
+    .workout-plan p{font-size:9px;color:#64748b;margin:5px 0;line-height:1.45}
+    .workout-plan table{margin-top:7px}
+    .workout-plan th,.workout-plan td{font-size:9px;padding:5px 4px}
     .detail-note{font-size:10px;line-height:1.6;color:#52647b;margin:10px 0 0}
     footer{margin-top:16px;padding:12px 22px;display:flex;align-items:center;gap:10px;border-top:1px solid #e1eaf4;background:#f7faff;color:#718096;font-size:8px;line-height:1.5}
     .footer-mark{display:grid;place-items:center;flex:0 0 26px;height:26px;border-radius:8px;background:#173b5d;color:#fff;font-weight:900;font-size:9px}
     footer b{margin-left:auto;color:#526984;font-size:8px;letter-spacing:.08em;white-space:nowrap}
-    @media screen and (max-width:650px){.fitness-print{margin:0;border-radius:0}.hero{padding:22px 20px;min-height:180px}.hero-art{right:0;width:260px;opacity:.72}.hero-copy{max-width:85%}.gym{font-size:24px}.date-chip{right:12px;top:8px}.columns{grid-template-columns:1fr;padding:12px 14px 0}.medical{margin:12px 14px 0}.member{padding:16px 18px}.member-details{gap:9px 15px}footer{padding:10px 14px}footer b{display:none}}
+    @media screen and (max-width:650px){.fitness-print{margin:0;border-radius:0}.hero{padding:22px 20px;min-height:180px}.hero-art{right:0;width:260px;opacity:.72}.hero-copy{max-width:85%}.gym{font-size:24px}.date-chip{right:12px;top:8px}.columns{grid-template-columns:1fr;padding:12px 14px 0}.medical{margin:12px 14px 0}.member{padding:16px 18px}.member-details{gap:9px 15px}footer{padding:10px 14px}.workouts{margin:12px 14px 0}}
     @media print{
       @page{size:A4;margin:9mm}
       body{background:#fff!important}
@@ -8830,6 +9201,9 @@ function printMemberFitnessMedical(member, settings) {
       .columns{gap:10px;padding:14px 16px 0}
       .panel{padding:11px}
       .medical{margin:10px 16px 0}
+      .workouts{margin:10px 16px 0}
+      .assigned-workout-table th,.assigned-workout-table td{font-size:7.5px;padding:3px 4px;line-height:1.2}
+      .workout-plan-meta,.workout-plan-notes{font-size:6.8px}
       .member{padding:14px 20px}
       footer{margin-top:12px}
       *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
@@ -8962,7 +9336,7 @@ function printPaymentInvoice(member, payment, settings, overrideGstMode = null) 
     <section class="schedule-wrap"><div class="schedule-title">PAYMENT SCHEDULE</div><table class="schedule-table"><thead><tr><th>DUE / PAYMENT DATE</th><th>AMOUNT</th><th>PAYMENT MODE</th><th>STATUS</th></tr></thead><tbody>${scheduleRows}</tbody></table></section>
     <section class="invoice-note"><strong>Amount in words:</strong> ${escapeHtml(amountInWordsIndian(invoiceAmount))}</section>
     <section class="invoice-bottom">
-      <div class="terms-card"><div class="bottom-title">NOTES &amp; TERMS</div><ol><li>This document records the membership / fitness service billed by ${escapeHtml(gymName)}.</li><li>Please retain this invoice for your records.</li>${isGst ? '<li>GST details should match the billing details configured by the gym.</li>' : ''}</ol><div class="signature"><div>For ${escapeHtml(gymName)}</div><div class="signature-line"></div><strong>Authorised Signatory</strong></div></div>
+      <div class="terms-card"><div class="bottom-title">NOTES &amp; TERMS</div><ol><li>This document records the membership / fitness service billed by ${escapeHtml(gymName)}.</li><li>Amounts paid are non-refundable.</li><li>Once your package has expired, it must be renewed. Expired packages will not be extended unless authorised by management.</li><li>Please retain this invoice for your records.</li>${isGst ? '<li>GST details should match the billing details configured by the gym.</li>' : ''}</ol><div class="signature"><div>For ${escapeHtml(gymName)}</div><div class="signature-line"></div><strong>Authorised Signatory</strong></div></div>
       <div class="qr-card"><div class="bottom-title">SCAN TO VISIT OUR GYM</div><div class="qr-row"><div class="qr-frame"><img class="qr-code" src="${qrUrl}" alt="QR code linking to Preface Fitness public page"/><img class="qr-center-logo" src="${LOGO_URL}" alt="Preface Fitness logo"/></div><div class="qr-copy"><strong>Thank you for choosing ${escapeHtml(gymName)}.</strong>Scan to visit our gym.</div></div></div>
     </section>
     <footer class="invoice-footer"><div class="footer-contact"><span>${escapeHtml(settings?.gymPhone || 'Preface Fitness')}</span>${settings?.gymEmail ? `<span>${escapeHtml(settings.gymEmail)}</span>` : ''}</div><div class="footer-slogan">THANK YOU FOR CHOOSING US</div></footer>
@@ -9356,7 +9730,7 @@ function InvoiceOptionsModal({ member, payment, payments = [], mode = 'single', 
   const [selectedGroupId, setSelectedGroupId] = useState(groups[0]?.id || '');
   const selectedGroup = groups.find((g) => g.id === selectedGroupId) || groups[0] || null;
   const selectedPayment = mode === 'member' && selectedGroup ? {
-    id: selectedGroup.id, invoiceNumber: `${settings?.invoicePrefix || 'PF-INV'}-${String(selectedGroup.id).replace(/[^a-zA-Z0-9-]/g, '')}`,
+    id: selectedGroup.id, invoiceNumber: getMemberMasterInvoiceNumber(member, settings, selectedGroup),
     type: 'Membership', description: selectedGroup.description, date: selectedGroup.endDate || today,
     mode: selectedGroup.payments.length === 1 ? selectedGroup.payments[0].mode : 'Multiple modes',
     consolidated: true, payments: selectedGroup.payments, planTotal: selectedGroup.planTotal,
@@ -10432,7 +10806,9 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
     gymEmail: current.gymEmail || '',
     gstin: current.gstin || '',
     defaultGstRate: Number(current.defaultGstRate ?? 5),
-    invoicePrefix: current.invoicePrefix || 'PF-INV',
+    invoicePrefix: current.invoicePrefix || 'PO',
+    invoiceSeriesA: getInvoiceSeriesSettings(current, 'invoiceSeriesA'),
+    invoiceSeriesB: getInvoiceSeriesSettings(current, 'invoiceSeriesB'),
     referralPointsPerReferral: Number(current.referralPointsPerReferral ?? 10),
     gymLatitude: current.gymLatitude || '',
     gymLongitude: current.gymLongitude || '',
@@ -10469,7 +10845,9 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
       gymEmail: current.gymEmail || '',
       gstin: current.gstin || '',
       defaultGstRate: Number(current.defaultGstRate ?? 5),
-      invoicePrefix: current.invoicePrefix || 'PF-INV',
+      invoicePrefix: current.invoicePrefix || 'PO',
+      invoiceSeriesA: getInvoiceSeriesSettings(current, 'invoiceSeriesA'),
+      invoiceSeriesB: getInvoiceSeriesSettings(current, 'invoiceSeriesB'),
       referralPointsPerReferral: Number(current.referralPointsPerReferral ?? 10),
       gymLatitude: current.gymLatitude || '',
       gymLongitude: current.gymLongitude || '',
@@ -10490,7 +10868,7 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
     }));
     setAuthMessage('');
     setNoticeForm({ enabled: Boolean(current.notice?.enabled), dashboardEnabled: current.notice?.dashboardEnabled !== false, text: current.notice?.text || '', priority: current.notice?.priority || 'medium' });
-  }, [current.gymName, current.gymAddress, current.gymPhone, current.gymEmail, current.gstin, current.defaultGstRate, current.invoicePrefix, current.referralPointsPerReferral, current.gymLatitude, current.gymLongitude, current.publicPage, current.notice?.id, current.notice?.enabled, current.notice?.dashboardEnabled, current.notice?.text, current.notice?.priority, current.noticeHistory, current.auth?.username, current.auth?.passwordHash]);
+  }, [current.gymName, current.gymAddress, current.gymPhone, current.gymEmail, current.gstin, current.defaultGstRate, current.invoicePrefix, current.invoiceSeriesA, current.invoiceSeriesB, current.referralPointsPerReferral, current.gymLatitude, current.gymLongitude, current.publicPage, current.notice?.id, current.notice?.enabled, current.notice?.dashboardEnabled, current.notice?.text, current.notice?.priority, current.noticeHistory, current.auth?.username, current.auth?.passwordHash]);
 
   const useCurrentLocation = () => {
     if (!navigator.geolocation) { showActionFeedback('This browser does not support location detection.', 'error'); return setAuthMessage('This browser does not support location detection.'); }
@@ -10566,6 +10944,8 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
     const settingsPatch = {
       ...form,
       referralPointsPerReferral: Math.max(0, Number(form.referralPointsPerReferral || 0)),
+      invoiceSeriesA: getInvoiceSeriesSettings({ ...current, ...form }, 'invoiceSeriesA'),
+      invoiceSeriesB: getInvoiceSeriesSettings({ ...current, ...form }, 'invoiceSeriesB'),
     };
 
     setData((d) => ({
@@ -10850,10 +11230,46 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
         {activeSettingsTab === 'general' && (
           <div className="settings-tab-panel">
 <section className="card">
-          <div className="card-header"><div><h3>Gym & billing details</h3><p>These details are used on member bills and invoices.</p></div></div>
+          <div className="card-header"><div><h3>Gym & billing details</h3><p>These details are used on member bills and invoices. Invoice numbers use separate Series A (GST) and Series B (non-GST) counters by financial year.</p></div></div>
           <div className="form-grid two">
             <FormField label="Gym name"><input value={form.gymName} onChange={(e) => setForm((f) => ({...f,gymName:e.target.value}))} /></FormField>
-            <FormField label="Invoice prefix"><input value={form.invoicePrefix} onChange={(e) => setForm((f) => ({...f,invoicePrefix:e.target.value}))} placeholder="PF-INV" /></FormField>
+            <div style={{gridColumn:'1 / -1',display:'grid',gridTemplateColumns:'repeat(2,minmax(0,1fr))',gap:'16px'}}>
+              {['A','B'].map((letter) => {
+                const key = letter === 'A' ? 'invoiceSeriesA' : 'invoiceSeriesB';
+                const series = form[key] || getInvoiceSeriesSettings(current, key);
+                const fy = String(series.financialYear || currentFinancialYear());
+                const nextNumber = Number(series.yearlyNext?.[fy] ?? series.nextNumber ?? 1);
+                const preview = `${String(series.prefix || 'PO').trim() || 'PO'}/${fy}/${String(nextNumber).padStart(Math.min(12,Math.max(1,Number(series.numberLength)||6)),'0')}`;
+                const updateSeries = (patch) => setForm((f) => ({...f,[key]:{...(f[key] || series),...patch}}));
+                const applyStart = async () => {
+                  const chosenYear = String(series.financialYear || currentFinancialYear()).trim();
+                  const chosenNumber = Math.max(1,parseInt(series.nextNumber,10)||1);
+                  const updatedSeries = { ...(form[key] || series), financialYear:chosenYear, nextNumber:chosenNumber, yearlyNext:{...((form[key] || series).yearlyNext || {}),[chosenYear]:chosenNumber}, memberNextNumber:chosenNumber, memberYearlyNext:{...((form[key] || series).memberYearlyNext || {}),[chosenYear]:chosenNumber} };
+                  const nextSettings = { ...(data.settings || {}), [key]: updatedSeries };
+                  setForm((f) => ({...f,[key]:updatedSeries}));
+                  setData((d) => ({...d,settings:{...(d.settings || {}),[key]:updatedSeries}}));
+                  try {
+                    await saveCloudSettings({ [key]: updatedSeries });
+                    showActionFeedback(`Series ${letter} applied. Next invoice: ${String(updatedSeries.prefix || 'PO').trim() || 'PO'}/${chosenYear}/${String(chosenNumber).padStart(Math.min(12,Math.max(1,Number(updatedSeries.numberLength)||6)),'0')}`);
+                  } catch (error) {
+                    console.error('Invoice series save failed:', error);
+                    showActionFeedback(error?.message || `Series ${letter} saved locally, but cloud save failed.`, 'error');
+                  }
+                };
+                return <div key={key} style={{border:'1px solid #e5e7eb',borderRadius:'12px',padding:'14px',display:'grid',gap:'10px'}}>
+                  <strong>Invoice Series {letter}</strong>
+                  <FormField label="Prefix"><input value={series.prefix || ''} onChange={(e) => updateSeries({prefix:e.target.value})} placeholder="PO" /></FormField>
+                  <FormField label="Number length"><input type="number" min="1" max="12" value={series.numberLength ?? 6} onChange={(e) => updateSeries({numberLength:Math.min(12,Math.max(1,Number(e.target.value)||1))})} /></FormField>
+                  <div style={{fontSize:'13px',color:'#94a3b8'}}>Next: {preview}</div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'}}>
+                    <FormField label="Financial year"><input value={series.financialYear || currentFinancialYear()} onChange={(e) => updateSeries({financialYear:e.target.value.trim()})} placeholder="2026-27" /></FormField>
+                    <FormField label="Start next at"><input type="number" min="1" value={series.nextNumber ?? 1} onChange={(e) => updateSeries({nextNumber:Math.max(1,parseInt(e.target.value,10)||1)})} /></FormField>
+                  </div>
+                  <div style={{fontSize:'12px',color:'#94a3b8'}}>Currently next: {preview}</div>
+                  <button className="btn btn-secondary" type="button" onClick={applyStart}><CheckCircle2 size={16}/> Apply start number</button>
+                </div>;
+              })}
+            </div>
           </div>
           <FormField label="Gym address"><textarea rows="2" value={form.gymAddress} onChange={(e) => setForm((f) => ({...f,gymAddress:e.target.value}))} placeholder="Full gym address" /></FormField>
           <div className="form-grid two">
