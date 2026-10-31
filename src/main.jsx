@@ -12125,7 +12125,12 @@ function MemberPortalPage() {
       });
       if (rpcError) throw rpcError;
       if (!data || data.ok !== true || !data.member) throw new Error('Login failed. Check your details and try again.');
-      setPortalData(data);
+      // Normalize the diet-plan response so the portal works with either
+      // snake_case (current RPC) or camelCase payloads from older deployments.
+      const normalizedDietPlans = Array.isArray(data.diet_plans)
+        ? data.diet_plans
+        : (Array.isArray(data.dietPlans) ? data.dietPlans : []);
+      setPortalData({ ...data, diet_plans: normalizedDietPlans });
       setPin('');
     } catch (e) {
       console.error('Member portal login failed:', e);
@@ -12203,7 +12208,7 @@ function MemberPortalPage() {
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,flexWrap:'wrap',marginBottom:14}}>
             <h2 style={{fontSize:19,margin:0,color:'#159b91',letterSpacing:'.04em'}}>✦ PERSONALIZED DIET & MEAL PLAN</h2>
           </div>
-          {!portalData.diet_plans?.length ? <p style={{color:'#71839a',fontSize:14,margin:0}}>No diet plan has been assigned to your profile yet.</p> : <div style={{display:'grid',gap:12}}>
+          {!Array.isArray(portalData.diet_plans) || !portalData.diet_plans.length ? <p style={{color:'#71839a',fontSize:14,margin:0}}>No diet plan has been assigned to your profile yet.</p> : <div style={{display:'grid',gap:12}}>
             {portalData.diet_plans.map((plan,index)=><section key={plan.id || index} style={{border:'1px solid #dce7f2',borderRadius:13,overflow:'hidden',background:'#fff'}}>
               <div style={{padding:'13px 15px',background:'linear-gradient(90deg,#eaf4ff,#effaf7)',borderBottom:'1px solid #dce7f2',display:'flex',justifyContent:'space-between',gap:10,alignItems:'center',flexWrap:'wrap'}}>
                 <div><div style={{fontSize:15,fontWeight:900,color:'#173b5d'}}>{plan.name || 'Nutrition plan'}</div><div style={{fontSize:11,color:'#71839a',marginTop:3}}>{plan.goal || 'General Fitness'} · {Number(plan.durationWeeks || 1)} weeks</div></div>
