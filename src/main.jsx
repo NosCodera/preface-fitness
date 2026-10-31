@@ -6336,8 +6336,8 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
 
           <div className="profile-card" style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' }}>
-              <PanelHeader title="Fitness, measurements & medical history" subtitle="Training baseline and health information reported by the member" icon={Activity} />
-              <button type="button" className="btn btn-secondary" onClick={() => printMemberFitnessMedical(member, settings, memberWorkoutPlans)} style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', flexShrink: 0 }}>
+              <PanelHeader title="Fitness Profile & Medical History" subtitle="Training baseline and health information reported by the member" icon={Activity} />
+              <button type="button" className="btn btn-secondary" onClick={() => printMemberFitnessMedical(member, settings)} style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', flexShrink: 0 }}>
                 <FileDown size={17} /> Print profile
               </button>
             </div>
@@ -6374,19 +6374,24 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
                   {meta.surgeryDetails && <p style={{ margin: '8px 0 0', color: '#475569', lineHeight: 1.6 }}><strong>Surgery (last 5 years):</strong> {meta.surgeryDetails}</p>}
                   {meta.additionalMedicalNotes && <p style={{ margin: '8px 0 0', color: '#475569', lineHeight: 1.6 }}><strong>Additional details:</strong> {meta.additionalMedicalNotes}</p>}
                 </section>
-                <section style={{ gridColumn: '1 / -1', marginTop: 4 }}>
-                  <h4 style={{ margin: '4px 0 10px', fontSize: '14px', color: '#64748b' }}>Assigned workout plans & exercises</h4>
-                  {memberWorkoutPlans.length ? <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 12 }}>
-                    {memberWorkoutPlans.map((plan) => <div key={plan.id} style={{ border: '1px solid #dce7f1', borderRadius: 12, padding: 13, background: '#f8fbff' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-start' }}><strong style={{ color: '#17365a', fontSize: 14 }}>{plan.name || 'Workout plan'}</strong><span style={{ fontSize: 11, color: '#64748b', whiteSpace: 'nowrap' }}>{Number(plan.durationWeeks || 0)} weeks</span></div>
-                      <div style={{ fontSize: 12, color: '#64748b', margin: '5px 0 10px' }}>{plan.goal || 'General Fitness'} · {plan.level || 'Beginner'}{plan.trainer ? ` · ${plan.trainer}` : ''}</div>
-                      {(plan.exercises || []).length ? <div style={{ display: 'grid', gap: 7 }}>{plan.exercises.map((exercise, index) => <div key={exercise.id || `${plan.id}-ex-${index}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, borderTop: '1px solid #e6edf5', paddingTop: 7 }}><div><strong style={{ color: '#243b53', fontSize: 12 }}>{index + 1}. {exercise.name || 'Exercise'}</strong><div style={{ fontSize: 11, color: '#718096', marginTop: 3 }}>{exercise.muscleGroup || exercise.muscle || 'Full Body'} · {exercise.sets || 3} sets · {exercise.reps || 15} reps · {exercise.rest || '60 sec'} rest</div></div></div>)}</div> : <span style={{ fontSize: 12, color: '#718096' }}>No exercises added to this plan.</span>}
-                      {plan.notes && <p style={{ margin: '9px 0 0', fontSize: 12, color: '#64748b' }}><strong>Notes:</strong> {plan.notes}</p>}
-                    </div>)}
-                  </div> : <p style={{ margin: 0, color: '#718096' }}>No workout plans have been assigned to this member.</p>}
-                </section>
               </div>;
             })()}
+          </div>
+
+          <div className="profile-card" style={cardStyle}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,flexWrap:'wrap'}}>
+              <PanelHeader title="Workout Plan" subtitle="Weekly training schedule assigned to this member" icon={Dumbbell} />
+              <button type="button" className="btn btn-secondary" onClick={() => printMemberWorkoutPlan(member, settings, memberWorkoutPlans)} style={{display:'inline-flex',alignItems:'center',gap:7,flexShrink:0}}><Printer size={17}/> Print workout plan</button>
+            </div>
+            {memberWorkoutPlans.length ? <div style={{display:'grid',gap:14,marginTop:12}}>{memberWorkoutPlans.map((plan) => {
+              const days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday','Unscheduled'];
+              return <section key={plan.id} style={{border:'1px solid #e3e8f2',borderRadius:14,padding:14,background:'#fbfcff'}}>
+                <div style={{display:'flex',justifyContent:'space-between',gap:10,flexWrap:'wrap'}}><strong style={{fontSize:16,color:'#243b53'}}>{plan.name || 'Workout plan'}</strong><span style={{fontSize:12,color:'#7654e8',fontWeight:800}}>{Number(plan.durationWeeks||0)} weeks</span></div>
+                <div style={{fontSize:12,color:'#64748b',margin:'5px 0 12px'}}>{plan.goal||'General Fitness'} · {plan.level||'Beginner'}{plan.trainer?` · ${plan.trainer}`:''}</div>
+                {days.map(day => { const exercises=(plan.exercises||[]).filter(ex=>(ex.day||'Unscheduled')===day); return exercises.length ? <div key={day} style={{marginTop:10}}><h4 style={{margin:'0 0 7px',fontSize:13,color:'#5145cd'}}>{day}</h4><div style={{display:'grid',gap:7}}>{exercises.map((exercise,index)=><div key={exercise.id||`${day}-${index}`} style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap',border:'1px solid #edf0f5',borderRadius:10,padding:10,background:'#fff'}}><div><strong style={{fontSize:13,color:'#243b53'}}>{exercise.name||'Exercise'}</strong><div style={{fontSize:11,color:'#718096',marginTop:3}}>{exercise.muscle||exercise.muscleGroup||'Full Body'} · {exercise.sets||3} sets · {exercise.reps||15} reps · Rest {exercise.rest||'60 sec'}</div></div>{exercise.notes||exercise.instructions ? <span style={{fontSize:11,color:'#64748b'}}>{exercise.notes||exercise.instructions}</span> : null}</div>)}</div></div> : null; })}
+                {plan.notes&&<p style={{margin:'10px 0 0',fontSize:12,color:'#64748b'}}><strong>Plan notes:</strong> {plan.notes}</p>}
+              </section>;
+            })}</div> : <p style={{margin:'10px 0 0',color:'#718096'}}>No workout plans have been assigned to this member.</p>}
           </div>
 
           <div className="profile-card" style={cardStyle}>
@@ -7821,16 +7826,16 @@ function WorkoutPlanModal({ members, onClose, onSave, plan, muscleGroups = [], o
     trainer: plan.trainer || 'Administrator',
     notes: plan.notes || '',
     assignedMemberIds: plan.assignedMemberIds || [],
-    exercises: plan.exercises?.length ? plan.exercises.map((exercise) => ({ ...exercise, muscle: exercise.muscle || 'Full Body' })) : [{ id: `EX-${Date.now()}`, name: '', muscle: 'Full Body', sets: 3, reps: '15', rest: '60 sec' }],
+    exercises: plan.exercises?.length ? plan.exercises.map((exercise) => ({ ...exercise, muscle: exercise.muscle || 'Full Body', day: exercise.day || 'Unscheduled' })) : [{ id: `EX-${Date.now()}`, name: '', muscle: 'Full Body', day: 'Unscheduled', sets: 3, reps: '15', rest: '60 sec' }],
   } : {
     name: '', goal: 'General Fitness', level: 'Beginner', durationWeeks: 4, trainer: 'Administrator', notes: '', assignedMemberIds: [],
-    exercises: [{ id: `EX-${Date.now()}`, name: '', muscle: 'Full Body', sets: 3, reps: '15', rest: '60 sec' }],
+    exercises: [{ id: `EX-${Date.now()}`, name: '', muscle: 'Full Body', day: 'Unscheduled', sets: 3, reps: '15', rest: '60 sec' }],
   });
 
   const allMuscleGroups = [...new Set([...defaultMuscleGroups, ...(muscleGroups || []).filter(Boolean), ...(form.exercises || []).map((exercise) => exercise.muscle).filter(Boolean)])];
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
   const updateExercise = (index, key, value) => setForm((current) => ({ ...current, exercises: current.exercises.map((exercise, i) => i === index ? { ...exercise, [key]: value } : exercise) }));
-  const addExercise = () => setForm((current) => ({ ...current, exercises: [...current.exercises, { id: `EX-${Date.now()}-${current.exercises.length}`, name: '', muscle: 'Full Body', sets: 3, reps: '15', rest: '60 sec' }] }));
+  const addExercise = () => setForm((current) => ({ ...current, exercises: [...current.exercises, { id: `EX-${Date.now()}-${current.exercises.length}`, name: '', muscle: 'Full Body', day: 'Unscheduled', sets: 3, reps: '15', rest: '60 sec' }] }));
   const removeExercise = (index) => setForm((current) => ({ ...current, exercises: current.exercises.filter((_, i) => i !== index) }));
   const toggleMember = (id) => setForm((current) => ({ ...current, assignedMemberIds: current.assignedMemberIds.includes(id) ? current.assignedMemberIds.filter((item) => item !== id) : [...current.assignedMemberIds, id] }));
   const removeMuscleGroup = (exerciseIndex) => {
@@ -7893,7 +7898,7 @@ function WorkoutPlanModal({ members, onClose, onSave, plan, muscleGroups = [], o
         <div className="form-grid three">
           <FormField label="Reps"><input value={exercise.reps} onChange={(e) => updateExercise(index, 'reps', e.target.value)} placeholder="8-12" /></FormField>
           <FormField label="Rest"><input value={exercise.rest} onChange={(e) => updateExercise(index, 'rest', e.target.value)} placeholder="60 sec" /></FormField>
-          <div />
+          <FormField label="Workout day"><select value={exercise.day || 'Unscheduled'} onChange={(e) => updateExercise(index, 'day', e.target.value)}>{['Unscheduled','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map((day) => <option key={day} value={day}>{day}</option>)}</select></FormField>
         </div>
         {form.exercises.length > 1 && <button type="button" className="link-btn" style={{ color: '#d45d5d' }} onClick={() => removeExercise(index)}><Trash2 size={14} /> Remove exercise</button>}
       </div>)}
@@ -9091,7 +9096,22 @@ function openPrintWindow(title, html) {
   return true;
 }
 
-function printMemberFitnessMedical(member, settings, workoutPlans = []) {
+
+function openMemberPrintWindow(html) {
+  // Blob URL prevents Chrome from labelling this print document as about:blank.
+  // An empty title prevents Chrome from injecting a centred document title.
+  const fullHtml = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title></title></head><body>${html}<script>
+    window.addEventListener('load', () => setTimeout(() => { window.focus(); window.print(); }, 350));
+  </script></body></html>`;
+  const blob = new Blob([fullHtml], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const printWindow = window.open(url, '_blank');
+  if (!printWindow) { URL.revokeObjectURL(url); alert('Please allow pop-ups to print this document.'); return false; }
+  printWindow.addEventListener('load', () => setTimeout(() => URL.revokeObjectURL(url), 5000), { once: true });
+  return true;
+}
+
+function printMemberFitnessMedical(member, settings) {
   const gymName = settings?.gymName || 'Preface Fitness';
   const meta = readMemberMeta(member?.notes);
   const conditions = Array.isArray(meta.medicalConditions) ? meta.medicalConditions : (Array.isArray(member?.medicalConditions) ? member.medicalConditions : []);
@@ -9106,11 +9126,6 @@ function printMemberFitnessMedical(member, settings, workoutPlans = []) {
     ['Thighs', meta.thighs ?? member?.thighs], ['Calves', meta.calves ?? member?.calves],
     ['Neck', meta.neck ?? member?.neck]
   ];
-  const assignedPlans = (workoutPlans || []).filter((plan) => (plan.assignedMemberIds || []).some((id) => String(id) === String(member?.id)));
-  const assignedWorkoutHtml = assignedPlans.length ? `<table class="assigned-workout-table"><thead><tr><th>Workout plan</th><th>Exercise</th><th>Muscle group</th><th>Sets</th><th>Reps</th><th>Rest</th></tr></thead><tbody>${assignedPlans.flatMap((plan) => {
-    const exercises = (plan.exercises || []).length ? plan.exercises : [{ name: 'No exercises added', muscleGroup: '—', sets: '—', reps: '—', rest: '—' }];
-    return exercises.map((exercise, index) => `<tr><td>${index === 0 ? `<strong>${escapeHtml(plan.name || 'Workout plan')}</strong><div class="workout-plan-meta">${escapeHtml(plan.goal || 'General Fitness')} · ${escapeHtml(plan.level || 'Beginner')} · ${escapeHtml(plan.durationWeeks || 0)} weeks${plan.trainer ? ` · ${escapeHtml(plan.trainer)}` : ''}</div>${plan.notes ? `<div class="workout-plan-notes">${escapeHtml(plan.notes)}</div>` : ''}` : `<span class="workout-plan-repeat">${escapeHtml(plan.name || 'Workout plan')}</span>`}</td><td>${escapeHtml(exercise.name || 'Exercise')}</td><td>${escapeHtml(exercise.muscleGroup || exercise.muscle || 'Full Body')}</td><td>${escapeHtml(exercise.sets ?? 3)}</td><td>${escapeHtml(exercise.reps ?? 15)}</td><td>${escapeHtml(exercise.rest || '60 sec')}</td></tr>`);
-  }).join('')}</tbody></table>` : '<p class="empty">No workout plans have been assigned to this member.</p>';
   const measurementLabels = ['Chest','Shoulder','Biceps','Forearms','Waist','Hips','Thighs','Calves','Neck'];
   const measurementValues = rows.filter(([label, value]) => measurementLabels.includes(label) && value !== undefined && value !== null && String(value).trim() !== '');
   const measurementRows = measurementValues.map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)} cm</td></tr>`).join('');
@@ -9155,7 +9170,6 @@ function printMemberFitnessMedical(member, settings, workoutPlans = []) {
       ${meta.surgeryDetails ? `<p class="detail-note"><b>Surgery (last 5 years):</b> ${escapeHtml(meta.surgeryDetails)}</p>` : ''}
       ${meta.additionalMedicalNotes ? `<p class="detail-note"><b>Additional details:</b> ${escapeHtml(meta.additionalMedicalNotes)}</p>` : ''}
     </section>
-    <section class="panel workouts"><div class="panel-head"><span class="panel-icon teal">04</span><h2>Assigned workout plans &amp; exercises</h2></div>${assignedWorkoutHtml}</section>
     <footer><span class="footer-mark">PF</span><span>This profile records information reported by the member for gym safety and training awareness. It is not a medical diagnosis.</span><b>${escapeHtml(gymName.toUpperCase())}</b></footer>
   </div>
   <style>
@@ -9243,8 +9257,66 @@ function printMemberFitnessMedical(member, settings, workoutPlans = []) {
       *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
     }
   </style>`;
-  return openPrintWindow(`${gymName} - ${member?.name || 'Member'} Fitness and Medical Profile`, html);
+  return openMemberPrintWindow(html);
 }
+function printMemberWorkoutPlan(member, settings, workoutPlans = []) {
+  const gymName = settings?.gymName || 'Preface Fitness';
+  const days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday','Unscheduled'];
+  const plans = (workoutPlans || []).filter((plan) =>
+    (plan.assignedMemberIds || []).some((id) => String(id) === String(member?.id))
+  );
+  const esc = (value) => escapeHtml(value ?? '—');
+  const planSections = plans.map((plan) => {
+    const exercises = plan.exercises || [];
+    const orderedExercises = days.flatMap((day) =>
+      exercises.filter((exercise) => (exercise.day || 'Unscheduled') === day)
+        .map((exercise) => ({ ...exercise, printDay: day }))
+    );
+    const rows = orderedExercises.length
+      ? orderedExercises.map((exercise) => `<tr>
+          <td class="day-cell">${esc(exercise.printDay)}</td>
+          <td><strong>${esc(exercise.name || exercise.exercise || 'Exercise')}</strong></td>
+          <td>${esc(exercise.muscle || exercise.muscleGroup || 'Full Body')}</td>
+          <td>${esc(exercise.sets ?? 3)}</td><td>${esc(exercise.reps ?? 15)}</td>
+          <td>${esc(exercise.rest || '60 sec')}</td><td>${esc(exercise.notes || exercise.instructions || '—')}</td>
+        </tr>`).join('')
+      : '<tr><td colspan="7" class="empty">No exercises added to this plan.</td></tr>';
+    return `<section class="plan">
+      <div class="plan-heading"><div><h2>${esc(plan.name || 'Workout plan')}</h2>
+      <p>${esc(plan.goal || 'General Fitness')} · ${esc(plan.level || 'Beginner')} · ${esc(plan.durationWeeks || 0)} weeks${plan.trainer ? ` · Trainer: ${esc(plan.trainer)}` : ''}</p></div></div>
+      ${plan.notes ? `<p class="notes"><b>Plan notes:</b> ${esc(plan.notes)}</p>` : ''}
+      <table class="workout-table"><thead><tr><th>Day</th><th>Exercise Name</th><th>Muscle Group</th><th>Sets</th><th>Reps</th><th>Rest</th><th>Instructions</th></tr></thead><tbody>${rows}</tbody></table>
+    </section>`;
+  }).join('');
+  const html = `<main class="sheet">
+    <div class="print-document-label">WORKOUT PLAN</div>
+    <div class="topline"><div><h1>${esc(gymName)}</h1><p>Member weekly workout schedule</p></div><div class="doc-title">WORKOUT PLAN</div></div>
+    <section class="member"><h2>${esc(member?.name || 'Member')}</h2><span>Member ID: ${esc(member?.id)}</span><span>Phone: ${esc(member?.phone || '—')}</span></section>
+    ${planSections || '<p class="empty">No workout plans assigned to this member.</p>'}
+    <footer>${esc(gymName)} · Follow your trainer’s instructions and use safe form.</footer>
+  </main>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#eef3f9;font:12px/1.5 Arial,sans-serif;color:#172b46;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .sheet{max-width:1000px;margin:20px auto;background:#fff;padding:24px;border:1px solid #d8e4f1;border-radius:14px}
+    .print-document-label{display:none;text-align:right;font-size:8px;font-weight:800;letter-spacing:.12em;color:#526984;padding-bottom:6px}
+    .topline{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1b8e88;padding-bottom:14px}
+    .topline h1{margin:0;font-size:24px}.topline p{margin:4px 0;color:#64748b}.doc-title{text-align:right;font-size:19px;font-weight:900;letter-spacing:.08em;color:#1769b2}
+    .member{display:flex;gap:20px;align-items:center;flex-wrap:wrap;padding:14px;background:#f3f8ff;border-radius:10px;margin:14px 0}.member h2{margin:0;font-size:17px}.member span{color:#52647b}
+    .plan{margin:16px 0 22px;break-inside:avoid}.plan-heading{border-left:4px solid #7654e8;padding-left:10px;margin-bottom:9px}
+    .plan h2{margin:0;font-size:16px}.plan p{margin:4px 0;color:#64748b}
+    .workout-table{width:100%;border-collapse:collapse;table-layout:fixed}
+    .workout-table th,.workout-table td{padding:8px 7px;border:1px solid #dce5ef;text-align:left;vertical-align:top;overflow-wrap:anywhere}
+    .workout-table th{background:#eff4ff;font-size:9px;text-transform:uppercase;letter-spacing:.03em}.workout-table td{font-size:10px}
+    .workout-table th:nth-child(1){width:12%}.workout-table th:nth-child(2){width:20%}.workout-table th:nth-child(3){width:16%}
+    .workout-table th:nth-child(4),.workout-table th:nth-child(5),.workout-table th:nth-child(6){width:8%}.workout-table th:nth-child(7){width:28%}
+    .day-cell{font-weight:800;color:#5145cd;background:#faf8ff}.notes{background:#f8fafc;padding:9px;border-radius:8px}
+    .empty{padding:12px;color:#718096;text-align:center}footer{margin-top:24px;padding-top:12px;border-top:1px solid #dce5ef;color:#718096;text-align:center;font-size:10px}
+    @page{size:A4 landscape;margin:9mm}
+    @media print{body{background:#fff}.sheet{margin:0;max-width:none;border:0;padding:0}.print-document-label{display:block;text-align:right}.plan{break-inside:auto}tr{break-inside:avoid;page-break-inside:avoid}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+  </style>`;
+  return openMemberPrintWindow(html);
+}
+
 function printMemberIdCard(member, settings) {
   const gymName = settings?.gymName || 'Preface Fitness';
   const qrData = encodeURIComponent(`Preface Fitness | Member ID: ${member.id} | Name: ${member.name}`);
@@ -11696,6 +11768,13 @@ function MemberPortalPage() {
       setError(e?.message?.toLowerCase().includes('locked') ? 'Too many failed attempts. Please wait 15 minutes before trying again.' : 'Login failed. Check your registered mobile/member ID and 6-digit PIN. If the problem continues, contact the gym admin.');
     } finally { setBusy(false); }
   };
+  const printPortalWorkoutPlan = () => {
+    const days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday','Unscheduled'];
+    const esc = (value) => escapeHtml(value ?? '—');
+    const plans = (portalData?.workout_plans || []).map((plan) => `<section class="plan"><h2>${esc(plan.name || plan.title || 'Workout plan')}</h2><p>${esc(plan.goal || 'General Fitness')} · ${esc(plan.level || 'Beginner')} · ${esc(plan.durationWeeks || 0)} weeks</p>${plan.notes ? `<p>${esc(plan.notes)}</p>` : ''}${days.map((day) => { const exercises=(plan.exercises||[]).filter((ex)=>(ex.day||'Unscheduled')===day); return exercises.length ? `<h3>${day}</h3><table><thead><tr><th>Exercise</th><th>Muscle</th><th>Sets</th><th>Reps</th><th>Rest</th><th>Notes</th></tr></thead><tbody>${exercises.map((ex)=>`<tr><td>${esc(ex.name||ex.exercise||'—')}</td><td>${esc(ex.muscle||ex.muscleGroup||'Full Body')}</td><td>${esc(ex.sets??'—')}</td><td>${esc(ex.reps??'—')}</td><td>${esc(ex.rest||'—')}</td><td>${esc(ex.notes||ex.instructions||'—')}</td></tr>`).join('')}</tbody></table>` : ''; }).join('')}</section>`).join('');
+    const html = `<main class="sheet"><header><div><h1>Preface Fitness</h1><p>Member weekly workout schedule</p></div><strong>WORKOUT PLAN</strong></header><section class="member"><h2>${esc(portalData?.member?.name||'Member')}</h2><span>Member ID: ${esc(portalData?.member?.member_code||'—')}</span></section>${plans || '<p>No workout plans assigned.</p>'}</main><style>*{box-sizing:border-box}body{font:12px/1.5 Arial,sans-serif;color:#172b46;margin:0}.sheet{max-width:900px;margin:20px auto;padding:24px}header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1b8e88;padding-bottom:14px}header h1{margin:0;font-size:24px}header p{margin:4px 0;color:#64748b}header strong{color:#1769b2;font-size:18px}.member{display:flex;gap:20px;align-items:center;flex-wrap:wrap;padding:14px;background:#f3f8ff;margin:14px 0}.member h2{margin:0}.plan{margin:18px 0;break-inside:avoid}.plan h2{font-size:16px;margin:0}.plan h3{font-size:13px;color:#5b43c8;margin:12px 0 6px}.plan p{color:#64748b}table{width:100%;border-collapse:collapse}th,td{padding:8px;border:1px solid #dce5ef;text-align:left}th{background:#eff4ff}@page{size:A4;margin:10mm}@media print{.sheet{margin:0;padding:0}tr{break-inside:avoid}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style>`;
+    openPrintWindow('', html);
+  };
   const logout = () => { setPortalData(null); setIdentifier(''); setPin(''); setError(''); };
   const card = { background:'rgba(255,255,255,.94)', border:'1px solid rgba(210,220,240,.9)', borderRadius:20, padding:20, boxShadow:'0 14px 36px rgba(44,55,110,.08)' };
   const label = { display:'block', fontSize:13, fontWeight:700, color:'#34445c', marginBottom:7 };
@@ -11730,7 +11809,7 @@ function MemberPortalPage() {
         <section style={{...card,marginBottom:16}}><h2 style={{fontSize:19,margin:'0 0 14px',background:'linear-gradient(90deg,#4f46e5,#0891b2)',WebkitBackgroundClip:'text',color:'transparent'}}>✦ Membership details</h2><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:14,fontSize:14}}><div><div style={{color:'#7b8798',marginBottom:4}}>Registered phone</div><strong>{portalData.member.phone||'—'}</strong></div><div><div style={{color:'#7b8798',marginBottom:4}}>Membership start</div><strong>{portalData.member.start_date||'—'}</strong></div><div><div style={{color:'#7b8798',marginBottom:4}}>Membership amount</div><strong>{moneyText(portalData.member.membership_amount)}</strong></div><div><div style={{color:'#7b8798',marginBottom:4}}>Amount paid</div><strong>{moneyText(portalData.member.paid_amount)}</strong></div></div></section>
         <section style={{...card,marginBottom:16}}><h2 style={{fontSize:19,margin:'0 0 14px',background:'linear-gradient(90deg,#059669,#0d9488)',WebkitBackgroundClip:'text',color:'transparent'}}>✦ Body measurements</h2>{!measurementRows.length?<p style={{color:'#778398',fontSize:14,margin:0}}>No body measurements have been added yet.</p>:<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(130px,1fr))',gap:10}}>{measurementRows.map(([name,value,unit])=><div key={name} style={{padding:12,borderRadius:11,background:'#f7f9fc',border:'1px solid #edf0f5'}}><div style={{fontSize:12,color:'#7b8798',marginBottom:5}}>{name}</div><strong style={{fontSize:17}}>{value}{unit?' '+unit:''}</strong></div>)}</div>}</section>
         <section style={{...card,marginBottom:16}}><h2 style={{fontSize:19,margin:'0 0 14px',background:'linear-gradient(90deg,#ea580c,#db2777)',WebkitBackgroundClip:'text',color:'transparent'}}>✦ Medical conditions & notes</h2>{(memberMeta.medicalConditions||[]).length===0 && !memberMeta.medicalOther && !memberMeta.surgeryDetails && !memberMeta.additionalMedicalNotes ? <p style={{color:'#778398',fontSize:14,margin:0}}>No medical conditions or notes have been recorded.</p>:<div style={{display:'grid',gap:10}}>{(memberMeta.medicalConditions||[]).length>0&&<div><div style={{fontSize:12,color:'#7b8798',marginBottom:6}}>Reported conditions / injuries</div><div style={{display:'flex',gap:7,flexWrap:'wrap'}}>{memberMeta.medicalConditions.map((condition)=><span key={condition} style={{padding:'6px 9px',borderRadius:99,background:'#fff4e5',border:'1px solid #ffe0b2',fontSize:12,fontWeight:700,color:'#8a5200'}}>{condition}</span>)}</div></div>}{memberMeta.medicalOther&&<div><div style={{fontSize:12,color:'#7b8798'}}>Other condition details</div><div style={{fontSize:14,whiteSpace:'pre-wrap'}}>{memberMeta.medicalOther}</div></div>}{memberMeta.surgeryDetails&&<div><div style={{fontSize:12,color:'#7b8798'}}>Surgery details</div><div style={{fontSize:14,whiteSpace:'pre-wrap'}}>{memberMeta.surgeryDetails}</div></div>}{memberMeta.additionalMedicalNotes&&<div><div style={{fontSize:12,color:'#7b8798'}}>Additional medical notes</div><div style={{fontSize:14,whiteSpace:'pre-wrap'}}>{memberMeta.additionalMedicalNotes}</div></div>}</div>}</section>
-        <section style={{...card,marginBottom:16}}><h2 style={{fontSize:19,margin:'0 0 14px',background:'linear-gradient(90deg,#7c3aed,#2563eb)',WebkitBackgroundClip:'text',color:'transparent'}}>✦ Assigned workout plans</h2>{!portalData.workout_plans?.length?<p style={{color:'#778398',fontSize:14,margin:0}}>No workout plans have been assigned to your profile yet.</p>:<div style={{display:'grid',gap:12}}>{portalData.workout_plans.map((plan,index)=><div key={plan.id||index} style={{padding:14,borderRadius:12,border:'1px solid #e8edf4',background:'#fbfcff'}}><div style={{display:'flex',justifyContent:'space-between',gap:10,flexWrap:'wrap'}}><strong style={{fontSize:16}}>{plan.name||plan.title||`Workout Plan ${index+1}`}</strong>{plan.durationWeeks&&<span style={{fontSize:12,color:'#7654e8',fontWeight:800}}>{plan.durationWeeks} week(s)</span>}</div>{plan.description&&<p style={{fontSize:13,color:'#6e7c91',margin:'7px 0'}}>{plan.description}</p>}{plan.notes&&<p style={{fontSize:13,color:'#6e7c91',whiteSpace:'pre-wrap',margin:'7px 0'}}>{plan.notes}</p>}{Array.isArray(plan.exercises)&&plan.exercises.length>0&&<div style={{overflowX:'auto',marginTop:8}}><table style={{width:'100%',borderCollapse:'collapse',fontSize:13,minWidth:330}}><thead><tr>{['Exercise','Sets','Reps','Notes'].map(t=><th key={t} style={{textAlign:'left',padding:'8px 6px',borderBottom:'1px solid #e8edf4',color:'#758198'}}>{t}</th>)}</tr></thead><tbody>{plan.exercises.map((ex,i)=><tr key={ex.id||i}>{[ex.name||ex.exercise||'—',ex.sets??'—',ex.reps??'—',ex.notes||ex.instructions||'—'].map((v,j)=><td key={j} style={{padding:'9px 6px',borderBottom:'1px solid #f0f3f7'}}>{v}</td>)}</tr>)}</tbody></table></div>}</div>)}</div>}</section>
+        <section className="member-portal-workouts" style={{...card,marginBottom:16}}><div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,flexWrap:'wrap',marginBottom:14}}><h2 style={{fontSize:19,margin:0,background:'linear-gradient(90deg,#7c3aed,#2563eb)',WebkitBackgroundClip:'text',color:'transparent'}}>✦ Assigned weekly workout plans</h2><button className="member-portal-no-print" onClick={printPortalWorkoutPlan} style={{border:'1px solid #d8d1ff',borderRadius:10,padding:'8px 12px',background:'#f4f0ff',color:'#5b43c8',fontWeight:800,cursor:'pointer'}}>Print workout plan</button></div>{!portalData.workout_plans?.length?<p style={{color:'#778398',fontSize:14,margin:0}}>No workout plans have been assigned to your profile yet.</p>:<div style={{display:'grid',gap:12}}>{portalData.workout_plans.map((plan,index)=>{const days=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday','Unscheduled'];return <div key={plan.id||index} style={{padding:14,borderRadius:12,border:'1px solid #e8edf4',background:'#fbfcff'}}><div style={{display:'flex',justifyContent:'space-between',gap:10,flexWrap:'wrap'}}><strong style={{fontSize:16}}>{plan.name||plan.title||`Workout Plan ${index+1}`}</strong>{plan.durationWeeks&&<span style={{fontSize:12,color:'#7654e8',fontWeight:800}}>{plan.durationWeeks} week(s)</span>}</div>{plan.description&&<p style={{fontSize:13,color:'#6e7c91',margin:'7px 0'}}>{plan.description}</p>}{plan.notes&&<p style={{fontSize:13,color:'#6e7c91',whiteSpace:'pre-wrap',margin:'7px 0'}}>{plan.notes}</p>}{days.map(day=>{const exercises=(plan.exercises||[]).filter(ex=>(ex.day||'Unscheduled')===day);return exercises.length?<div key={day} style={{marginTop:12}}><h3 style={{fontSize:14,color:'#5b43c8',margin:'0 0 7px'}}>{day}</h3><div style={{overflowX:'auto'}}><table style={{width:'100%',borderCollapse:'collapse',fontSize:13,minWidth:330}}><thead><tr>{['Exercise','Muscle','Sets','Reps','Rest','Notes'].map(t=><th key={t} style={{textAlign:'left',padding:'8px 6px',borderBottom:'1px solid #e8edf4',color:'#758198'}}>{t}</th>)}</tr></thead><tbody>{exercises.map((ex,i)=><tr key={ex.id||i}>{[ex.name||ex.exercise||'—',ex.muscle||ex.muscleGroup||'Full Body',ex.sets??'—',ex.reps??'—',ex.rest||'—',ex.notes||ex.instructions||'—'].map((v,j)=><td key={j} style={{padding:'9px 6px',borderBottom:'1px solid #f0f3f7'}}>{v}</td>)}</tr>)}</tbody></table></div></div>:null;})}</div>})}</div>}</section>
         <section style={{...card,marginBottom:16}}><h2 style={{fontSize:19,margin:'0 0 14px',background:'linear-gradient(90deg,#16a34a,#0d9488)',WebkitBackgroundClip:'text',color:'transparent'}}>✦ Payment history</h2>{!portalData.payments?.length?<p style={{color:'#778398',fontSize:14,margin:0}}>No payment records available yet.</p>:<div style={{overflowX:'auto'}}><table style={{width:'100%',borderCollapse:'collapse',fontSize:13,minWidth:440}}><thead><tr>{['Date','Type','Mode','Amount','Receipt'].map(t=><th key={t} style={{textAlign:'left',padding:'10px 8px',borderBottom:'1px solid #e8edf4',color:'#758198'}}>{t}</th>)}</tr></thead><tbody>{portalData.payments.map((p,i)=><tr key={p.id||i}>{[p.payment_date||p.date||'—',p.payment_type||'Payment',p.payment_mode||'—',moneyText(p.amount),p.invoice_number||'—'].map((v,j)=><td key={j} style={{padding:'11px 8px',borderBottom:'1px solid #f0f3f7',whiteSpace:'nowrap'}}>{v}</td>)}</tr>)}</tbody></table></div>}</section>
         <section style={card}><h2 style={{fontSize:19,margin:'0 0 14px',background:'linear-gradient(90deg,#d97706,#db2777)',WebkitBackgroundClip:'text',color:'transparent'}}>✦ Recent attendance</h2>{!portalData.attendance?.length?<p style={{color:'#778398',fontSize:14,margin:0}}>No attendance records available yet.</p>:<div style={{display:'grid',gap:9}}>{portalData.attendance.map((a,i)=><div key={a.id||i} style={{display:'flex',justifyContent:'space-between',gap:12,padding:'11px 12px',borderRadius:10,background:'#f7f9fc',fontSize:13}}><strong>{a.date||a.attendance_date||a.check_in_date||a.created_at?.slice(0,10)||'Attendance'}</strong><span style={{color:'#718096'}}>{a.source||a.status||'Checked in'}</span></div>)}</div>}</section>
       </>}
