@@ -2166,7 +2166,13 @@ function App() {
   }, []);
   const [data, setData] = useState(seed);
   const [dbReady, setDbReady] = useState(false);
-  const [active, setActive] = useState('Dashboard');
+  const [active, setActive] = useState(() => {
+    try {
+      return window.localStorage.getItem('preface-fitness-active-page') || 'Dashboard';
+    } catch {
+      return 'Dashboard';
+    }
+  });
   const [query, setQuery] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [modal, setModal] = useState(null);
@@ -2755,11 +2761,53 @@ function App() {
     }
   };
 
-  const addLead = (lead) => {
-    const id = `L-${101 + data.leads.length}`;
-    setData((d) => ({ ...d, leads: [{ ...lead, id, stage: 'New' }, ...d.leads] }));
-    setModal(null);
-    setToast('Lead added successfully');
+  const addLead = async (lead) => {
+    const id = `L-${Date.now()}`;
+    const clean = {
+      ...lead,
+      id,
+      name: String(lead.name || '').trim(),
+      phone: String(lead.phone || '').trim(),
+      email: String(lead.email || '').trim(),
+      source: lead.source || 'Walk-in',
+      stage: lead.stage || 'New',
+      followUp: lead.followUp || today,
+      interestedPlan: lead.interestedPlan || '',
+      notes: lead.notes || '',
+      lastContact: lead.lastContact || today,
+    };
+
+    // Persist to the gym-scoped Supabase leads table before showing success.
+    // This prevents the next cloud refresh/reload from replacing a local-only lead.
+    if (isAuthenticated && cloudStatus !== 'connected') {
+      setToast('Cloud is not connected. Lead was not added; please retry after connection is restored.');
+      return;
+    }
+
+    try {
+      if (isAuthenticated) {
+        const row = await insertRecord('leads', {
+          legacy_id: id,
+          name: clean.name,
+          phone: clean.phone,
+          email: clean.email,
+          source: clean.source,
+          stage: clean.stage,
+          follow_up_date: clean.followUp,
+          interested_plan: clean.interestedPlan,
+          notes: clean.notes,
+          last_contact: clean.lastContact,
+        });
+        clean.cloudId = row.id;
+        clean.id = row.legacy_id || id;
+      }
+      setData((current) => ({ ...current, leads: [clean, ...(current.leads || [])] }));
+      setModal(null);
+      setToast('Lead added and saved successfully');
+    } catch (error) {
+      console.error('Supabase lead insert failed:', error);
+      setToast(error?.message || 'Unable to save lead to Supabase');
+    }
   };
 
   const addPayment = async (payment) => {
@@ -2989,6 +3037,26 @@ function App() {
     } catch (error) {
       console.error('Website enquiry status update failed:', error);
       setToast(error?.message || 'Unable to update enquiry status');
+    }
+  };
+
+  const deleteWebsiteEnquiry = async (enquiry) => {
+    if (!enquiry || !window.confirm(`Delete enquiry from ${enquiry.memberName || 'this customer'}? This cannot be undone.`)) return;
+    try {
+      if (isAuthenticated) {
+        if (!enquiry.cloudId) throw new Error('This enquiry is not linked to a Supabase record, so it cannot be safely deleted. Refresh and try again.');
+        await deleteRecord('feedbacks', enquiry.cloudId);
+      }
+      const deletedId = String(enquiry.cloudId || enquiry.id);
+      setData((current) => ({
+        ...current,
+        websiteEnquiries: (current.websiteEnquiries || []).filter((item) => String(item.cloudId || item.id) !== deletedId),
+      }));
+      if (seenWebsiteEnquiriesRef.current instanceof Set) seenWebsiteEnquiriesRef.current.delete(deletedId);
+      setToast('Website enquiry deleted successfully');
+    } catch (error) {
+      console.error('Website enquiry delete failed:', error);
+      setToast(error?.message || 'Unable to delete website enquiry');
     }
   };
 
@@ -3820,12 +3888,28 @@ function App() {
     }
   };
 
-  const updateLeadStage = (id, stage) => {
-    setData((d) => ({ ...d, leads: d.leads.map((l) => l.id === id ? { ...l, stage } : l) }));
+  const updateLeadStage = async (id, stage) => {
+    const lead = (data.leads || []).find((item) => String(item.id) === String(id));
+    if (!lead) return;
+    if (isAuthenticated && cloudStatus !== 'connected') {
+      setToast('Cloud is not connected. Lead stage was not changed; please retry.');
+      return;
+    }
+    try {
+      if (isAuthenticated) {
+        if (!lead.cloudId) throw new Error('This lead is not linked to Supabase. Please refresh the Leads page and try again.');
+        await updateRecord('leads', lead.cloudId, { stage });
+      }
+      setData((current) => ({ ...current, leads: (current.leads || []).map((item) => item.id === id ? { ...item, stage } : item) }));
+      setToast('Lead stage updated and saved');
+    } catch (error) {
+      console.error('Supabase lead stage update failed:', error);
+      setToast(error?.message || 'Unable to save lead stage');
+    }
   };
 
 
-  const updateLeadDetails = (lead) => {
+  const updateLeadDetails = async (lead) => {
     const clean = {
       ...lead,
       phone: lead.phone || '',
@@ -3837,13 +3921,35 @@ function App() {
       interestedPlan: lead.interestedPlan || '',
       lastContact: lead.lastContact || today,
     };
-
-    setData((d) => ({
-      ...d,
-      leads: d.leads.map((item) => item.id === clean.id ? clean : item),
-    }));
-    setModal(null);
-    setToast('Lead updated');
+    if (isAuthenticated && cloudStatus !== 'connected') {
+      setToast('Cloud is not connected. Lead changes were not saved; please retry.');
+      return;
+    }
+    try {
+      if (isAuthenticated) {
+        if (!clean.cloudId) throw new Error('This lead is not linked to Supabase. Please refresh the Leads page and try again.');
+        await updateRecord('leads', clean.cloudId, {
+          name: clean.name,
+          phone: clean.phone,
+          email: clean.email,
+          source: clean.source,
+          stage: clean.stage,
+          follow_up_date: clean.followUp,
+          interested_plan: clean.interestedPlan,
+          notes: clean.notes,
+          last_contact: clean.lastContact,
+        });
+      }
+      setData((current) => ({
+        ...current,
+        leads: (current.leads || []).map((item) => item.id === clean.id ? clean : item),
+      }));
+      setModal(null);
+      setToast('Lead updated and saved successfully');
+    } catch (error) {
+      console.error('Supabase lead update failed:', error);
+      setToast(error?.message || 'Unable to save lead changes');
+    }
   };
 
   const deleteLead = async (id) => {
@@ -4072,6 +4178,38 @@ function App() {
     setQuery('');
   };
 
+  // Remember the last page so a browser reload restores the same section.
+  // The existing permission guard below still redirects staff away from
+  // sections they are not allowed to access.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    try {
+      window.localStorage.setItem('preface-fitness-active-page', active || 'Dashboard');
+    } catch (error) {
+      console.warn('Could not remember the last opened page:', error);
+    }
+  }, [active, isAuthenticated]);
+
+  // Every section should start at the top when opened, including after reload.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      if ('scrollRestoration' in window.history) {
+        window.history.scrollRestoration = 'manual';
+      }
+    } catch {}
+
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+
+    // Some layouts may scroll inside the app's main/content containers.
+    const main = document.querySelector('.vibrant-app-shell .main');
+    const content = document.querySelector('.vibrant-app-shell .content');
+    if (main) main.scrollTop = 0;
+    if (content) content.scrollTop = 0;
+  }, [active]);
+
   useEffect(() => {
     if (!isAuthenticated || isOwner) return;
 
@@ -4093,6 +4231,7 @@ function App() {
     }
 
     setIsAuthenticated(false);
+    try { window.localStorage.removeItem('preface-fitness-active-page'); } catch {}
     setActive('Dashboard');
     setSidebarOpen(false);
     setModal(null);
@@ -4236,7 +4375,7 @@ function App() {
           {active === 'Dashboard' && <Dashboard {...{ activeMembers, expiringMembers, overdue, revenue, data, navigate, setModal, markAttendance, isReadOnlyStaff }} />}
           {active === 'Members' && <MembersPage members={data.members} query={query} setQuery={setQuery} setModal={setModal} markAttendance={markAttendance} deleteMember={deleteMember} settings={data.settings || {}} payments={data.payments || []} ptSessions={data.ptSessions || []} trainers={data.trainers || []} workoutPlans={data.workoutPlans || []} dietPlans={data.dietPlans || []} />}
           {active === 'Leads' && <LeadsPage leads={data.leads} members={data.members} setModal={setModal} updateLeadStage={updateLeadStage} updateLeadDetails={updateLeadDetails} deleteLead={deleteLead} convertLeadToMember={convertLeadToMember} />}
-          {active === 'Website Enquiries' && <WebsiteEnquiriesPage enquiries={data.websiteEnquiries || []} onUpdateStatus={updateWebsiteEnquiryStatus} />}
+          {active === 'Website Enquiries' && <WebsiteEnquiriesPage enquiries={data.websiteEnquiries || []} onUpdateStatus={updateWebsiteEnquiryStatus} onDelete={deleteWebsiteEnquiry} />}
           {active === 'Memberships' && <MembershipsPage members={data.members} data={data} setModal={setModal} planPrices={planPrices} setData={setData} setToast={setToast} onRenewMembership={renewMembership} />}
           {active === 'Attendance' && <AttendancePage attendance={data.attendance} members={data.members} markAttendance={markAttendance} isOwner={isOwner} removeAttendanceRecord={removeAttendanceRecord} />}
           {active === 'Payments' && <PaymentsPage payments={data.payments} overdue={overdue} setModal={setModal} deletePayment={deletePayment} members={data.members} settings={data.settings || {}} />}
@@ -4805,7 +4944,7 @@ function parseWebsiteEnquiry(item) {
   };
 }
 
-function WebsiteEnquiriesPage({ enquiries: websiteEnquiries = [], onUpdateStatus }) {
+function WebsiteEnquiriesPage({ enquiries: websiteEnquiries = [], onUpdateStatus, onDelete }) {
   const [search, setSearch] = useState('');
   const enquiries = websiteEnquiries
     .map((item) => ({ ...item, details: parseWebsiteEnquiry(item) }))
@@ -4840,7 +4979,7 @@ function WebsiteEnquiriesPage({ enquiries: websiteEnquiries = [], onUpdateStatus
               const digits = item.details.phone.replace(/\D/g, '');
               return (
                 <article className="website-enquiry-card" key={item.cloudId || item.id}>
-                  <div className="website-enquiry-card-head"><div><strong>{item.details.name}</strong><span>{dateLabel}</span></div><label className="website-enquiry-status-control"><span>Status</span><select value={item.status || 'Open'} onChange={(event) => onUpdateStatus?.(item, event.target.value)}><option>Open</option><option>In progress</option><option>Resolved</option></select></label></div>
+                  <div className="website-enquiry-card-head"><div><strong>{item.details.name}</strong><span>{dateLabel}</span></div><div className="website-enquiry-card-actions"><label className="website-enquiry-status-control"><span>Status</span><select value={item.status || 'Open'} onChange={(event) => onUpdateStatus?.(item, event.target.value)}><option>Open</option><option>In progress</option><option>Resolved</option></select></label><button type="button" className="website-enquiry-delete" title="Delete enquiry" aria-label={`Delete enquiry from ${item.details.name}`} onClick={() => onDelete?.(item)}><X size={15}/></button></div></div>
                   <div className="website-enquiry-contact">
                     {item.details.phone && <a href={`tel:${item.details.phone}`}><Phone size={15} />{item.details.phone}</a>}
                     {item.details.email && <a href={`mailto:${item.details.email}`}><Mail size={15} />{item.details.email}</a>}
@@ -4854,7 +4993,7 @@ function WebsiteEnquiriesPage({ enquiries: websiteEnquiries = [], onUpdateStatus
           </div>
         )}
       </section>
-      <style>{`.website-enquiries-page .website-enquiry-list{display:grid;gap:12px;padding:18px}.website-enquiries-page .website-enquiry-card{border:1px solid #e6e9f2;border-radius:16px;padding:17px;background:linear-gradient(135deg,#fff,#faf9ff);box-shadow:0 5px 18px rgba(49,43,96,.045)}.website-enquiries-page .website-enquiry-card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.website-enquiries-page .website-enquiry-card-head strong{display:block;color:#1d2940;font-size:16px;font-weight:850}.website-enquiries-page .website-enquiry-card-head span{display:block;margin-top:4px;color:#7b879a;font-size:11px}.website-enquiries-page .website-enquiry-status-control{display:flex;align-items:center;gap:7px;color:#7b879a;font-size:11px;font-weight:750}.website-enquiries-page .website-enquiry-status-control select{border:1px solid #e2e5ef;border-radius:9px;padding:7px 9px;background:#fff;color:#5744bc;font-size:11px;font-weight:800}.website-enquiries-page .website-enquiry-contact{display:flex;flex-wrap:wrap;gap:8px;margin-top:13px}.website-enquiries-page .website-enquiry-contact a{display:inline-flex;align-items:center;gap:6px;padding:8px 10px;border:1px solid #e5e8f1;border-radius:9px;background:#fff;color:#5542bd;text-decoration:none;font-size:12px;font-weight:750}.website-enquiries-page .website-enquiry-interest{margin:13px 0 0;color:#354158;font-size:13px}.website-enquiries-page .website-enquiry-message-text{margin:10px 0 0;padding:11px 12px;border-radius:10px;background:#f4f5fa;color:#4b566b;font-size:13px;white-space:pre-wrap;line-height:1.6}@media(max-width:650px){.website-enquiries-page .website-enquiry-card-head{flex-direction:column}.website-enquiries-page .panel-header{align-items:stretch;flex-direction:column}}`}</style>
+      <style>{`.website-enquiries-page .website-enquiry-list{display:grid;gap:12px;padding:18px}.website-enquiries-page .website-enquiry-card{border:1px solid #e6e9f2;border-radius:16px;padding:17px;background:linear-gradient(135deg,#fff,#faf9ff);box-shadow:0 5px 18px rgba(49,43,96,.045)}.website-enquiries-page .website-enquiry-card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.website-enquiries-page .website-enquiry-card-actions{display:flex;align-items:center;gap:9px}.website-enquiries-page .website-enquiry-delete{width:30px;height:30px;min-height:30px!important;display:inline-flex;align-items:center;justify-content:center;border:1px solid #f1cbd2;border-radius:9px;background:#fff5f6;color:#d0445b;cursor:pointer;padding:0}.website-enquiries-page .website-enquiry-delete:hover{background:#ffe6ea;border-color:#e99aa8;transform:translateY(-1px)}.website-enquiries-page .website-enquiry-card-head strong{display:block;color:#1d2940;font-size:16px;font-weight:850}.website-enquiries-page .website-enquiry-card-head span{display:block;margin-top:4px;color:#7b879a;font-size:11px}.website-enquiries-page .website-enquiry-status-control{display:flex;align-items:center;gap:7px;color:#7b879a;font-size:11px;font-weight:750}.website-enquiries-page .website-enquiry-status-control select{border:1px solid #e2e5ef;border-radius:9px;padding:7px 9px;background:#fff;color:#5744bc;font-size:11px;font-weight:800}.website-enquiries-page .website-enquiry-contact{display:flex;flex-wrap:wrap;gap:8px;margin-top:13px}.website-enquiries-page .website-enquiry-contact a{display:inline-flex;align-items:center;gap:6px;padding:8px 10px;border:1px solid #e5e8f1;border-radius:9px;background:#fff;color:#5542bd;text-decoration:none;font-size:12px;font-weight:750}.website-enquiries-page .website-enquiry-interest{margin:13px 0 0;color:#354158;font-size:13px}.website-enquiries-page .website-enquiry-message-text{margin:10px 0 0;padding:11px 12px;border-radius:10px;background:#f4f5fa;color:#4b566b;font-size:13px;white-space:pre-wrap;line-height:1.6}@media(max-width:650px){.website-enquiries-page .website-enquiry-card-head{flex-direction:column}.website-enquiries-page .website-enquiry-card-actions{width:100%;justify-content:space-between}.website-enquiries-page .panel-header{align-items:stretch;flex-direction:column}}`}</style>
     </div>
   );
 }
@@ -6191,8 +6330,8 @@ function printMemberDietPlans(member, settings, plans = []) {
 function MembersPage({ members, query, setQuery, setModal, markAttendance, deleteMember, settings, payments = [], ptSessions = [], trainers = [], workoutPlans = [], dietPlans = [] }) {
   const [statusFilter, setStatusFilter] = useState('All');
   const [selectedMember, setSelectedMember] = useState(null);
-  const [workoutPlansExpanded, setWorkoutPlansExpanded] = useState(true);
-  const [dietPlansExpanded, setDietPlansExpanded] = useState(true);
+  const [workoutPlansExpanded, setWorkoutPlansExpanded] = useState(false);
+  const [dietPlansExpanded, setDietPlansExpanded] = useState(false);
 
   const filtered = members.filter((member) => {
     const q = query.toLowerCase();
