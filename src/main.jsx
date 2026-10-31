@@ -95,18 +95,22 @@ function printPTMasterRecord({ member, sessions, trainers, settings = {} }) {
   }).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.time || '').localeCompare(String(a.time || '')));
   const packages = [...(sessions || [])].sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')));
   const completed = rows.length;
+  const assigned = packages.reduce((n,p)=>n+Number(p.sessionsTotal||1),0);
+  const remaining = packages.reduce((n,p)=>n+Math.max(0,Number(p.sessionsTotal||1)-Number(p.sessionsCompleted||0)),0);
   const money = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
   const esc = (v) => String(v ?? '—').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const gymName = settings?.gymName || 'Preface Fitness';
   const win = window.open('', '_blank', 'width=1000,height=800');
   if (!win) { alert('Please allow pop-ups to print the PT record.'); return; }
   win.document.write(`<!doctype html><html><head><title>PT Master Record - ${esc(member?.name || 'Member')}</title><meta charset="utf-8"><style>
-    *{box-sizing:border-box}body{font:13px Arial,sans-serif;color:#17243b;margin:28px}header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #6d4aff;padding-bottom:16px;margin-bottom:18px}h1{margin:0 0 5px;font-size:25px}h2{font-size:17px;margin:24px 0 10px}.muted{color:#64748b}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:16px 0}.metric{padding:12px;border:1px solid #e2e8f0;border-radius:9px}.metric span{display:block;color:#64748b;font-size:11px}.metric strong{display:block;font-size:19px;margin-top:5px}table{width:100%;border-collapse:collapse;margin-top:10px}th,td{padding:9px 8px;border:1px solid #dbe2ec;text-align:left;vertical-align:top}th{background:#f2efff;font-size:11px;text-transform:uppercase;letter-spacing:.03em}.notes{max-width:240px;white-space:pre-wrap;word-break:break-word}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:80px;margin-top:60px}.signatures div{border-top:1px solid #64748b;padding-top:8px;text-align:center}.print-btn{background:#6d4aff;color:#fff;border:0;padding:10px 16px;border-radius:7px;cursor:pointer}@media print{body{margin:12mm}.print-btn{display:none}tr{break-inside:avoid}header{break-after:avoid}}
-  </style></head><body><header><div><h1>${esc(settings?.gymName || 'Preface Fitness')}</h1><div class="muted">Personal Training · Client Master Record</div></div><button class="print-btn" onclick="window.print()">Print / Save PDF</button></header>
-  <h2>Client details</h2><div><strong>${esc(member?.name)}</strong> &nbsp; · &nbsp; Member ID: ${esc(member?.id)} &nbsp; · &nbsp; Phone: ${esc(member?.phone || '—')}</div>
-  <div class="summary"><div class="metric"><span>Completed sessions</span><strong>${completed}</strong></div><div class="metric"><span>PT packages</span><strong>${packages.length}</strong></div><div class="metric"><span>Sessions assigned</span><strong>${packages.reduce((n,p)=>n+Number(p.sessionsTotal||1),0)}</strong></div><div class="metric"><span>Sessions remaining</span><strong>${packages.reduce((n,p)=>n+Math.max(0,Number(p.sessionsTotal||1)-Number(p.sessionsCompleted||0)),0)}</strong></div></div>
-  <h2>Session history</h2>${rows.length ? `<table><thead><tr><th>#</th><th>Date</th><th>Time</th><th>Trainer</th><th>Package</th><th>Session note</th><th>Recorded by</th></tr></thead><tbody>${rows.map((r,i)=>`<tr><td>${rows.length-i}</td><td>${esc(r.date)}</td><td>${esc(r.time || '—')}</td><td>${esc(r.trainerName)}</td><td>${esc(r.planName)}</td><td class="notes">${esc(r.notes || '—')}</td><td>${esc(r.recordedBy || 'Staff')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">No individual completed-session history has been recorded yet. Older package counts may exist without per-session dates.</p>'}
-  <h2>PT packages</h2><table><thead><tr><th>Package start</th><th>Plan</th><th>Trainer</th><th>Completed / Total</th><th>Expiry</th><th>Fee</th><th>Status</th></tr></thead><tbody>${packages.map(p=>`<tr><td>${esc(p.date)}</td><td>${esc(p.planName||p.type||'Personal Training')}</td><td>${esc(trainers.find(t=>t.id===p.trainerId)?.name||p.trainer||'—')}</td><td>${Number(p.sessionsCompleted||0)} / ${Number(p.sessionsTotal||1)}</td><td>${esc(p.expiryDate||'—')}</td><td>${money(p.fee)}</td><td>${esc(p.status)}</td></tr>`).join('')}</tbody></table>
-  <div class="signatures"><div>Client signature</div><div>Trainer / Gym representative</div></div><script>window.onload=()=>{};</script></body></html>`);
+    *{box-sizing:border-box}body{font:13px Arial,sans-serif;color:#17243b;margin:22px;background:#f4f8fc}.page{max-width:1100px;margin:0 auto;background:#fff;border:1px solid #dbe7f2;border-radius:16px;overflow:hidden}.hero{position:relative;overflow:hidden;display:flex;justify-content:space-between;align-items:center;gap:20px;padding:24px 28px;color:#fff;background:linear-gradient(112deg,#123553 0%,#1c5275 58%,#087f78 100%);border-bottom:5px solid #20b7a5}.hero:before,.hero:after{content:"";position:absolute;border:1px solid rgba(255,255,255,.13);border-radius:50%;width:220px;height:220px;right:100px;top:-115px}.hero:after{width:160px;height:160px;right:130px;top:-85px}.hero-copy{position:relative;z-index:1}.eyebrow{font-size:10px;font-weight:900;letter-spacing:.22em;color:#83eee0;text-transform:uppercase}.hero h1{margin:7px 0 5px;font-size:27px;letter-spacing:.01em}.hero-sub{font-size:11px;font-weight:800;letter-spacing:.16em;color:#d3e9f5;text-transform:uppercase}.hero-desc{margin-top:12px;color:#dceaf4;font-size:12px}.hero-art{position:relative;z-index:1;width:210px;height:84px;flex:0 0 210px}.toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 22px;background:#f5f9fd;border-bottom:1px solid #e2ebf4}.toolbar strong{color:#1769a5;font-size:12px;letter-spacing:.12em}.print-btn{background:#1769b2;color:#fff;border:0;padding:10px 16px;border-radius:8px;cursor:pointer;font-weight:800}.content{padding:18px 22px 24px}.section-title{display:flex;align-items:center;gap:9px;color:#1769a5;font-size:15px;font-weight:900;margin:18px 0 9px}.section-title:before{content:"";width:5px;height:18px;border-radius:5px;background:#19a99b}.client{display:flex;flex-wrap:wrap;gap:8px 22px;padding:12px 14px;border:1px solid #dce8f3;border-radius:10px;background:#f8fbfe}.client strong{color:#173b5d}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0}.metric{padding:12px;border:1px solid #dce8f3;border-radius:10px;background:linear-gradient(145deg,#fff,#f5faff);border-top:3px solid #159b91}.metric span{display:block;color:#647b91;font-size:10px;font-weight:700}.metric strong{display:block;font-size:20px;margin-top:5px;color:#173b5d}.muted{color:#647b91}table{width:100%;border-collapse:collapse;margin-top:8px;font-size:11px}th,td{padding:8px 7px;border:1px solid #dbe5ef;text-align:left;vertical-align:top}th{background:#e8f3fc;color:#20577e;font-size:9px;text-transform:uppercase;letter-spacing:.06em}tbody tr:nth-child(even){background:#f7fafc}.notes{max-width:240px;white-space:pre-wrap;word-break:break-word}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:80px;margin:52px 30px 10px}.signatures div{border-top:1px solid #8093a7;padding-top:8px;text-align:center;color:#526b82;font-size:11px}.footer{display:flex;justify-content:space-between;padding:12px 22px;background:#f3f8fc;color:#647b91;font-size:9px;font-weight:800;letter-spacing:.08em;border-top:1px solid #e1eaf3}@media print{body{margin:0;background:#fff}.page{max-width:none;border-radius:0;border:0}.print-btn{display:none}.hero{break-after:avoid}.summary,.metric,table,tr{break-inside:avoid} .content{padding:14px 18px}.signatures{margin-top:38px}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}
+  </style></head><body><main class="page"><header class="hero"><div class="hero-copy"><div class="eyebrow">Personal training record</div><h1>${esc(gymName)}</h1><div class="hero-sub">PT Progress & Session Report</div><div class="hero-desc">A clear record of coaching sessions, assigned packages and training progress.</div></div><svg class="hero-art" viewBox="0 0 240 100" role="img" aria-label="Dumbbell illustration"><defs><linearGradient id="bar" x1="0" x2="1"><stop stop-color="#b9fff2"/><stop offset="1" stop-color="#37c7ba"/></linearGradient></defs><g fill="none" stroke="url(#bar)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><path d="M54 50H186"/><path d="M45 27V73M30 34V66M195 27V73M210 34V66"/><path d="M45 50H30M195 50H210"/></g><circle cx="120" cy="50" r="44" fill="none" stroke="rgba(150,255,239,.25)" stroke-width="1.5"/><circle cx="120" cy="50" r="34" fill="none" stroke="rgba(150,255,239,.14)" stroke-width="1"/></svg></header>
+  <div class="toolbar"><strong>CLIENT TRAINING OVERVIEW</strong><button class="print-btn" onclick="window.print()">Print / Save PDF</button></div><section class="content">
+  <div class="client"><span><strong>Member:</strong> ${esc(member?.name)}</span><span><strong>Member ID:</strong> ${esc(member?.id)}</span><span><strong>Phone:</strong> ${esc(member?.phone || '—')}</span></div>
+  <div class="summary"><div class="metric"><span>Completed sessions</span><strong>${completed}</strong></div><div class="metric"><span>PT packages</span><strong>${packages.length}</strong></div><div class="metric"><span>Sessions assigned</span><strong>${assigned}</strong></div><div class="metric"><span>Sessions remaining</span><strong>${remaining}</strong></div></div>
+  <h2 class="section-title">Completed session history</h2>${rows.length ? `<table><thead><tr><th>#</th><th>Date</th><th>Time</th><th>Trainer</th><th>Package</th><th>Session note</th><th>Recorded by</th></tr></thead><tbody>${rows.map((r,i)=>`<tr><td>${rows.length-i}</td><td>${esc(r.date)}</td><td>${esc(r.time || '—')}</td><td>${esc(r.trainerName)}</td><td>${esc(r.planName)}</td><td class="notes">${esc(r.notes || '—')}</td><td>${esc(r.recordedBy || 'Staff')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">No individual completed-session history has been recorded yet. Older package counts may exist without per-session dates.</p>'}
+  <h2 class="section-title">Assigned PT packages</h2><table><thead><tr><th>Package start</th><th>Plan</th><th>Trainer</th><th>Completed / Total</th><th>Expiry</th><th>Fee</th><th>Status</th></tr></thead><tbody>${packages.map(p=>`<tr><td>${esc(p.date)}</td><td>${esc(p.planName||p.type||'Personal Training')}</td><td>${esc(trainers.find(t=>t.id===p.trainerId)?.name||p.trainer||'—')}</td><td>${Number(p.sessionsCompleted||0)} / ${Number(p.sessionsTotal||1)}</td><td>${esc(p.expiryDate||'—')}</td><td>${money(p.fee)}</td><td>${esc(p.status)}</td></tr>`).join('')}</tbody></table>
+  <div class="signatures"><div>Client signature</div><div>Trainer / Gym representative</div></div></section><footer class="footer"><span>${esc(gymName.toUpperCase())} · PERSONAL TRAINING</span><span>CONSISTENCY · COACHING · PROGRESS</span></footer></main></body></html>`);
   win.document.close();
 }
 
@@ -2141,6 +2145,24 @@ function useGentleInputAssist() {
 
 function App() {
   useGentleInputAssist();
+  useEffect(() => {
+    const handleEscape = (event) => {
+      if (event.key !== 'Escape') return;
+      const overlays = Array.from(document.querySelectorAll('.modal-backdrop')).filter((node) => {
+        const rect = node.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && getComputedStyle(node).visibility !== 'hidden';
+      });
+      const topOverlay = overlays[overlays.length - 1];
+      if (!topOverlay) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const closeButton = topOverlay.querySelector('.modal-header button[aria-label*="close" i], .modal-header button[title*="close" i], .modal-header .icon-btn');
+      if (closeButton) closeButton.click();
+      else topOverlay.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    };
+    document.addEventListener('keydown', handleEscape, true);
+    return () => document.removeEventListener('keydown', handleEscape, true);
+  }, []);
   const [data, setData] = useState(seed);
   const [dbReady, setDbReady] = useState(false);
   const [active, setActive] = useState('Dashboard');
@@ -5684,6 +5706,34 @@ function TrainersPTPage({
   );
 }
 
+function capitalizeFieldWords(value) {
+  return String(value || '').trim().replace(/(^|[\s'-])([\p{L}])/gu, (_, separator, letter) => separator + letter.toLocaleUpperCase());
+}
+
+function SearchableMemberPicker({ members = [], value, onChange, placeholder = 'Search member by name or ID...' }) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  const selected = members.find((member) => member.id === value);
+  const filtered = members.filter((member) => [member.name, member.id, member.phone, member.plan].filter(Boolean).join(' ').toLowerCase().includes(query.trim().toLowerCase()));
+  useEffect(() => {
+    const closeOutside = (event) => { if (rootRef.current && !rootRef.current.contains(event.target)) setOpen(false); };
+    document.addEventListener('mousedown', closeOutside);
+    return () => document.removeEventListener('mousedown', closeOutside);
+  }, []);
+  return <div ref={rootRef} style={{ position: 'relative', width: '100%' }}>
+    <button type="button" className="professional-field" onClick={() => { setQuery(''); setOpen((current) => !current); }} style={{ width: '100%', minHeight: 46, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, textAlign: 'left', background: '#fff', border: '1px solid #dbe3ef', borderRadius: 10, padding: '10px 12px', color: selected ? '#243b53' : '#94a3b8' }}>
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selected ? `${selected.name} (${selected.id})` : 'Select member'}</span><ChevronDown size={16}/>
+    </button>
+    {open && <div style={{ position: 'absolute', zIndex: 10020, top: 'calc(100% + 5px)', left: 0, right: 0, background: '#fff', border: '1px solid #dbe3ef', borderRadius: 12, boxShadow: '0 14px 35px rgba(25,45,75,.18)', padding: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, border: '1px solid #dbe3ef', borderRadius: 8, padding: '0 9px', marginBottom: 7 }}><Search size={15} color="#718096"/><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setOpen(false); } }} placeholder={placeholder} style={{ border: 0, outline: 0, width: '100%', minHeight: 38, background: 'transparent' }}/></div>
+      <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+        {filtered.length ? filtered.map((member) => <button key={member.id} type="button" onClick={() => { onChange(member.id); setOpen(false); setQuery(''); }} style={{ display: 'block', width: '100%', border: 0, borderRadius: 7, background: member.id === value ? '#eaf3ff' : '#fff', padding: '9px 10px', textAlign: 'left', cursor: 'pointer', color: '#243b53' }}><strong>{member.name}</strong><span style={{ display: 'block', color: '#718096', fontSize: 11, marginTop: 2 }}>{member.id}{member.phone ? ` · ${member.phone}` : ''}</span></button>) : <div style={{ padding: 12, color: '#718096', fontSize: 13, textAlign: 'center' }}>No matching members found.</div>}
+      </div>
+    </div>}
+  </div>;
+}
+
 function TrainerModal({ onClose, onSave, trainer }) {
   const [form, setForm] = useState(() => trainer ? {
     ...trainer,
@@ -5748,7 +5798,7 @@ function TrainerModal({ onClose, onSave, trainer }) {
           <div className="form-grid professional-form-grid">
             <label className="professional-field">
               Name *
-              <input value={form.name} onChange={(e) => update('name', e.target.value)} />
+              <input value={form.name} onChange={(e) => update('name', e.target.value)} onBlur={(e) => update('name', capitalizeFieldWords(e.target.value))} />
             </label>
 
             <label className="professional-field">
@@ -5761,6 +5811,7 @@ function TrainerModal({ onClose, onSave, trainer }) {
               <input
                 value={form.specialization}
                 onChange={(e) => update('specialization', e.target.value)}
+                onBlur={(e) => update('specialization', capitalizeFieldWords(e.target.value))}
                 placeholder="e.g. Strength & Conditioning"
               />
             </label>
@@ -5855,7 +5906,7 @@ function PTSessionModal({ trainers, members, onClose, onSave }) {
   const cfg = trainer?.ptPricing?.[form.planName] || { fee: 0, sessions: 22, validityDays: 30 };
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
   const save = () => { if (!form.trainerId || !form.memberId || !form.date) return; onSave({ ...form, fee: Number(cfg.fee || 0), planConfig: { sessions: Number(cfg.sessions || 22), validityDays: Number(cfg.validityDays || 30) } }); };
-  return <div className="modal-backdrop"><div className="modal"><div className="modal-header"><div><h3>Assign PT package</h3><span>Select trainer, member and a configured PT plan.</span></div><button className="icon-btn" onClick={onClose}><X size={18}/></button></div><div className="modal-body"><div className="form-grid professional-form-grid"><label className="professional-field">Trainer<select value={form.trainerId} onChange={(e)=>update('trainerId',e.target.value)}>{trainers.map((t)=><option key={t.id} value={t.id}>{t.name} — {t.tier || 'Silver'}</option>)}</select></label><label className="professional-field">Member<select value={form.memberId} onChange={(e)=>update('memberId',e.target.value)}>{members.map((m)=><option key={m.id} value={m.id}>{m.name} ({m.id})</option>)}</select></label><label className="professional-field">Package start date<input type="date" value={form.date} onChange={(e)=>update('date',e.target.value)}/></label><label className="professional-field">PT plan<select value={form.planName} onChange={(e)=>update('planName',e.target.value)}><option>Monthly</option><option>Half-yearly</option><option>Annual</option></select></label><div style={{gridColumn:'1 / -1',background:'#f5f7ff',padding:14,borderRadius:12}}><div style={{fontWeight:800,fontSize:20}}>₹{Number(cfg.fee || 0).toLocaleString('en-IN')}</div><div>{Number(cfg.sessions || 22)} sessions · valid for {Number(cfg.validityDays || 30)} days · {trainer?.tier || 'Silver'} tier</div><small style={{color:'#68758a'}}>Plan price and limits are configured in the trainer profile.</small></div><label style={{gridColumn:'1 / -1'}}>Notes<textarea rows="3" value={form.notes} onChange={(e)=>update('notes',e.target.value)}/></label></div></div><div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Cancel</button><button className="btn btn-primary" onClick={save} disabled={!form.trainerId || !form.memberId || !form.date}>Assign package</button></div></div></div>;
+  return <div className="modal-backdrop"><div className="modal"><div className="modal-header"><div><h3>Assign PT package</h3><span>Select trainer, member and a configured PT plan.</span></div><button className="icon-btn" onClick={onClose}><X size={18}/></button></div><div className="modal-body"><div className="form-grid professional-form-grid"><label className="professional-field">Trainer<select value={form.trainerId} onChange={(e)=>update('trainerId',e.target.value)}>{trainers.map((t)=><option key={t.id} value={t.id}>{t.name} — {t.tier || 'Silver'}</option>)}</select></label><label className="professional-field">Member<SearchableMemberPicker members={members} value={form.memberId} onChange={(value)=>update('memberId',value)} /></label><label className="professional-field">Package start date<input type="date" value={form.date} onChange={(e)=>update('date',e.target.value)}/></label><label className="professional-field">PT plan<select value={form.planName} onChange={(e)=>update('planName',e.target.value)}><option>Monthly</option><option>Half-yearly</option><option>Annual</option></select></label><div style={{gridColumn:'1 / -1',background:'#f5f7ff',padding:14,borderRadius:12}}><div style={{fontWeight:800,fontSize:20}}>₹{Number(cfg.fee || 0).toLocaleString('en-IN')}</div><div>{Number(cfg.sessions || 22)} sessions · valid for {Number(cfg.validityDays || 30)} days · {trainer?.tier || 'Silver'} tier</div><small style={{color:'#68758a'}}>Plan price and limits are configured in the trainer profile.</small></div><label style={{gridColumn:'1 / -1'}}>Notes<textarea rows="3" value={form.notes} onChange={(e)=>update('notes',e.target.value)}/></label></div></div><div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Cancel</button><button className="btn btn-primary" onClick={save} disabled={!form.trainerId || !form.memberId || !form.date}>Assign package</button></div></div></div>;
 }
 
 function Dashboard({ activeMembers, expiringMembers, overdue, revenue, data, navigate, setModal, markAttendance, isReadOnlyStaff }) {
@@ -6038,6 +6089,7 @@ function Dashboard({ activeMembers, expiringMembers, overdue, revenue, data, nav
 function MembersPage({ members, query, setQuery, setModal, markAttendance, deleteMember, settings, payments = [], ptSessions = [], trainers = [], workoutPlans = [] }) {
   const [statusFilter, setStatusFilter] = useState('All');
   const [selectedMember, setSelectedMember] = useState(null);
+  const [workoutPlansExpanded, setWorkoutPlansExpanded] = useState(true);
 
   const filtered = members.filter((member) => {
     const q = query.toLowerCase();
@@ -6491,12 +6543,22 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
             })()}
           </div>
 
-          <div className="profile-card" style={cardStyle}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,flexWrap:'wrap'}}>
-              <PanelHeader title="Assigned workout plans" subtitle="Weekly training schedule assigned to this member" icon={Dumbbell} />
-              <button type="button" className="btn btn-secondary" onClick={() => printMemberWorkoutPlan(member, settings, memberWorkoutPlans)} style={{display:'inline-flex',alignItems:'center',gap:7,flexShrink:0}}><Printer size={17}/> Print workout plan</button>
+          <div className="profile-card" style={{...cardStyle, minHeight: workoutPlansExpanded ? undefined : 112, display:'flex', flexDirection:'column', justifyContent:'center', transition:'min-height .2s ease, padding .2s ease'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,flexWrap:'wrap'}}>
+              <div style={{display:'flex',alignItems:'center',gap:12,minWidth:0,flex:'1 1 260px'}}>
+                <div style={{width:42,height:42,minWidth:42,borderRadius:13,display:'grid',placeItems:'center',background:'linear-gradient(135deg,#e4f2ff,#e5f8f4)',color:'#1769b2',border:'1px solid #d9eaf8'}}><Dumbbell size={20}/></div>
+                <div style={{minWidth:0}}>
+                  <div style={{fontSize:17,fontWeight:850,color:'#173b5d'}}>Assigned workout plans</div>
+                  <div style={{fontSize:12,color:'#71839a',marginTop:3}}>Weekly training schedule · {memberWorkoutPlans.length} {memberWorkoutPlans.length === 1 ? 'plan' : 'plans'} assigned</div>
+                </div>
+              </div>
+              <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                <button type="button" className="btn btn-secondary" onClick={() => printMemberWorkoutPlan(member, settings, memberWorkoutPlans)} style={{display:'inline-flex',alignItems:'center',gap:7,flexShrink:0}}><Printer size={17}/> Print workout plan</button>
+                <button type="button" className="btn btn-secondary" aria-expanded={workoutPlansExpanded} onClick={() => setWorkoutPlansExpanded(value => !value)} style={{display:'inline-flex',alignItems:'center',gap:7,flexShrink:0,minWidth:112,justifyContent:'center'}}>{workoutPlansExpanded ? <><ChevronUp size={17}/> Collapse</> : <><ChevronDown size={17}/> Expand</>}</button>
+              </div>
             </div>
-            {memberWorkoutPlans.length ? <div style={{display:'grid',gap:7,marginTop:8}}>{memberWorkoutPlans.map((plan) => {
+            {!workoutPlansExpanded && <div style={{display:'flex',alignItems:'center',gap:8,marginTop:12,padding:'9px 11px',borderRadius:11,background:'linear-gradient(90deg,#f1f7ff,#f0fbf8)',border:'1px solid #e2edf6',color:'#58718a',fontSize:12}}><ClipboardList size={15} color="#159b91"/><span>{memberWorkoutPlans.length ? `${memberWorkoutPlans.length} workout ${memberWorkoutPlans.length === 1 ? 'plan is' : 'plans are'} assigned. Expand to view the weekly schedule and exercises.` : 'No workout plans assigned yet.'}</span></div>}
+            {workoutPlansExpanded && (memberWorkoutPlans.length ? <div style={{display:'grid',gap:7,marginTop:8}}>{memberWorkoutPlans.map((plan) => {
               const esc = (value) => escapeHtml(value ?? '—');
               const groups = getWorkoutDayGroups(plan);
               return <section key={plan.id} className="workout-card-sheet" style={{margin:0}}>
@@ -6510,7 +6572,7 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
                 </section>) : <p style={{padding:14}}>No exercises added.</p>}
                 <div className="workout-card-footer"><span>{plan.goal || 'GENERAL FITNESS'} · {plan.trainer || 'PREFACE FITNESS'}</span><span>{Number(plan.durationWeeks || 1)} WEEKS</span></div>
               </section>;
-            })}</div> : <p style={{margin:'10px 0 0',color:'#718096'}}>No workout plans have been assigned to this member.</p>}
+            })}</div> : <p style={{margin:'10px 0 0',color:'#718096'}}>No workout plans have been assigned to this member.</p>)}
           </div>
 
           <div className="profile-card" style={cardStyle}>
@@ -7995,13 +8057,13 @@ function WorkoutPlanModal({ members, onClose, onSave, plan, muscleGroups = [], o
   return <Modal title={plan ? 'Edit workout plan' : 'Create workout plan'} onClose={onClose} wide>
     <div className="form-section-title">Plan details</div>
     <div className="form-grid three">
-      <FormField label="Plan name"><input autoFocus value={form.name} onChange={(e) => update('name', e.target.value)} placeholder="e.g. Fat Loss Foundation" /></FormField>
+      <FormField label="Plan name"><input autoFocus value={form.name} onChange={(e) => update('name', e.target.value)} onBlur={(e) => update('name', capitalizeFieldWords(e.target.value))} placeholder="e.g. Fat Loss Foundation" /></FormField>
       <FormField label="Goal"><select value={form.goal} onChange={(e) => update('goal', e.target.value)}><option>General Fitness</option><option>Fat Loss</option><option>Muscle Building</option><option>Strength</option><option>Rehabilitation</option><option>Sports Performance</option></select></FormField>
       <FormField label="Level"><select value={form.level} onChange={(e) => update('level', e.target.value)}><option>Beginner</option><option>Intermediate</option><option>Advanced</option></select></FormField>
     </div>
     <div className="form-grid three">
       <FormField label="Duration (weeks)"><input type="number" min="1" max="52" value={form.durationWeeks} onChange={(e) => update('durationWeeks', e.target.value)} /></FormField>
-      <FormField label="Trainer"><input value={form.trainer} onChange={(e) => update('trainer', e.target.value)} placeholder="Trainer name" /></FormField>
+      <FormField label="Trainer"><input value={form.trainer} onChange={(e) => update('trainer', e.target.value)} onBlur={(e) => update('trainer', capitalizeFieldWords(e.target.value))} placeholder="Trainer name" /></FormField>
       <FormField label="Warm up (minutes)"><input type="number" min="0" max="60" value={form.warmupMinutes ?? 10} onChange={(e) => update('warmupMinutes', e.target.value)} /></FormField>
       <FormField label="Cool down (minutes)"><input type="number" min="0" max="60" value={form.cooldownMinutes ?? 5} onChange={(e) => update('cooldownMinutes', e.target.value)} /></FormField>
     </div>
@@ -9437,12 +9499,12 @@ function printMemberWorkoutPlan(member, settings, workoutPlans = []) {
   const esc = (value) => escapeHtml(value ?? '—');
   const plans = (workoutPlans || []).filter((plan) => (plan.assignedMemberIds || []).some((id) => String(id) === String(member?.id)));
   const sections = plans.map((plan, index) => `<section class="workout-card-sheet">
-    ${index === 0 ? `<div class="workout-card-top"><div class="workout-brand">${esc(gymName.toUpperCase())}<small>FITNESS • WORKOUT CARD</small></div><span style="font-size:10px;color:#71839a;font-weight:800">WEEKLY TRAINING</span></div><div class="workout-member-meta"><span>Member: ${esc(member?.name)}</span><span>ID: ${esc(member?.id)}</span></div>` : ''}
+    ${index === 0 ? `<div class="workout-hero"><div class="workout-hero-copy"><div class="workout-eyebrow">Personal training programme</div><div class="workout-brand">${esc(gymName.toUpperCase())}<small>FITNESS • WORKOUT CARD</small></div><div class="workout-hero-sub">Your weekly strength & conditioning plan</div></div><svg class="workout-hero-art" viewBox="0 0 220 90" aria-label="Dumbbell illustration"><defs><linearGradient id="workBar" x1="0" x2="1"><stop stop-color="#c9fff4"/><stop offset="1" stop-color="#42cbbb"/></linearGradient></defs><g fill="none" stroke="url(#workBar)" stroke-width="7" stroke-linecap="round"><path d="M48 45H172M40 22V68M24 30V60M180 22V68M196 30V60"/></g><circle cx="110" cy="45" r="39" fill="none" stroke="rgba(255,255,255,.2)"/></svg></div><div class="workout-member-meta"><span>MEMBER: ${esc(member?.name)}</span><span>ID: ${esc(member?.id)}</span></div>` : `<div class="workout-plan-compact-brand"><strong>${esc(gymName.toUpperCase())}</strong><span>WORKOUT PLAN ${index + 1}</span></div>`}
     <div class="workout-plan-strip"><strong>${esc(plan.name || 'Workout plan')}</strong><span>${esc(String(plan.level || 'BEGINNER').toUpperCase())} · ${esc(Number(plan.durationWeeks || 1))} WKS</span></div>
     ${workoutCardGroupHtml(plan, esc) || '<p style="padding:8px">No exercises added.</p>'}
     <div class="workout-card-footer"><span>${esc(plan.goal || 'GENERAL FITNESS')}</span><span>${esc(Number(plan.durationWeeks || 1))} WEEKS</span></div>
   </section>`).join('');
-  const html = `<main class="workout-print-page">${sections || '<p>No workout plans assigned.</p>'}</main><style>*{box-sizing:border-box}body{margin:0;padding:8px;background:#f4f7fb;color:#1b2942;font:10px/1.35 Arial,sans-serif}.workout-print-page{max-width:850px;margin:0 auto}.workout-card-sheet{font-family:Arial,Helvetica,sans-serif;background:#fff;color:#1b2942;border:1px solid #d9e4f0;border-radius:9px;overflow:hidden;margin:7px 0;break-inside:avoid}.workout-card-top{display:flex;justify-content:space-between;align-items:center;padding:7px 11px;background:linear-gradient(110deg,#f4f8fd,#eaf3fb);border-bottom:2px solid #159b91}.workout-brand{font-size:17px;line-height:1;font-weight:950;color:#173b5e}.workout-brand small{display:block;color:#168b9b;font-size:8px;letter-spacing:.08em;margin-top:3px}.workout-member-meta{display:flex;gap:14px;padding:5px 10px;background:#f5f8fc;color:#24527a;font-size:9px;font-weight:800}.workout-plan-strip{display:flex;justify-content:space-between;gap:8px;padding:5px 10px;background:#f7faff;border-bottom:1px solid #e5edf6;color:#24496d}.workout-plan-strip strong{font-size:11px}.workout-plan-strip span{font-size:9px;font-weight:900;color:#1769b2}.workout-day-card{margin:5px 9px 7px;border:1px solid #dce6f1;border-radius:7px;overflow:hidden;break-inside:avoid}.workout-day-heading{background:#e7f3ff;color:#1769b2;padding:5px 9px;font-size:10px;font-weight:950}.workout-warmup,.workout-cooldown{display:flex;justify-content:space-between;padding:3px 9px;font-size:9px;font-weight:900;color:#167f79}.workout-exercise-row{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:7px;align-items:center;padding:2px 8px;min-height:20px;background:#f7f9fc;color:#26384d;font-size:9px}.workout-exercise-row:nth-child(even){background:#eef3f8}.workout-number{width:14px;height:14px;border-radius:50%;display:grid;place-items:center;background:#159b91;color:#fff;font-size:8px;font-weight:950}.workout-exercise-dose{font-size:9px;font-weight:950;color:#1769b2}.workout-cooldown{border-top:1px solid #dce6f1;color:#168b9b}.workout-card-footer{display:flex;justify-content:space-between;padding:4px 10px;color:#71839a;font-size:8px;font-weight:800}.portal-workout-day{margin:5px 9px 7px;border:1px solid #dce6f1;border-radius:7px;overflow:hidden;break-inside:avoid}.portal-workout-day-title{background:#e7f3ff;color:#1769b2;padding:5px 9px;font-size:10px;font-weight:950}.portal-workout-table{width:100%;border-collapse:collapse;font-size:9px}.portal-workout-table th{background:#f1f6fc;color:#31516f;text-align:left;padding:5px 6px;border-bottom:1px solid #dce6f1}.portal-workout-table td{padding:5px 6px;border-bottom:1px solid #edf1f6;color:#26384d}.portal-workout-table tbody tr:nth-child(even){background:#f5f8fc}.portal-workout-number{display:inline-grid;place-items:center;width:15px;height:15px;border-radius:50%;background:#159b91;color:#fff;font-size:8px;font-weight:900}.portal-workout-warmcool{display:flex;justify-content:space-between;gap:8px;padding:5px 8px;color:#167f79;font-size:8px;font-weight:800;background:#fbfdff}.portal-workout-warmcool span{display:flex;gap:5px}.portal-workout-warmcool b{color:#1769b2}@page{size:A4 portrait;margin:7mm}@media print{body{padding:0;background:#fff}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style>`;
+  const html = `<main class="workout-print-page">${sections || '<p>No workout plans assigned.</p>'}<footer class="workout-print-footer"><span>${esc(gymName.toUpperCase())} · TRAINING PROGRAMME</span><span>TRAIN SMART · STAY CONSISTENT</span></footer></main><style>*{box-sizing:border-box}body{margin:0;padding:12px;background:#f4f7fb;color:#1b2942;font:10px/1.35 Arial,sans-serif}.workout-print-page{max-width:850px;margin:0 auto}.workout-card-sheet{font-family:Arial,Helvetica,sans-serif;background:#fff;color:#1b2942;border:1px solid #d9e4f0;border-radius:12px;overflow:hidden;margin:8px 0 12px;break-inside:avoid;box-shadow:0 5px 16px rgba(23,54,90,.06)}.workout-hero{position:relative;overflow:hidden;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px;background:linear-gradient(112deg,#123553 0%,#1d5275 62%,#087f78 100%);border-bottom:4px solid #20b7a5;color:#fff}.workout-hero:after{content:"";position:absolute;width:170px;height:170px;border:1px solid rgba(255,255,255,.14);border-radius:50%;right:80px;top:-100px}.workout-hero-copy{position:relative;z-index:1}.workout-eyebrow{font-size:8px;font-weight:900;letter-spacing:.18em;color:#8af0df;text-transform:uppercase;margin-bottom:4px}.workout-brand{font-size:19px;line-height:1;font-weight:950;color:#fff}.workout-brand small{display:block;color:#9de9e0;font-size:8px;letter-spacing:.12em;margin-top:4px}.workout-hero-sub{font-size:9px;color:#d8eaf5;margin-top:7px}.workout-hero-art{position:relative;z-index:1;width:170px;height:68px;flex:0 0 170px}.workout-member-meta{display:flex;gap:16px;padding:6px 11px;background:#f2f7fc;color:#24527a;font-size:8px;font-weight:900;letter-spacing:.04em;border-bottom:1px solid #e2ebf4}.workout-plan-compact-brand{display:flex;justify-content:space-between;align-items:center;padding:7px 11px;background:#f3f8fc;border-bottom:1px solid #e1eaf3;color:#24527a;font-size:9px}.workout-plan-compact-brand span{font-weight:900;color:#168b9b;letter-spacing:.08em}.workout-plan-strip{display:flex;justify-content:space-between;gap:8px;padding:6px 10px;background:#f7faff;border-bottom:1px solid #e5edf6;color:#24496d}.workout-plan-strip strong{font-size:11px}.workout-plan-strip span{font-size:9px;font-weight:900;color:#1769b2}.workout-day-card{margin:5px 9px 7px;border:1px solid #dce6f1;border-radius:7px;overflow:hidden;break-inside:avoid}.workout-day-heading{background:#e7f3ff;color:#1769b2;padding:5px 9px;font-size:10px;font-weight:950}.workout-warmup,.workout-cooldown{display:flex;justify-content:space-between;padding:3px 9px;font-size:9px;font-weight:900;color:#167f79}.workout-exercise-row{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:7px;align-items:center;padding:2px 8px;min-height:20px;background:#f7f9fc;color:#26384d;font-size:9px}.workout-exercise-row:nth-child(even){background:#eef3f8}.workout-number{width:14px;height:14px;border-radius:50%;display:grid;place-items:center;background:#159b91;color:#fff;font-size:8px;font-weight:950}.workout-exercise-dose{font-size:9px;font-weight:950;color:#1769b2}.workout-cooldown{border-top:1px solid #dce6f1;color:#168b9b}.workout-card-footer{display:flex;justify-content:space-between;padding:5px 10px;color:#71839a;font-size:8px;font-weight:800;background:#f7fafc;border-top:1px solid #edf2f7}.workout-print-footer{display:flex;justify-content:space-between;padding:9px 3px;color:#71839a;font-size:8px;font-weight:900;letter-spacing:.08em}.portal-workout-day{margin:5px 9px 7px;border:1px solid #dce6f1;border-radius:7px;overflow:hidden;break-inside:avoid}.portal-workout-day-title{background:#e7f3ff;color:#1769b2;padding:5px 9px;font-size:10px;font-weight:950}.portal-workout-table{width:100%;border-collapse:collapse;font-size:9px}.portal-workout-table th{background:#f1f6fc;color:#31516f;text-align:left;padding:5px 6px;border-bottom:1px solid #dce6f1}.portal-workout-table td{padding:5px 6px;border-bottom:1px solid #edf1f6;color:#26384d}.portal-workout-table tbody tr:nth-child(even){background:#f5f8fc}.portal-workout-number{display:inline-grid;place-items:center;width:15px;height:15px;border-radius:50%;background:#159b91;color:#fff;font-size:8px;font-weight:900}.portal-workout-warmcool{display:flex;justify-content:space-between;gap:8px;padding:5px 8px;color:#167f79;font-size:8px;font-weight:800;background:#fbfdff}.portal-workout-warmcool span{display:flex;gap:5px}.portal-workout-warmcool b{color:#1769b2}@page{size:A4 portrait;margin:7mm}@media print{body{padding:0;background:#fff}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}.workout-card-sheet{box-shadow:none}}</style>`;
   openPrintWindow(`${gymName} - ${member?.name || 'Member'} Workout Card`, html);
 }
 
@@ -10049,7 +10111,7 @@ function PaymentModal({ members, onClose, onSave, settings = {} }) {
     </div>
     <div className="form-section-title">Transaction details</div>
     <div className="form-grid two">
-      <FormField label="Member"><select value={form.memberId} onChange={(e) => update('memberId', e.target.value)}>{members.map((m) => <option key={m.id} value={m.id}>{m.name} · {m.id}</option>)}</select></FormField>
+      <FormField label="Member"><SearchableMemberPicker members={members} value={form.memberId} onChange={(value) => update('memberId', value)} /></FormField>
       <FormField label="Payment date"><input type="date" value={form.date} onChange={(e) => update('date', e.target.value)} /></FormField>
     </div>
     <div className="form-grid three">
