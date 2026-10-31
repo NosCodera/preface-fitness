@@ -2027,7 +2027,120 @@ const PERMISSION_FOR_PAGE = Object.fromEntries(
   STAFF_PERMISSION_DEFINITIONS.map((item) => [item.label, item.key])
 );
 
+
+// Gentle typing assistance shared by the admin app and member portal.
+// Apply only conservative corrections to words that are present; never
+// reinsert deleted text or modify identifiers, numbers, email, URLs or PINs.
+function useGentleInputAssist() {
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+    const safeCorrections = {
+      recieve: 'receive', adress: 'address', addres: 'address',
+      seperate: 'separate', definately: 'definitely', occured: 'occurred',
+      untill: 'until', wich: 'which', teh: 'the', thier: 'their',
+      heigth: 'height', wieght: 'weight', excersise: 'exercise',
+      workuot: 'workout', tranner: 'trainer', membar: 'member',
+      paymant: 'payment', ammount: 'amount', attendence: 'attendance',
+      mesurment: 'measurement', mesurement: 'measurement', medicle: 'medical',
+    };
+    const isTextField = (el) => {
+      if (!(el instanceof HTMLElement)) return false;
+      if (el instanceof HTMLTextAreaElement) return true;
+      if (!(el instanceof HTMLInputElement)) return false;
+      return ['text', 'search', ''].includes((el.type || '').toLowerCase());
+    };
+    const fieldContext = (el) => {
+      const parts = [el.getAttribute('name'), el.id, el.getAttribute('placeholder'), el.getAttribute('aria-label')];
+      const label = el.closest('label');
+      if (label) parts.push(label.innerText || label.textContent || '');
+      const labelledBy = el.getAttribute('aria-labelledby');
+      if (labelledBy) labelledBy.split(/\s+/).forEach((id) => parts.push(document.getElementById(id)?.textContent || ''));
+      const parent = el.parentElement;
+      if (parent) parts.push(parent.innerText || parent.textContent || '');
+      return parts.filter(Boolean).join(' ').toLowerCase();
+    };
+    const isNameField = (el) => {
+      const context = fieldContext(el);
+      return /\b(full\s*name|member\s*name|customer\s*name|client\s*name|first\s*name|last\s*name|trainer\s*name|your\s*name|name)\b/i.test(context)
+        && !/\b(file\s*name|user\s*name|username|plan\s*name|gym\s*name|company\s*name|product\s*name)\b/i.test(context);
+    };
+    const preserveCase = (original, replacement) => {
+      if (original.toUpperCase() === original) return replacement.toUpperCase();
+      if (original[0] === original[0]?.toUpperCase()) return replacement[0].toUpperCase() + replacement.slice(1);
+      return replacement;
+    };
+    const gentlyCorrectText = (value) => String(value || '').replace(/\b[\p{L}]+\b/gu, (word) => {
+      const replacement = safeCorrections[word.toLocaleLowerCase()];
+      return replacement ? preserveCase(word, replacement) : word;
+    }).replace(/[ \t]+([,.;!?])/g, '$1').replace(/([,.;!?])(?=\S)/g, '$1 ');
+    const capitalizeName = (value) => String(value || '').trim().replace(/(^|[\s'-])(\p{L})/gu, (_, separator, letter) => separator + letter.toLocaleUpperCase());
+    const isAddressField = (el) => {
+      const context = fieldContext(el);
+      return /\b(address|street|residential|permanent address|correspondence address|locality|landmark)\b/i.test(context)
+        && !/\b(email|website|url|maps|search)\b/i.test(context);
+    };
+    const capitalizeAddress = (value) => {
+      const smallWords = new Set(['and', 'of', 'the', 'near', 'behind', 'opposite', 'at', 'to']);
+      return gentlyCorrectText(value).trim().replace(/\s+/g, ' ').split(/(\s+|,\s*|\/)/).map((part, index, all) => {
+        if (!part || /^\s+$/.test(part) || part === '/' || /^,/.test(part)) return part;
+        const word = part.replace(/^[,]+|[,]+$/g, '');
+        if (!word || /^\d+$/.test(word) || /^[A-Z0-9-]{2,}$/i.test(word) && /\d/.test(word)) return part;
+        const lower = word.toLocaleLowerCase();
+        const isFirstWord = index === 0 || /^\s+$/.test(all[index - 1] || '') && (index < 2 || !all.slice(0, index).some((x) => x && !/^\s+$/.test(x)));
+        const fixed = smallWords.has(lower) && !isFirstWord ? lower : lower.charAt(0).toLocaleUpperCase() + lower.slice(1);
+        return part.replace(word, fixed);
+      });
+    };
+    const setNativeValue = (el, value) => {
+      if (el.value === value) return;
+      const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+      setter?.call(el, value);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    const enhance = (root) => {
+      const fields = [];
+      if (root instanceof HTMLElement && isTextField(root)) fields.push(root);
+      if (root?.querySelectorAll) fields.push(...root.querySelectorAll('input[type="text"],input[type="search"],textarea'));
+      fields.forEach((el) => {
+        if (el.dataset.gentleAssistApplied === '1') return;
+        el.dataset.gentleAssistApplied = '1';
+        el.setAttribute('spellcheck', 'true');
+        el.setAttribute('autocorrect', 'off');
+        el.setAttribute('autocapitalize', isNameField(el) ? 'words' : 'sentences');
+        if (isNameField(el)) el.dataset.gentleNameField = '1';
+      });
+    };
+    enhance(document.body);
+    const observer = new MutationObserver((records) => records.forEach((record) => record.addedNodes.forEach((node) => {
+      if (node.nodeType === 1) enhance(node);
+    })));
+    observer.observe(document.body, { childList: true, subtree: true });
+    const onFocusOut = (event) => {
+      const el = event.target;
+      if (!isTextField(el) || el.dataset.gentleCorrectionBusy === '1') return;
+      const before = el.value;
+      if (!before.trim()) return;
+      let after = gentlyCorrectText(before);
+      if (isNameField(el)) after = capitalizeName(after);
+      else if (isAddressField(el)) after = capitalizeAddress(after);
+      if (after !== before) {
+        el.dataset.gentleCorrectionBusy = '1';
+        setNativeValue(el, after);
+        delete el.dataset.gentleCorrectionBusy;
+      }
+    };
+    document.addEventListener('focusout', onFocusOut, true);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener('focusout', onFocusOut, true);
+    };
+  }, []);
+}
+
 function App() {
+  useGentleInputAssist();
   const [data, setData] = useState(seed);
   const [dbReady, setDbReady] = useState(false);
   const [active, setActive] = useState('Dashboard');
@@ -6336,8 +6449,8 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
 
           <div className="profile-card" style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' }}>
-              <PanelHeader title="Fitness Profile & Medical History" subtitle="Training baseline and health information reported by the member" icon={Activity} />
-              <button type="button" className="btn btn-secondary" onClick={() => printMemberFitnessMedical(member, settings)} style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', flexShrink: 0 }}>
+              <PanelHeader title="Fitness, measurements & medical history" subtitle="Training baseline and health information reported by the member" icon={Activity} />
+              <button type="button" className="btn btn-secondary" onClick={() => printMemberFitnessMedical(member, settings, memberWorkoutPlans)} style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', flexShrink: 0 }}>
                 <FileDown size={17} /> Print profile
               </button>
             </div>
@@ -6380,16 +6493,22 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
 
           <div className="profile-card" style={cardStyle}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,flexWrap:'wrap'}}>
-              <PanelHeader title="Workout Plan" subtitle="Weekly training schedule assigned to this member" icon={Dumbbell} />
+              <PanelHeader title="Assigned workout plans" subtitle="Weekly training schedule assigned to this member" icon={Dumbbell} />
               <button type="button" className="btn btn-secondary" onClick={() => printMemberWorkoutPlan(member, settings, memberWorkoutPlans)} style={{display:'inline-flex',alignItems:'center',gap:7,flexShrink:0}}><Printer size={17}/> Print workout plan</button>
             </div>
-            {memberWorkoutPlans.length ? <div style={{display:'grid',gap:14,marginTop:12}}>{memberWorkoutPlans.map((plan) => {
-              const days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday','Unscheduled'];
-              return <section key={plan.id} style={{border:'1px solid #e3e8f2',borderRadius:14,padding:14,background:'#fbfcff'}}>
-                <div style={{display:'flex',justifyContent:'space-between',gap:10,flexWrap:'wrap'}}><strong style={{fontSize:16,color:'#243b53'}}>{plan.name || 'Workout plan'}</strong><span style={{fontSize:12,color:'#7654e8',fontWeight:800}}>{Number(plan.durationWeeks||0)} weeks</span></div>
-                <div style={{fontSize:12,color:'#64748b',margin:'5px 0 12px'}}>{plan.goal||'General Fitness'} · {plan.level||'Beginner'}{plan.trainer?` · ${plan.trainer}`:''}</div>
-                {days.map(day => { const exercises=(plan.exercises||[]).filter(ex=>(ex.day||'Unscheduled')===day); return exercises.length ? <div key={day} style={{marginTop:10}}><h4 style={{margin:'0 0 7px',fontSize:13,color:'#5145cd'}}>{day}</h4><div style={{display:'grid',gap:7}}>{exercises.map((exercise,index)=><div key={exercise.id||`${day}-${index}`} style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap',border:'1px solid #edf0f5',borderRadius:10,padding:10,background:'#fff'}}><div><strong style={{fontSize:13,color:'#243b53'}}>{exercise.name||'Exercise'}</strong><div style={{fontSize:11,color:'#718096',marginTop:3}}>{exercise.muscle||exercise.muscleGroup||'Full Body'} · {exercise.sets||3} sets · {exercise.reps||15} reps · Rest {exercise.rest||'60 sec'}</div></div>{exercise.notes||exercise.instructions ? <span style={{fontSize:11,color:'#64748b'}}>{exercise.notes||exercise.instructions}</span> : null}</div>)}</div></div> : null; })}
-                {plan.notes&&<p style={{margin:'10px 0 0',fontSize:12,color:'#64748b'}}><strong>Plan notes:</strong> {plan.notes}</p>}
+            {memberWorkoutPlans.length ? <div style={{display:'grid',gap:7,marginTop:8}}>{memberWorkoutPlans.map((plan) => {
+              const esc = (value) => escapeHtml(value ?? '—');
+              const groups = getWorkoutDayGroups(plan);
+              return <section key={plan.id} className="workout-card-sheet" style={{margin:0}}>
+                {memberWorkoutPlans[0]?.id === plan.id && <><div className="workout-card-top"><div className="workout-brand">PREFACE<small>FITNESS • WORKOUT CARD</small></div><span style={{fontSize:10,color:'#71839a',fontWeight:800}}>WEEKLY TRAINING</span></div><div className="workout-member-meta"><span>Member: {member.name || '—'}</span><span>ID: {member.id || '—'}</span></div></>}
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,padding:'5px 10px',background:'#f7faff',borderBottom:'1px solid #e5edf6'}}><strong style={{fontSize:12,color:'#24496d'}}>{plan.name || 'Workout plan'}</strong><span style={{fontSize:9,fontWeight:900,color:'#1769b2'}}>{String(plan.level || 'BEGINNER').toUpperCase()} · {Number(plan.durationWeeks || 1)} WKS</span></div>
+                {groups.length ? groups.map((group,index) => <section key={`${plan.id}-group-${index}`} className="workout-day-card">
+                  <div className="workout-day-heading">{group.days.map(day=>day.toUpperCase()).join('  •  ')}</div>
+                  <div className="workout-warmup"><strong>Warm up &amp; Stretching</strong><b>{plan.warmupMinutes ?? 10} MIN</b></div>
+                  {group.exercises.map((exercise,i)=><div key={exercise.id||i} className="workout-exercise-row"><span className="workout-number">{i+1}</span><span className="workout-exercise-name">{exercise.name || 'Exercise'}</span><span className="workout-exercise-dose">{exercise.reps ?? 15} × {exercise.sets ?? 3}</span></div>)}
+                  <div className="workout-cooldown"><strong>Cool Down &amp; Stretching</strong><b>{plan.cooldownMinutes ?? 5} MIN</b></div>
+                </section>) : <p style={{padding:14}}>No exercises added.</p>}
+                <div className="workout-card-footer"><span>{plan.goal || 'GENERAL FITNESS'} · {plan.trainer || 'PREFACE FITNESS'}</span><span>{Number(plan.durationWeeks || 1)} WEEKS</span></div>
               </section>;
             })}</div> : <p style={{margin:'10px 0 0',color:'#718096'}}>No workout plans have been assigned to this member.</p>}
           </div>
@@ -7825,10 +7944,12 @@ function WorkoutPlanModal({ members, onClose, onSave, plan, muscleGroups = [], o
     durationWeeks: plan.durationWeeks || 4,
     trainer: plan.trainer || 'Administrator',
     notes: plan.notes || '',
+    warmupMinutes: plan.warmupMinutes ?? 10,
+    cooldownMinutes: plan.cooldownMinutes ?? 5,
     assignedMemberIds: plan.assignedMemberIds || [],
     exercises: plan.exercises?.length ? plan.exercises.map((exercise) => ({ ...exercise, muscle: exercise.muscle || 'Full Body', day: exercise.day || 'Unscheduled' })) : [{ id: `EX-${Date.now()}`, name: '', muscle: 'Full Body', day: 'Unscheduled', sets: 3, reps: '15', rest: '60 sec' }],
   } : {
-    name: '', goal: 'General Fitness', level: 'Beginner', durationWeeks: 4, trainer: 'Administrator', notes: '', assignedMemberIds: [],
+    name: '', goal: 'General Fitness', level: 'Beginner', durationWeeks: 4, trainer: 'Administrator', notes: '', warmupMinutes: 10, cooldownMinutes: 5, assignedMemberIds: [],
     exercises: [{ id: `EX-${Date.now()}`, name: '', muscle: 'Full Body', day: 'Unscheduled', sets: 3, reps: '15', rest: '60 sec' }],
   });
 
@@ -7881,7 +8002,8 @@ function WorkoutPlanModal({ members, onClose, onSave, plan, muscleGroups = [], o
     <div className="form-grid three">
       <FormField label="Duration (weeks)"><input type="number" min="1" max="52" value={form.durationWeeks} onChange={(e) => update('durationWeeks', e.target.value)} /></FormField>
       <FormField label="Trainer"><input value={form.trainer} onChange={(e) => update('trainer', e.target.value)} placeholder="Trainer name" /></FormField>
-      <FormField label="Notes"><input value={form.notes} onChange={(e) => update('notes', e.target.value)} placeholder="Training instructions" /></FormField>
+      <FormField label="Warm up (minutes)"><input type="number" min="0" max="60" value={form.warmupMinutes ?? 10} onChange={(e) => update('warmupMinutes', e.target.value)} /></FormField>
+      <FormField label="Cool down (minutes)"><input type="number" min="0" max="60" value={form.cooldownMinutes ?? 5} onChange={(e) => update('cooldownMinutes', e.target.value)} /></FormField>
     </div>
 
     <div className="form-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -9096,22 +9218,7 @@ function openPrintWindow(title, html) {
   return true;
 }
 
-
-function openMemberPrintWindow(html) {
-  // Blob URL prevents Chrome from labelling this print document as about:blank.
-  // An empty title prevents Chrome from injecting a centred document title.
-  const fullHtml = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title></title></head><body>${html}<script>
-    window.addEventListener('load', () => setTimeout(() => { window.focus(); window.print(); }, 350));
-  </script></body></html>`;
-  const blob = new Blob([fullHtml], { type: 'text/html;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const printWindow = window.open(url, '_blank');
-  if (!printWindow) { URL.revokeObjectURL(url); alert('Please allow pop-ups to print this document.'); return false; }
-  printWindow.addEventListener('load', () => setTimeout(() => URL.revokeObjectURL(url), 5000), { once: true });
-  return true;
-}
-
-function printMemberFitnessMedical(member, settings) {
+function printMemberFitnessMedical(member, settings, workoutPlans = []) {
   const gymName = settings?.gymName || 'Preface Fitness';
   const meta = readMemberMeta(member?.notes);
   const conditions = Array.isArray(meta.medicalConditions) ? meta.medicalConditions : (Array.isArray(member?.medicalConditions) ? member.medicalConditions : []);
@@ -9126,6 +9233,11 @@ function printMemberFitnessMedical(member, settings) {
     ['Thighs', meta.thighs ?? member?.thighs], ['Calves', meta.calves ?? member?.calves],
     ['Neck', meta.neck ?? member?.neck]
   ];
+  const assignedPlans = (workoutPlans || []).filter((plan) => (plan.assignedMemberIds || []).some((id) => String(id) === String(member?.id)));
+  const assignedWorkoutHtml = assignedPlans.length ? `<table class="assigned-workout-table"><thead><tr><th>Workout plan</th><th>Exercise</th><th>Muscle group</th><th>Sets</th><th>Reps</th><th>Rest</th></tr></thead><tbody>${assignedPlans.flatMap((plan) => {
+    const exercises = (plan.exercises || []).length ? plan.exercises : [{ name: 'No exercises added', muscleGroup: '—', sets: '—', reps: '—', rest: '—' }];
+    return exercises.map((exercise, index) => `<tr><td>${index === 0 ? `<strong>${escapeHtml(plan.name || 'Workout plan')}</strong><div class="workout-plan-meta">${escapeHtml(plan.goal || 'General Fitness')} · ${escapeHtml(plan.level || 'Beginner')} · ${escapeHtml(plan.durationWeeks || 0)} weeks${plan.trainer ? ` · ${escapeHtml(plan.trainer)}` : ''}</div>${plan.notes ? `<div class="workout-plan-notes">${escapeHtml(plan.notes)}</div>` : ''}` : `<span class="workout-plan-repeat">${escapeHtml(plan.name || 'Workout plan')}</span>`}</td><td>${escapeHtml(exercise.name || 'Exercise')}</td><td>${escapeHtml(exercise.muscleGroup || exercise.muscle || 'Full Body')}</td><td>${escapeHtml(exercise.sets ?? 3)}</td><td>${escapeHtml(exercise.reps ?? 15)}</td><td>${escapeHtml(exercise.rest || '60 sec')}</td></tr>`);
+  }).join('')}</tbody></table>` : '<p class="empty">No workout plans have been assigned to this member.</p>';
   const measurementLabels = ['Chest','Shoulder','Biceps','Forearms','Waist','Hips','Thighs','Calves','Neck'];
   const measurementValues = rows.filter(([label, value]) => measurementLabels.includes(label) && value !== undefined && value !== null && String(value).trim() !== '');
   const measurementRows = measurementValues.map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)} cm</td></tr>`).join('');
@@ -9257,64 +9369,70 @@ function printMemberFitnessMedical(member, settings) {
       *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
     }
   </style>`;
-  return openMemberPrintWindow(html);
+  return openPrintWindow(`${gymName} - ${member?.name || 'Member'} Fitness and Medical Profile`, html);
 }
+function getWorkoutDayGroups(plan) {
+  const order = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday','Unscheduled'];
+  const groups = new Map();
+  order.forEach((day) => {
+    const exercises = (plan?.exercises || []).filter((exercise) => (exercise.day || 'Unscheduled') === day);
+    if (!exercises.length) return;
+    const signature = JSON.stringify(exercises.map((ex) => [ex.name || ex.exercise || '', ex.muscle || ex.muscleGroup || 'Full Body', ex.sets ?? 3, ex.reps ?? 15, ex.rest || '60 sec']));
+    if (!groups.has(signature)) groups.set(signature, { days: [], exercises });
+    groups.get(signature).days.push(day);
+  });
+  return [...groups.values()];
+}
+
+function workoutCardGroupHtml(plan, esc) {
+  const groups = getWorkoutDayGroups(plan);
+  return groups.map((group) => `<section class="workout-day-card">
+    <div class="workout-day-heading">${group.days.map((day) => esc(day.toUpperCase())).join(' <span>•</span> ')}</div>
+    <div class="workout-warmup"><strong>Warm up &amp; Stretching</strong><b>${esc(plan.warmupMinutes ?? 10)} MIN</b></div>
+    <div class="workout-exercise-list">${group.exercises.map((ex, index) => `<div class="workout-exercise-row"><span class="workout-number">${index + 1}</span><span class="workout-exercise-name">${esc(ex.name || ex.exercise || 'Exercise')}</span><span class="workout-exercise-dose">${esc(ex.reps ?? 15)} × ${esc(ex.sets ?? 3)}</span></div>`).join('')}</div>
+    <div class="workout-cooldown"><strong>Cool Down &amp; Stretching</strong><b>${esc(plan.cooldownMinutes ?? 5)} MIN</b></div>
+  </section>`).join('');
+}
+
+const WORKOUT_CARD_CSS = `
+  .workout-card-sheet{font-family:Arial,Helvetica,sans-serif;background:#ffffff;color:#1b2942;border:1px solid #d9e4f0;border-radius:10px;overflow:hidden;margin:8px 0;break-inside:avoid}
+  .workout-card-top{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 12px;background:linear-gradient(110deg,#f4f8fd 0%,#eaf3fb 100%);border-bottom:2px solid #159b91}
+  .workout-brand{font-size:18px;line-height:1;font-weight:950;letter-spacing:.03em;color:#173b5e}.workout-brand small{display:block;color:#168b9b;font-size:9px;letter-spacing:.08em;margin-top:3px}
+  .workout-plan-level{background:#e7f3ff;color:#1769b2;border:1px solid #c6def8;border-radius:7px;padding:6px 10px;font-size:11px;font-weight:950;letter-spacing:.04em;white-space:nowrap}
+  .workout-member-meta{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;padding:6px 10px;background:#f5f8fc;border:1px solid #dce6f1;border-radius:7px;margin:6px 10px;color:#24527a;font-size:9px;font-weight:800}
+  .workout-member-meta span{border-bottom:1px dotted #b8c7d8;padding-bottom:3px}
+  .workout-day-card{margin:6px 10px 8px;border:1px solid #dce6f1;border-radius:8px;overflow:hidden;background:#ffffff;break-inside:avoid}
+  .workout-day-heading{background:#e7f3ff;color:#1769b2;padding:6px 10px;font-size:11px;font-weight:950;letter-spacing:.055em}.workout-day-heading span{color:#4f83b5;padding:0 5px}
+  .workout-warmup,.workout-cooldown{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:4px 10px;font-size:10px;font-weight:900;color:#167f79}.workout-warmup b,.workout-cooldown b{white-space:nowrap}
+  .workout-exercise-row{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:9px;align-items:center;padding:3px 9px;min-height:23px;background:#f7f9fc;color:#26384d;font-size:10px}.workout-exercise-row:nth-child(even){background:#eef3f8}
+  .workout-number{width:16px;height:16px;border-radius:50%;display:grid;place-items:center;background:#159b91;color:#fff;font-size:10px;font-weight:950}
+  .workout-exercise-name{min-width:0;overflow-wrap:anywhere}.workout-exercise-dose{font-size:10px;font-weight:950;color:#1769b2;white-space:nowrap}
+  .workout-cooldown{border-top:1px solid #dce6f1;color:#168b9b;padding-top:9px;padding-bottom:10px}
+  .workout-plan-strip{display:flex;justify-content:space-between;gap:8px;padding:5px 10px;background:#f7faff;border-bottom:1px solid #e5edf6;color:#24496d}.workout-plan-strip strong{font-size:11px}.workout-plan-strip span{font-size:9px;font-weight:900;color:#1769b2}
+  .workout-card-footer{display:flex;justify-content:space-between;gap:12px;padding:6px 10px;color:#71839a;font-size:8px;letter-spacing:.08em;font-weight:800}
+  @media(max-width:600px){.workout-member-meta{grid-template-columns:1fr}.workout-brand{font-size:19px}.workout-day-heading{font-size:12px}}
+`;
+
+
+if (typeof document !== 'undefined' && !document.getElementById('preface-workout-card-theme')) {
+  const style = document.createElement('style');
+  style.id = 'preface-workout-card-theme';
+  style.textContent = WORKOUT_CARD_CSS;
+  document.head.appendChild(style);
+}
+
 function printMemberWorkoutPlan(member, settings, workoutPlans = []) {
   const gymName = settings?.gymName || 'Preface Fitness';
-  const days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday','Unscheduled'];
-  const plans = (workoutPlans || []).filter((plan) =>
-    (plan.assignedMemberIds || []).some((id) => String(id) === String(member?.id))
-  );
   const esc = (value) => escapeHtml(value ?? '—');
-  const planSections = plans.map((plan) => {
-    const exercises = plan.exercises || [];
-    const orderedExercises = days.flatMap((day) =>
-      exercises.filter((exercise) => (exercise.day || 'Unscheduled') === day)
-        .map((exercise) => ({ ...exercise, printDay: day }))
-    );
-    const rows = orderedExercises.length
-      ? orderedExercises.map((exercise) => `<tr>
-          <td class="day-cell">${esc(exercise.printDay)}</td>
-          <td><strong>${esc(exercise.name || exercise.exercise || 'Exercise')}</strong></td>
-          <td>${esc(exercise.muscle || exercise.muscleGroup || 'Full Body')}</td>
-          <td>${esc(exercise.sets ?? 3)}</td><td>${esc(exercise.reps ?? 15)}</td>
-          <td>${esc(exercise.rest || '60 sec')}</td><td>${esc(exercise.notes || exercise.instructions || '—')}</td>
-        </tr>`).join('')
-      : '<tr><td colspan="7" class="empty">No exercises added to this plan.</td></tr>';
-    return `<section class="plan">
-      <div class="plan-heading"><div><h2>${esc(plan.name || 'Workout plan')}</h2>
-      <p>${esc(plan.goal || 'General Fitness')} · ${esc(plan.level || 'Beginner')} · ${esc(plan.durationWeeks || 0)} weeks${plan.trainer ? ` · Trainer: ${esc(plan.trainer)}` : ''}</p></div></div>
-      ${plan.notes ? `<p class="notes"><b>Plan notes:</b> ${esc(plan.notes)}</p>` : ''}
-      <table class="workout-table"><thead><tr><th>Day</th><th>Exercise Name</th><th>Muscle Group</th><th>Sets</th><th>Reps</th><th>Rest</th><th>Instructions</th></tr></thead><tbody>${rows}</tbody></table>
-    </section>`;
-  }).join('');
-  const html = `<main class="sheet">
-    <div class="print-document-label">WORKOUT PLAN</div>
-    <div class="topline"><div><h1>${esc(gymName)}</h1><p>Member weekly workout schedule</p></div><div class="doc-title">WORKOUT PLAN</div></div>
-    <section class="member"><h2>${esc(member?.name || 'Member')}</h2><span>Member ID: ${esc(member?.id)}</span><span>Phone: ${esc(member?.phone || '—')}</span></section>
-    ${planSections || '<p class="empty">No workout plans assigned to this member.</p>'}
-    <footer>${esc(gymName)} · Follow your trainer’s instructions and use safe form.</footer>
-  </main>
-  <style>
-    *{box-sizing:border-box}body{margin:0;background:#eef3f9;font:12px/1.5 Arial,sans-serif;color:#172b46;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-    .sheet{max-width:1000px;margin:20px auto;background:#fff;padding:24px;border:1px solid #d8e4f1;border-radius:14px}
-    .print-document-label{display:none;text-align:right;font-size:8px;font-weight:800;letter-spacing:.12em;color:#526984;padding-bottom:6px}
-    .topline{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1b8e88;padding-bottom:14px}
-    .topline h1{margin:0;font-size:24px}.topline p{margin:4px 0;color:#64748b}.doc-title{text-align:right;font-size:19px;font-weight:900;letter-spacing:.08em;color:#1769b2}
-    .member{display:flex;gap:20px;align-items:center;flex-wrap:wrap;padding:14px;background:#f3f8ff;border-radius:10px;margin:14px 0}.member h2{margin:0;font-size:17px}.member span{color:#52647b}
-    .plan{margin:16px 0 22px;break-inside:avoid}.plan-heading{border-left:4px solid #7654e8;padding-left:10px;margin-bottom:9px}
-    .plan h2{margin:0;font-size:16px}.plan p{margin:4px 0;color:#64748b}
-    .workout-table{width:100%;border-collapse:collapse;table-layout:fixed}
-    .workout-table th,.workout-table td{padding:8px 7px;border:1px solid #dce5ef;text-align:left;vertical-align:top;overflow-wrap:anywhere}
-    .workout-table th{background:#eff4ff;font-size:9px;text-transform:uppercase;letter-spacing:.03em}.workout-table td{font-size:10px}
-    .workout-table th:nth-child(1){width:12%}.workout-table th:nth-child(2){width:20%}.workout-table th:nth-child(3){width:16%}
-    .workout-table th:nth-child(4),.workout-table th:nth-child(5),.workout-table th:nth-child(6){width:8%}.workout-table th:nth-child(7){width:28%}
-    .day-cell{font-weight:800;color:#5145cd;background:#faf8ff}.notes{background:#f8fafc;padding:9px;border-radius:8px}
-    .empty{padding:12px;color:#718096;text-align:center}footer{margin-top:24px;padding-top:12px;border-top:1px solid #dce5ef;color:#718096;text-align:center;font-size:10px}
-    @page{size:A4 landscape;margin:9mm}
-    @media print{body{background:#fff}.sheet{margin:0;max-width:none;border:0;padding:0}.print-document-label{display:block;text-align:right}.plan{break-inside:auto}tr{break-inside:avoid;page-break-inside:avoid}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-  </style>`;
-  return openMemberPrintWindow(html);
+  const plans = (workoutPlans || []).filter((plan) => (plan.assignedMemberIds || []).some((id) => String(id) === String(member?.id)));
+  const sections = plans.map((plan, index) => `<section class="workout-card-sheet">
+    ${index === 0 ? `<div class="workout-card-top"><div class="workout-brand">${esc(gymName.toUpperCase())}<small>FITNESS • WORKOUT CARD</small></div><span style="font-size:10px;color:#71839a;font-weight:800">WEEKLY TRAINING</span></div><div class="workout-member-meta"><span>Member: ${esc(member?.name)}</span><span>ID: ${esc(member?.id)}</span></div>` : ''}
+    <div class="workout-plan-strip"><strong>${esc(plan.name || 'Workout plan')}</strong><span>${esc(String(plan.level || 'BEGINNER').toUpperCase())} · ${esc(Number(plan.durationWeeks || 1))} WKS</span></div>
+    ${workoutCardGroupHtml(plan, esc) || '<p style="padding:8px">No exercises added.</p>'}
+    <div class="workout-card-footer"><span>${esc(plan.goal || 'GENERAL FITNESS')}</span><span>${esc(Number(plan.durationWeeks || 1))} WEEKS</span></div>
+  </section>`).join('');
+  const html = `<main class="workout-print-page">${sections || '<p>No workout plans assigned.</p>'}</main><style>*{box-sizing:border-box}body{margin:0;padding:8px;background:#f4f7fb;color:#1b2942;font:10px/1.35 Arial,sans-serif}.workout-print-page{max-width:850px;margin:0 auto}.workout-card-sheet{font-family:Arial,Helvetica,sans-serif;background:#fff;color:#1b2942;border:1px solid #d9e4f0;border-radius:9px;overflow:hidden;margin:7px 0;break-inside:avoid}.workout-card-top{display:flex;justify-content:space-between;align-items:center;padding:7px 11px;background:linear-gradient(110deg,#f4f8fd,#eaf3fb);border-bottom:2px solid #159b91}.workout-brand{font-size:17px;line-height:1;font-weight:950;color:#173b5e}.workout-brand small{display:block;color:#168b9b;font-size:8px;letter-spacing:.08em;margin-top:3px}.workout-member-meta{display:flex;gap:14px;padding:5px 10px;background:#f5f8fc;color:#24527a;font-size:9px;font-weight:800}.workout-plan-strip{display:flex;justify-content:space-between;gap:8px;padding:5px 10px;background:#f7faff;border-bottom:1px solid #e5edf6;color:#24496d}.workout-plan-strip strong{font-size:11px}.workout-plan-strip span{font-size:9px;font-weight:900;color:#1769b2}.workout-day-card{margin:5px 9px 7px;border:1px solid #dce6f1;border-radius:7px;overflow:hidden;break-inside:avoid}.workout-day-heading{background:#e7f3ff;color:#1769b2;padding:5px 9px;font-size:10px;font-weight:950}.workout-warmup,.workout-cooldown{display:flex;justify-content:space-between;padding:3px 9px;font-size:9px;font-weight:900;color:#167f79}.workout-exercise-row{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:7px;align-items:center;padding:2px 8px;min-height:20px;background:#f7f9fc;color:#26384d;font-size:9px}.workout-exercise-row:nth-child(even){background:#eef3f8}.workout-number{width:14px;height:14px;border-radius:50%;display:grid;place-items:center;background:#159b91;color:#fff;font-size:8px;font-weight:950}.workout-exercise-dose{font-size:9px;font-weight:950;color:#1769b2}.workout-cooldown{border-top:1px solid #dce6f1;color:#168b9b}.workout-card-footer{display:flex;justify-content:space-between;padding:4px 10px;color:#71839a;font-size:8px;font-weight:800}@page{size:A4 portrait;margin:7mm}@media print{body{padding:0;background:#fff}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style>`;
+  openPrintWindow(`${gymName} - ${member?.name || 'Member'} Workout Card`, html);
 }
 
 function printMemberIdCard(member, settings) {
@@ -9750,7 +9868,7 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
     <div className="form-grid three">
       <FormField label="Member ID"><input value={form.id} readOnly={!!member} onChange={(e) => update('id', e.target.value)} placeholder="Leave blank for auto ID" /></FormField>
       <FormField label="Attendance number"><input value={form.attendanceNumber || ''} onChange={(e) => update('attendanceNumber', e.target.value.replace(/\D/g, '').slice(0, 8))} placeholder="e.g. 23" inputMode="numeric" /></FormField>
-      <FormField label="Full name"><input autoFocus value={form.name} onChange={(e) => update('name', e.target.value)} placeholder="Rahul Sharma" /></FormField>
+      <FormField label="Full name"><input autoFocus value={form.name} onChange={(e) => update('name', e.target.value)} onBlur={(e) => update('name', String(e.target.value || '').trim().replace(/(^|[\s'-])(\p{L})/gu, (_, separator, letter) => separator + letter.toLocaleUpperCase()))} placeholder="Rahul Sharma" /></FormField>
       <FormField label="Phone"><input value={form.phone} onChange={(e) => update('phone', e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="9876543210" inputMode="numeric" /></FormField>
       <FormField label="Email"><input type="email" value={form.email} onChange={(e) => update('email', e.target.value)} placeholder="name@email.com" /></FormField>
     </div>
@@ -11738,6 +11856,7 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
 
 
 function MemberPortalPage() {
+  useGentleInputAssist();
   const gymId = new URLSearchParams(window.location.search).get('gym') || '';
   const [identifier, setIdentifier] = useState('');
   const [pin, setPin] = useState('');
@@ -11769,11 +11888,16 @@ function MemberPortalPage() {
     } finally { setBusy(false); }
   };
   const printPortalWorkoutPlan = () => {
-    const days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday','Unscheduled'];
     const esc = (value) => escapeHtml(value ?? '—');
-    const plans = (portalData?.workout_plans || []).map((plan) => `<section class="plan"><h2>${esc(plan.name || plan.title || 'Workout plan')}</h2><p>${esc(plan.goal || 'General Fitness')} · ${esc(plan.level || 'Beginner')} · ${esc(plan.durationWeeks || 0)} weeks</p>${plan.notes ? `<p>${esc(plan.notes)}</p>` : ''}${days.map((day) => { const exercises=(plan.exercises||[]).filter((ex)=>(ex.day||'Unscheduled')===day); return exercises.length ? `<h3>${day}</h3><table><thead><tr><th>Exercise</th><th>Muscle</th><th>Sets</th><th>Reps</th><th>Rest</th><th>Notes</th></tr></thead><tbody>${exercises.map((ex)=>`<tr><td>${esc(ex.name||ex.exercise||'—')}</td><td>${esc(ex.muscle||ex.muscleGroup||'Full Body')}</td><td>${esc(ex.sets??'—')}</td><td>${esc(ex.reps??'—')}</td><td>${esc(ex.rest||'—')}</td><td>${esc(ex.notes||ex.instructions||'—')}</td></tr>`).join('')}</tbody></table>` : ''; }).join('')}</section>`).join('');
-    const html = `<main class="sheet"><header><div><h1>Preface Fitness</h1><p>Member weekly workout schedule</p></div><strong>WORKOUT PLAN</strong></header><section class="member"><h2>${esc(portalData?.member?.name||'Member')}</h2><span>Member ID: ${esc(portalData?.member?.member_code||'—')}</span></section>${plans || '<p>No workout plans assigned.</p>'}</main><style>*{box-sizing:border-box}body{font:12px/1.5 Arial,sans-serif;color:#172b46;margin:0}.sheet{max-width:900px;margin:20px auto;padding:24px}header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1b8e88;padding-bottom:14px}header h1{margin:0;font-size:24px}header p{margin:4px 0;color:#64748b}header strong{color:#1769b2;font-size:18px}.member{display:flex;gap:20px;align-items:center;flex-wrap:wrap;padding:14px;background:#f3f8ff;margin:14px 0}.member h2{margin:0}.plan{margin:18px 0;break-inside:avoid}.plan h2{font-size:16px;margin:0}.plan h3{font-size:13px;color:#5b43c8;margin:12px 0 6px}.plan p{color:#64748b}table{width:100%;border-collapse:collapse}th,td{padding:8px;border:1px solid #dce5ef;text-align:left}th{background:#eff4ff}@page{size:A4;margin:10mm}@media print{.sheet{margin:0;padding:0}tr{break-inside:avoid}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style>`;
-    openPrintWindow('', html);
+    const sourcePlans = portalData?.workout_plans || [];
+    const plans = sourcePlans.map((plan,index) => `<section class="workout-card-sheet">
+      ${index === 0 ? `<div class="workout-card-top"><div class="workout-brand">PREFACE<small>FITNESS • WORKOUT CARD</small></div><span style="font-size:10px;color:#71839a;font-weight:800">WEEKLY TRAINING</span></div><div class="workout-member-meta"><span>Member: ${esc(portalData?.member?.name || 'Member')}</span><span>ID: ${esc(portalData?.member?.member_code || '—')}</span></div>` : ''}
+      <div class="workout-plan-strip"><strong>${esc(plan.name || plan.title || 'Workout plan')}</strong><span>${esc(String(plan.level || 'BEGINNER').toUpperCase())} · ${esc(Number(plan.durationWeeks || 1))} WKS</span></div>
+      ${workoutCardGroupHtml(plan, esc)}
+      <div class="workout-card-footer"><span>${esc(plan.goal || 'GENERAL FITNESS')}</span><span>${esc(Number(plan.durationWeeks || 1))} WEEKS</span></div>
+    </section>`).join('');
+    const html = `<main class="workout-print-page">${plans || '<p>No workout plans assigned.</p>'}</main><style>*{box-sizing:border-box}body{margin:0;padding:8px;background:#f4f7fb;color:#1b2942;font:10px/1.35 Arial,sans-serif}.workout-print-page{max-width:850px;margin:0 auto}.workout-card-sheet{font-family:Arial,Helvetica,sans-serif;background:#fff;color:#1b2942;border:1px solid #d9e4f0;border-radius:9px;overflow:hidden;margin:7px 0;break-inside:avoid}.workout-card-top{display:flex;justify-content:space-between;align-items:center;padding:7px 11px;background:linear-gradient(110deg,#f4f8fd,#eaf3fb);border-bottom:2px solid #159b91}.workout-brand{font-size:17px;line-height:1;font-weight:950;color:#173b5e}.workout-brand small{display:block;color:#168b9b;font-size:8px;letter-spacing:.08em;margin-top:3px}.workout-member-meta{display:flex;gap:14px;padding:5px 10px;background:#f5f8fc;color:#24527a;font-size:9px;font-weight:800}.workout-plan-strip{display:flex;justify-content:space-between;gap:8px;padding:5px 10px;background:#f7faff;border-bottom:1px solid #e5edf6;color:#24496d}.workout-plan-strip strong{font-size:11px}.workout-plan-strip span{font-size:9px;font-weight:900;color:#1769b2}.workout-day-card{margin:5px 9px 7px;border:1px solid #dce6f1;border-radius:7px;overflow:hidden;break-inside:avoid}.workout-day-heading{background:#e7f3ff;color:#1769b2;padding:5px 9px;font-size:10px;font-weight:950}.workout-warmup,.workout-cooldown{display:flex;justify-content:space-between;padding:3px 9px;font-size:9px;font-weight:900;color:#167f79}.workout-exercise-row{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:7px;align-items:center;padding:2px 8px;min-height:20px;background:#f7f9fc;color:#26384d;font-size:9px}.workout-exercise-row:nth-child(even){background:#eef3f8}.workout-number{width:14px;height:14px;border-radius:50%;display:grid;place-items:center;background:#159b91;color:#fff;font-size:8px;font-weight:950}.workout-exercise-dose{font-size:9px;font-weight:950;color:#1769b2}.workout-cooldown{border-top:1px solid #dce6f1;color:#168b9b}.workout-card-footer{display:flex;justify-content:space-between;padding:4px 10px;color:#71839a;font-size:8px;font-weight:800}@page{size:A4 portrait;margin:7mm}@media print{body{padding:0;background:#fff}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style>`;
+    openPrintWindow('Preface Fitness Workout Card', html);
   };
   const logout = () => { setPortalData(null); setIdentifier(''); setPin(''); setError(''); };
   const card = { background:'rgba(255,255,255,.94)', border:'1px solid rgba(210,220,240,.9)', borderRadius:20, padding:20, boxShadow:'0 14px 36px rgba(44,55,110,.08)' };
@@ -11809,7 +11933,7 @@ function MemberPortalPage() {
         <section style={{...card,marginBottom:16}}><h2 style={{fontSize:19,margin:'0 0 14px',background:'linear-gradient(90deg,#4f46e5,#0891b2)',WebkitBackgroundClip:'text',color:'transparent'}}>✦ Membership details</h2><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:14,fontSize:14}}><div><div style={{color:'#7b8798',marginBottom:4}}>Registered phone</div><strong>{portalData.member.phone||'—'}</strong></div><div><div style={{color:'#7b8798',marginBottom:4}}>Membership start</div><strong>{portalData.member.start_date||'—'}</strong></div><div><div style={{color:'#7b8798',marginBottom:4}}>Membership amount</div><strong>{moneyText(portalData.member.membership_amount)}</strong></div><div><div style={{color:'#7b8798',marginBottom:4}}>Amount paid</div><strong>{moneyText(portalData.member.paid_amount)}</strong></div></div></section>
         <section style={{...card,marginBottom:16}}><h2 style={{fontSize:19,margin:'0 0 14px',background:'linear-gradient(90deg,#059669,#0d9488)',WebkitBackgroundClip:'text',color:'transparent'}}>✦ Body measurements</h2>{!measurementRows.length?<p style={{color:'#778398',fontSize:14,margin:0}}>No body measurements have been added yet.</p>:<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(130px,1fr))',gap:10}}>{measurementRows.map(([name,value,unit])=><div key={name} style={{padding:12,borderRadius:11,background:'#f7f9fc',border:'1px solid #edf0f5'}}><div style={{fontSize:12,color:'#7b8798',marginBottom:5}}>{name}</div><strong style={{fontSize:17}}>{value}{unit?' '+unit:''}</strong></div>)}</div>}</section>
         <section style={{...card,marginBottom:16}}><h2 style={{fontSize:19,margin:'0 0 14px',background:'linear-gradient(90deg,#ea580c,#db2777)',WebkitBackgroundClip:'text',color:'transparent'}}>✦ Medical conditions & notes</h2>{(memberMeta.medicalConditions||[]).length===0 && !memberMeta.medicalOther && !memberMeta.surgeryDetails && !memberMeta.additionalMedicalNotes ? <p style={{color:'#778398',fontSize:14,margin:0}}>No medical conditions or notes have been recorded.</p>:<div style={{display:'grid',gap:10}}>{(memberMeta.medicalConditions||[]).length>0&&<div><div style={{fontSize:12,color:'#7b8798',marginBottom:6}}>Reported conditions / injuries</div><div style={{display:'flex',gap:7,flexWrap:'wrap'}}>{memberMeta.medicalConditions.map((condition)=><span key={condition} style={{padding:'6px 9px',borderRadius:99,background:'#fff4e5',border:'1px solid #ffe0b2',fontSize:12,fontWeight:700,color:'#8a5200'}}>{condition}</span>)}</div></div>}{memberMeta.medicalOther&&<div><div style={{fontSize:12,color:'#7b8798'}}>Other condition details</div><div style={{fontSize:14,whiteSpace:'pre-wrap'}}>{memberMeta.medicalOther}</div></div>}{memberMeta.surgeryDetails&&<div><div style={{fontSize:12,color:'#7b8798'}}>Surgery details</div><div style={{fontSize:14,whiteSpace:'pre-wrap'}}>{memberMeta.surgeryDetails}</div></div>}{memberMeta.additionalMedicalNotes&&<div><div style={{fontSize:12,color:'#7b8798'}}>Additional medical notes</div><div style={{fontSize:14,whiteSpace:'pre-wrap'}}>{memberMeta.additionalMedicalNotes}</div></div>}</div>}</section>
-        <section className="member-portal-workouts" style={{...card,marginBottom:16}}><div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,flexWrap:'wrap',marginBottom:14}}><h2 style={{fontSize:19,margin:0,background:'linear-gradient(90deg,#7c3aed,#2563eb)',WebkitBackgroundClip:'text',color:'transparent'}}>✦ Assigned weekly workout plans</h2><button className="member-portal-no-print" onClick={printPortalWorkoutPlan} style={{border:'1px solid #d8d1ff',borderRadius:10,padding:'8px 12px',background:'#f4f0ff',color:'#5b43c8',fontWeight:800,cursor:'pointer'}}>Print workout plan</button></div>{!portalData.workout_plans?.length?<p style={{color:'#778398',fontSize:14,margin:0}}>No workout plans have been assigned to your profile yet.</p>:<div style={{display:'grid',gap:12}}>{portalData.workout_plans.map((plan,index)=>{const days=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday','Unscheduled'];return <div key={plan.id||index} style={{padding:14,borderRadius:12,border:'1px solid #e8edf4',background:'#fbfcff'}}><div style={{display:'flex',justifyContent:'space-between',gap:10,flexWrap:'wrap'}}><strong style={{fontSize:16}}>{plan.name||plan.title||`Workout Plan ${index+1}`}</strong>{plan.durationWeeks&&<span style={{fontSize:12,color:'#7654e8',fontWeight:800}}>{plan.durationWeeks} week(s)</span>}</div>{plan.description&&<p style={{fontSize:13,color:'#6e7c91',margin:'7px 0'}}>{plan.description}</p>}{plan.notes&&<p style={{fontSize:13,color:'#6e7c91',whiteSpace:'pre-wrap',margin:'7px 0'}}>{plan.notes}</p>}{days.map(day=>{const exercises=(plan.exercises||[]).filter(ex=>(ex.day||'Unscheduled')===day);return exercises.length?<div key={day} style={{marginTop:12}}><h3 style={{fontSize:14,color:'#5b43c8',margin:'0 0 7px'}}>{day}</h3><div style={{overflowX:'auto'}}><table style={{width:'100%',borderCollapse:'collapse',fontSize:13,minWidth:330}}><thead><tr>{['Exercise','Muscle','Sets','Reps','Rest','Notes'].map(t=><th key={t} style={{textAlign:'left',padding:'8px 6px',borderBottom:'1px solid #e8edf4',color:'#758198'}}>{t}</th>)}</tr></thead><tbody>{exercises.map((ex,i)=><tr key={ex.id||i}>{[ex.name||ex.exercise||'—',ex.muscle||ex.muscleGroup||'Full Body',ex.sets??'—',ex.reps??'—',ex.rest||'—',ex.notes||ex.instructions||'—'].map((v,j)=><td key={j} style={{padding:'9px 6px',borderBottom:'1px solid #f0f3f7'}}>{v}</td>)}</tr>)}</tbody></table></div></div>:null;})}</div>})}</div>}</section>
+        <section className="member-portal-workouts" style={{...card,marginBottom:16,background:'#ffffff',border:'1px solid #d9e4f0',color:'#1b2942'}}><div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,flexWrap:'wrap',marginBottom:14}}><h2 style={{fontSize:19,margin:0,color:'#1769b2',letterSpacing:'.04em'}}>✦ FITNESS • WORKOUT CARD</h2><button className="member-portal-no-print" onClick={printPortalWorkoutPlan} style={{border:'1px solid #c6def8',borderRadius:10,padding:'8px 12px',background:'#e7f3ff',color:'#1769b2',fontWeight:900,cursor:'pointer'}}>Print workout plan</button></div>{!portalData.workout_plans?.length?<p style={{color:'#71839a',fontSize:14,margin:0}}>No workout plans have been assigned to your profile yet.</p>:<div style={{display:'grid',gap:7}}>{portalData.workout_plans.map((plan,index)=>{const groups=getWorkoutDayGroups(plan);return <section key={plan.id||index} className="workout-card-sheet" style={{margin:0}}>{index===0&&<><div className="workout-card-top"><div className="workout-brand">PREFACE<small>FITNESS • WORKOUT CARD</small></div><span style={{fontSize:10,color:'#71839a',fontWeight:800}}>WEEKLY TRAINING</span></div><div className="workout-member-meta"><span>Member: {portalData.member.name||'Member'}</span><span>ID: {portalData.member.member_code||'—'}</span></div></>}<div className="workout-plan-strip"><strong>{plan.name||plan.title||'Workout plan'}</strong><span>{String(plan.level||'BEGINNER').toUpperCase()} · {Number(plan.durationWeeks||1)} WKS</span></div>{groups.length?groups.map((group,gIndex)=><section key={`${plan.id||index}-${gIndex}`} className="workout-day-card"><div className="workout-day-heading">{group.days.map(day=>day.toUpperCase()).join('  •  ')}</div><div className="workout-warmup"><strong>Warm up &amp; Stretching</strong><b>{plan.warmupMinutes??10} MIN</b></div>{group.exercises.map((ex,i)=><div key={ex.id||i} className="workout-exercise-row"><span className="workout-number">{i+1}</span><span className="workout-exercise-name">{ex.name||ex.exercise||'Exercise'}</span><span className="workout-exercise-dose">{ex.reps??15} × {ex.sets??3}</span></div>)}<div className="workout-cooldown"><strong>Cool Down &amp; Stretching</strong><b>{plan.cooldownMinutes??5} MIN</b></div></section>):<p style={{padding:12,color:'#71839a'}}>No exercises added.</p>}<div className="workout-card-footer"><span>{plan.goal||'GENERAL FITNESS'}</span><span>{Number(plan.durationWeeks||1)} WEEKS</span></div></section>})}</div>}</section>
         <section style={{...card,marginBottom:16}}><h2 style={{fontSize:19,margin:'0 0 14px',background:'linear-gradient(90deg,#16a34a,#0d9488)',WebkitBackgroundClip:'text',color:'transparent'}}>✦ Payment history</h2>{!portalData.payments?.length?<p style={{color:'#778398',fontSize:14,margin:0}}>No payment records available yet.</p>:<div style={{overflowX:'auto'}}><table style={{width:'100%',borderCollapse:'collapse',fontSize:13,minWidth:440}}><thead><tr>{['Date','Type','Mode','Amount','Receipt'].map(t=><th key={t} style={{textAlign:'left',padding:'10px 8px',borderBottom:'1px solid #e8edf4',color:'#758198'}}>{t}</th>)}</tr></thead><tbody>{portalData.payments.map((p,i)=><tr key={p.id||i}>{[p.payment_date||p.date||'—',p.payment_type||'Payment',p.payment_mode||'—',moneyText(p.amount),p.invoice_number||'—'].map((v,j)=><td key={j} style={{padding:'11px 8px',borderBottom:'1px solid #f0f3f7',whiteSpace:'nowrap'}}>{v}</td>)}</tr>)}</tbody></table></div>}</section>
         <section style={card}><h2 style={{fontSize:19,margin:'0 0 14px',background:'linear-gradient(90deg,#d97706,#db2777)',WebkitBackgroundClip:'text',color:'transparent'}}>✦ Recent attendance</h2>{!portalData.attendance?.length?<p style={{color:'#778398',fontSize:14,margin:0}}>No attendance records available yet.</p>:<div style={{display:'grid',gap:9}}>{portalData.attendance.map((a,i)=><div key={a.id||i} style={{display:'flex',justifyContent:'space-between',gap:12,padding:'11px 12px',borderRadius:10,background:'#f7f9fc',fontSize:13}}><strong>{a.date||a.attendance_date||a.check_in_date||a.created_at?.slice(0,10)||'Attendance'}</strong><span style={{color:'#718096'}}>{a.source||a.status||'Checked in'}</span></div>)}</div>}</section>
       </>}
