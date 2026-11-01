@@ -2171,16 +2171,26 @@ function useGentleInputAssist() {
         && !/\b(email|website|url|maps|search)\b/i.test(context);
     };
     const capitalizeAddress = (value) => {
+      // Only normalize spacing and capitalization. Never add punctuation.
       const smallWords = new Set(['and', 'of', 'the', 'near', 'behind', 'opposite', 'at', 'to']);
-      return gentlyCorrectText(value).trim().replace(/\s+/g, ' ').split(/(\s+|,\s*|\/)/).map((part, index, all) => {
-        if (!part || /^\s+$/.test(part) || part === '/' || /^,/.test(part)) return part;
-        const word = part.replace(/^[,]+|[,]+$/g, '');
-        if (!word || /^\d+$/.test(word) || /^[A-Z0-9-]{2,}$/i.test(word) && /\d/.test(word)) return part;
-        const lower = word.toLocaleLowerCase();
-        const isFirstWord = index === 0 || /^\s+$/.test(all[index - 1] || '') && (index < 2 || !all.slice(0, index).some((x) => x && !/^\s+$/.test(x)));
-        const fixed = smallWords.has(lower) && !isFirstWord ? lower : lower.charAt(0).toLocaleUpperCase() + lower.slice(1);
-        return part.replace(word, fixed);
-      });
+      return String(value || '')
+        .replace(/[\t\r]+/g, ' ')
+        .replace(/ {2,}/g, ' ')
+        .trim()
+        .split(' ')
+        .map((word, index) => {
+          if (!word) return word;
+          const match = word.match(/^([^\p{L}\p{N}]*)([\p{L}\p{N}][^,;]*?)([^\p{L}\p{N}]*)$/u);
+          if (!match) return word;
+          const [, leading, core, trailing] = match;
+          if (/^\d+$/.test(core) || /[A-Z0-9-]{2,}/i.test(core) && /\d/.test(core)) return word;
+          const lower = core.toLocaleLowerCase();
+          const fixed = smallWords.has(lower) && index > 0
+            ? lower
+            : lower.charAt(0).toLocaleUpperCase() + lower.slice(1);
+          return leading + fixed + trailing;
+        })
+        .join(' ');
     };
     const setNativeValue = (el, value) => {
       if (el.value === value) return;
