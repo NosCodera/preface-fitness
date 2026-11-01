@@ -3537,6 +3537,53 @@ function App() {
     }
   };
 
+  const sendMemberPortalCredentials = async (member) => {
+    if (!isOwner) {
+      setToast('Only the Admin can reset and share a Member Portal PIN.');
+      return;
+    }
+    if (!member?.cloudId) {
+      setToast('Member cloud record is missing. Refresh member data and try again.');
+      return;
+    }
+    if (!member.phone) {
+      setToast('This member has no phone number saved.');
+      return;
+    }
+    const confirmed = window.confirm(
+      `A new 6-digit Member Portal PIN will be generated for ${member.name}. The previous PIN will stop working. Continue?`
+    );
+    if (!confirmed) return;
+
+    const whatsappTab = window.open('about:blank', '_blank');
+    try {
+      const randomBytes = new Uint32Array(1);
+      window.crypto.getRandomValues(randomBytes);
+      const newPin = String(randomBytes[0] % 1000000).padStart(6, '0');
+      const { error } = await supabase.rpc('set_member_portal_pin', {
+        p_member_id: member.cloudId,
+        p_pin: newPin,
+      });
+      if (error) throw error;
+
+      const digits = String(member.phone).replace(/\D/g, '');
+      const target = digits.length === 10 ? `91${digits}` : digits;
+      const gymName = data.settings?.gymName || 'Preface Fitness';
+      const portalUrl = `${PRODUCTION_APP_URL}?gym=${encodeURIComponent(data.gym?.id || PRODUCTION_GYM_ID)}#member-portal`;
+      const message = `${gymName} – Member Portal Login Details\n\nMember Name: ${member.name}\nMember ID: ${member.id}\n6-digit PIN: ${newPin}\n\nPortal: ${portalUrl}\n\nPlease keep your PIN private.`;
+      const url = target
+        ? `https://wa.me/${target}?text=${encodeURIComponent(message)}`
+        : `https://wa.me/?text=${encodeURIComponent(message)}`;
+      if (whatsappTab) whatsappTab.location.href = url;
+      else window.open(url, '_blank', 'noopener,noreferrer');
+      setToast('New Member Portal PIN generated. Review the WhatsApp message and send it to the member.');
+    } catch (error) {
+      if (whatsappTab) whatsappTab.close();
+      console.error('Member Portal PIN reset failed:', error);
+      setToast(error?.message || 'Unable to reset the Member Portal PIN.');
+    }
+  };
+
   const markAttendance = (memberOrId, attendanceDate = today) => {
     // Prefer a unique member ID. Names are not unique (e.g. two members named Aditya Rawat).
     const requestedId = typeof memberOrId === 'object' && memberOrId
@@ -4881,7 +4928,7 @@ function App() {
             <>
           {active === 'Performance' && <PerformancePage data={data} />}
           {active === 'Dashboard' && <Dashboard {...{ activeMembers, expiringMembers, overdue, revenue, data, navigate, setModal, markAttendance, isReadOnlyStaff }} />}
-          {active === 'Members' && <MembersPage members={data.members} query={query} setQuery={setQuery} setModal={setModal} markAttendance={markAttendance} deleteMember={deleteMember} settings={data.settings || {}} payments={data.payments || []} ptSessions={data.ptSessions || []} trainers={data.trainers || []} workoutPlans={data.workoutPlans || []} dietPlans={data.dietPlans || []} />}
+          {active === 'Members' && <MembersPage members={data.members} query={query} setQuery={setQuery} setModal={setModal} markAttendance={markAttendance} deleteMember={deleteMember} settings={data.settings || {}} payments={data.payments || []} ptSessions={data.ptSessions || []} trainers={data.trainers || []} workoutPlans={data.workoutPlans || []} dietPlans={data.dietPlans || []} sendMemberPortalCredentials={sendMemberPortalCredentials} isOwner={isOwner} />}
           {active === 'Leads' && <LeadsPage leads={data.leads} members={data.members} setModal={setModal} updateLeadStage={updateLeadStage} updateLeadDetails={updateLeadDetails} deleteLead={deleteLead} convertLeadToMember={convertLeadToMember} />}
           {active === 'Website Enquiries' && <WebsiteEnquiriesPage enquiries={data.websiteEnquiries || []} onUpdateStatus={updateWebsiteEnquiryStatus} onDelete={deleteWebsiteEnquiry} />}
           {active === 'Memberships' && <MembershipsPage members={data.members} data={data} setModal={setModal} planPrices={planPrices} setData={setData} setToast={setToast} onRenewMembership={renewMembership} />}
@@ -6838,7 +6885,7 @@ function printMemberDietPlans(member, settings, plans = []) {
   win.document.open(); win.document.write(html); win.document.close();
 }
 
-function MembersPage({ members, query, setQuery, setModal, markAttendance, deleteMember, settings, payments = [], ptSessions = [], trainers = [], workoutPlans = [], dietPlans = [] }) {
+function MembersPage({ members, query, setQuery, setModal, markAttendance, deleteMember, settings, payments = [], ptSessions = [], trainers = [], workoutPlans = [], dietPlans = [], sendMemberPortalCredentials, isOwner = false }) {
   const [statusFilter, setStatusFilter] = useState('All');
   const [selectedMember, setSelectedMember] = useState(null);
   const [workoutPlansExpanded, setWorkoutPlansExpanded] = useState(false);
@@ -6953,6 +7000,104 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
         .member-profile-premium .profile-actions { display:grid;gap:9px; }
         .member-profile-premium .profile-actions .quick-action { min-height:52px;border:1px solid #e7edf2;border-radius:14px;background:#fff;transition:all .2s ease; }
         .member-profile-premium .profile-actions .quick-action:hover { transform:translateX(4px);border-color:#bfe7e2;background:#f7fffd;box-shadow:0 8px 18px rgba(15,118,110,.08); }
+
+        /* Premium action tiles: consistent with Preface Fitness violet + teal theme */
+        .member-profile-premium .documents-grid,
+        .member-profile-premium .profile-actions {
+          gap:12px;
+        }
+        .member-profile-premium .quick-action {
+          position:relative;
+          isolation:isolate;
+          display:flex;
+          align-items:center;
+          gap:13px;
+          min-width:0;
+          min-height:66px !important;
+          padding:10px 14px !important;
+          overflow:hidden;
+          border:1px solid #e3e9f3 !important;
+          border-radius:16px !important;
+          background:linear-gradient(115deg,#ffffff 0%,#fbfcff 72%,#f7fbff 100%) !important;
+          color:#34445e !important;
+          box-shadow:0 3px 10px rgba(31,48,78,.035);
+          text-align:left;
+          cursor:pointer;
+          transition:transform .2s ease,border-color .2s ease,box-shadow .2s ease,background .2s ease !important;
+        }
+        .member-profile-premium .quick-action::before {
+          content:"";
+          position:absolute;
+          inset:0 auto 0 0;
+          width:3px;
+          border-radius:16px 0 0 16px;
+          background:linear-gradient(180deg,#7957ff,#18b8a5);
+          opacity:0;
+          transition:opacity .2s ease;
+          z-index:-1;
+        }
+        .member-profile-premium .quick-action > span {
+          display:grid !important;
+          place-items:center;
+          flex:0 0 42px;
+          width:42px !important;
+          height:42px !important;
+          min-width:42px;
+          margin:0 !important;
+          border:1px solid rgba(109,74,255,.09);
+          border-radius:13px !important;
+          background:linear-gradient(145deg,#f0edff,#eafaf7) !important;
+          color:#6350e8 !important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.9);
+          transition:transform .2s ease,background .2s ease,color .2s ease;
+        }
+        .member-profile-premium .quick-action > strong {
+          flex:1;
+          min-width:0;
+          color:#34445e !important;
+          font-size:13px !important;
+          font-weight:800 !important;
+          line-height:1.35;
+          letter-spacing:-.01em;
+        }
+        .member-profile-premium .quick-action > svg:last-child {
+          flex:0 0 auto;
+          color:#9aa8bb !important;
+          transition:transform .2s ease,color .2s ease;
+        }
+        .member-profile-premium .quick-action:hover:not(:disabled) {
+          transform:translateY(-3px) !important;
+          border-color:#cfc5ff !important;
+          background:linear-gradient(115deg,#fff 0%,#faf8ff 62%,#f0fbf9 100%) !important;
+          box-shadow:0 12px 24px rgba(78,68,150,.10) !important;
+        }
+        .member-profile-premium .quick-action:hover:not(:disabled)::before { opacity:1; }
+        .member-profile-premium .quick-action:hover:not(:disabled) > span {
+          transform:translateY(-1px) scale(1.04);
+          background:linear-gradient(145deg,#e8e1ff,#ddf8f2) !important;
+        }
+        .member-profile-premium .quick-action:hover:not(:disabled) > svg:last-child {
+          transform:translate(2px,-2px);
+          color:#6950e8 !important;
+        }
+        .member-profile-premium .quick-action:focus-visible {
+          outline:3px solid rgba(109,74,255,.2);
+          outline-offset:2px;
+        }
+        .member-profile-premium .quick-action:disabled {
+          opacity:.48;
+          cursor:not-allowed;
+          box-shadow:none;
+        }
+        .member-profile-premium .quick-action.action-idcard > span,
+        .member-profile-premium .quick-action.action-edit > span { color:#6750e8 !important;background:linear-gradient(145deg,#f0edff,#e8eaff) !important; }
+        .member-profile-premium .quick-action.action-share-id > span,
+        .member-profile-premium .quick-action.action-share-bill > span,
+        .member-profile-premium .quick-action.action-whatsapp > span { color:#0b9d8d !important;background:linear-gradient(145deg,#e5faf5,#e8f7ff) !important; }
+        .member-profile-premium .quick-action.action-bill > span,
+        .member-profile-premium .quick-action.action-email > span { color:#3980c8 !important;background:linear-gradient(145deg,#e8f3ff,#edf2ff) !important; }
+        .member-profile-premium .quick-action.action-portal-pin > span { color:#8a58d8 !important;background:linear-gradient(145deg,#f4eaff,#eeeaff) !important; }
+        .member-profile-premium .quick-action.action-attendance > span { color:#159b70 !important;background:linear-gradient(145deg,#e5f8ef,#e5faf7) !important; }
         .member-profile-premium .member-notes { margin:0;color:#63748a;font-size:14px;line-height:1.75; }
 
         /* Package & Membership History — contained, full-width profile section */
@@ -7384,20 +7529,21 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
           <div className="profile-card" style={cardStyle}>
             <PanelHeader title="Documents" subtitle="Print, save as PDF or share member documents" icon={FileDown} />
             <div className="documents-grid">
-              <button className="quick-action" onClick={() => printMemberIdCard(member, settings)}><span><FileDown size={18} /></span><strong>ID card / PDF</strong><ArrowUpRight size={15} /></button>
-              <button className="quick-action" onClick={() => shareMemberWhatsApp(member)}><span><MessageCircle size={18} /></span><strong>Share ID on WhatsApp</strong><ArrowUpRight size={15} /></button>
-              <button className="quick-action" onClick={() => { const payment = getInvoicePaymentForMember(member, payments); setModal({ type:'invoiceOptions', source:'member', member, payment }); }}><span><CreditCard size={18} /></span><strong>Bill / PDF</strong><ArrowUpRight size={15} /></button>
-              <button className="quick-action" onClick={() => { const payment = getInvoicePaymentForMember(member, payments); shareBillWhatsApp(member, settings, payment); }}><span><MessageCircle size={18} /></span><strong>Share bill on WhatsApp</strong><ArrowUpRight size={15} /></button>
+              <button className="quick-action action-idcard" onClick={() => printMemberIdCard(member, settings)}><span><QrCode size={19} /></span><strong>ID card / PDF</strong><ArrowUpRight size={16} /></button>
+              <button className="quick-action action-share-id" onClick={() => shareMemberWhatsApp(member, settings)}><span><MessageCircle size={19} /></span><strong>Share ID on WhatsApp</strong><ArrowUpRight size={16} /></button>
+              <button className="quick-action action-bill" onClick={() => { const payment = getInvoicePaymentForMember(member, payments); setModal({ type:'invoiceOptions', source:'member', member, payment }); }}><span><CreditCard size={19} /></span><strong>Bill / PDF</strong><ArrowUpRight size={16} /></button>
+              <button className="quick-action action-share-bill" onClick={() => { const payment = getInvoicePaymentForMember(member, payments); shareBillWhatsApp(member, settings, payment); }}><span><MessageCircle size={19} /></span><strong>Share bill on WhatsApp</strong><ArrowUpRight size={16} /></button>
+              <button className="quick-action action-portal-pin" onClick={() => sendMemberPortalCredentials?.(member)} disabled={!isOwner} title={isOwner ? "Generate a new 6-digit PIN and share login details" : "Only Admin can reset a member PIN"}><span><ShieldCheck size={19} /></span><strong>Send Portal ID &amp; PIN on WhatsApp</strong><ArrowUpRight size={16} /></button>
             </div>
           </div>
 
           <div className="profile-card" style={cardStyle}>
             <PanelHeader title="Quick actions" subtitle="Common front-desk actions" icon={Sparkles} />
             <div className="profile-actions">
-              <button className="quick-action" onClick={() => setModal({ type:'editMember', member })}><span><Settings size={18} /></span><strong>Edit member</strong><ArrowUpRight size={15} /></button>
-              <button className="quick-action" onClick={() => markAttendance(member.id)}><span><CheckCircle2 size={18} /></span><strong>Mark attendance</strong><ArrowUpRight size={15} /></button>
-              <button className="quick-action" onClick={() => window.open(`https://wa.me/91${member.phone}`, '_blank')}><span><MessageCircle size={18} /></span><strong>WhatsApp member</strong><ArrowUpRight size={15} /></button>
-              <button className="quick-action" onClick={() => window.location.href = `mailto:${member.email || ''}`}><span><MessageCircle size={18} /></span><strong>Send email</strong><ArrowUpRight size={15} /></button>
+              <button className="quick-action action-edit" onClick={() => setModal({ type:'editMember', member })}><span><Pencil size={19} /></span><strong>Edit member</strong><ArrowUpRight size={16} /></button>
+              <button className="quick-action action-attendance" onClick={() => markAttendance(member.id)}><span><CheckCircle2 size={19} /></span><strong>Mark attendance</strong><ArrowUpRight size={16} /></button>
+              <button className="quick-action action-whatsapp" onClick={() => window.open(`https://wa.me/91${member.phone}`, '_blank')}><span><Phone size={19} /></span><strong>WhatsApp member</strong><ArrowUpRight size={16} /></button>
+              <button className="quick-action action-email" onClick={() => window.location.href = `mailto:${member.email || ''}`}><span><Mail size={19} /></span><strong>Send email</strong><ArrowUpRight size={16} /></button>
             </div>
           </div>
 
@@ -10017,8 +10163,8 @@ function getMemberSubscriptionGroups(member, payments = []) {
   return groups.reverse().map((g, index) => ({ ...g, label: `${g.description} · ${formatDate(g.startDate)}${g.endDate && g.endDate !== g.startDate ? ` – ${formatDate(g.endDate)}` : ''} · ${g.payments.length} payment(s)` }));
 }
 
-function openPrintWindow(title, html) {
-  const printWindow = window.open('', '_blank', 'width=900,height=800');
+function openPrintWindow(title, html, returnDocumentHtml = false) {
+  const printWindow = returnDocumentHtml ? null : window.open('', '_blank', 'width=900,height=800');
   const documentHtml = `<!doctype html><html><head><title>${escapeHtml(title)}</title><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>
   @page{size:A4 portrait;margin:10mm}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#fff;color:#1d2b42;font-family:Arial,Helvetica,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}.invoice-page{width:100%;max-width:900px;margin:12px auto;background:#fff;font-size:12px;line-height:1.5;color:#172b46}.invoice-hero{position:relative;overflow:hidden;color:#172b46;padding:12px 0 15px;display:flex;align-items:center;justify-content:space-between;gap:18px;border-bottom:3px solid #203954;background:#f3f8ff;border-radius:0 0 10px 10px}.hero-brand{display:flex;align-items:center;gap:12px;min-width:0}.hero-logo{width:54px;height:54px;object-fit:contain;background:#fff;border-radius:5px;padding:1px}.hero-name{font-size:27px;line-height:1.05;font-weight:900;letter-spacing:.01em;color:#172b46}.hero-tag{font-size:8px;letter-spacing:.2em;color:#596777;margin-top:6px;font-weight:700}.hero-invoice{text-align:right;flex:0 0 auto}.invoice-title{font-size:26px;letter-spacing:.02em;font-weight:900;color:#172b46}.invoice-status{display:inline-block;margin-top:7px;color:#087f70;background:#dff8ef;border:1px solid #b7edda;border-radius:30px;padding:4px 9px;font-size:9px;font-weight:900;letter-spacing:.12em}.invoice-meta{font-size:10px;line-height:1.7;margin-top:10px;color:#34445a}.invoice-meta strong{color:#1d2b42}.seller-details{padding:10px 12px;margin:0 0 3px;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:11px;color:#43546c;line-height:1.6;border-bottom:1px solid #dbe5ef;background:#f8fbff;border-radius:0 0 8px 8px}.seller-details strong{color:#1d2b42}.invoice-parties{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:13px 0 15px}.party-box{border:1px solid #d7e5f6;border-radius:13px;padding:13px 15px;background:#f7faff;font-size:11px;line-height:1.7;color:#42536b;min-width:0;box-shadow:0 3px 10px rgba(31,66,112,.045)}.party-box:nth-child(2){background:#f2fbf7;border-color:#c9eee1}.party-label{display:flex;align-items:center;gap:8px;font-size:10px;font-weight:900;letter-spacing:.13em;color:#17385d;margin-bottom:9px;text-transform:uppercase}.party-label:before{content:'';display:inline-block;width:4px;height:18px;border-radius:3px;background:#1769b2;flex:0 0 4px;box-shadow:none}.party-box:nth-child(2) .party-label:before{background:#059669}.party-box strong{display:inline;color:#1d2b42;font-size:11px;margin-bottom:0}.party-box > strong:first-of-type{display:block;font-size:16px;margin:2px 0 6px;color:#142b49}.invoice-table-wrap{padding:0}.invoice-table{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:0;font-size:11px;border:1px solid #cfdced;border-radius:10px;overflow:hidden}.invoice-table th{background:#203650;color:#fff;text-align:left;vertical-align:middle;padding:11px 9px;font-size:10px;line-height:1.35;letter-spacing:.025em;border-bottom:1px solid #d7e0e9;white-space:normal}.invoice-table td{padding:12px 9px;border-bottom:1px solid #e1eaf3;color:#344861;vertical-align:middle;font-size:11px;line-height:1.5;overflow-wrap:anywhere;background:#fff}.invoice-table tr:last-child td{border-bottom:1px solid #dce2e8}.invoice-table td strong{display:block;color:#172b46;font-size:12px}.invoice-table td small{display:block;color:#718096;margin-top:3px;font-size:10px}.invoice-table .right{text-align:right}.invoice-table th:nth-child(1),.invoice-table td:nth-child(1){text-align:center}.invoice-table th:nth-child(5),.invoice-table td:nth-child(5){text-align:center}.invoice-table th:nth-child(6),.invoice-table td:nth-child(6),.invoice-table th:nth-child(7),.invoice-table td:nth-child(7){text-align:right}.invoice-table .qty-col{text-align:center}.invoice-table .money-col{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}.invoice-lower{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:13px 0 0;align-items:stretch}.payment-summary,.amount-summary{border:1px solid #d4e3f4;border-top:4px solid #0c9b83;border-radius:12px;overflow:hidden;background:#f5f9ff;box-shadow:0 4px 12px rgba(32,59,91,.05)}.amount-summary{border-top-color:#344d91;background:#f7f8ff}.summary-title{padding:12px 13px;background:transparent;color:#17365a;font-size:10px;font-weight:900;letter-spacing:.13em;border-bottom:1px solid #e1eaf4}.summary-title:before{content:'';display:inline-block;width:4px;height:18px;margin-right:9px;border-radius:3px;background:#079579;vertical-align:middle}.amount-summary .summary-title:before{background:#4d63ba}.summary-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 13px;border-bottom:1px solid #e2eaf2;font-size:11px;color:#52647d}.summary-row strong{color:#172b46;font-size:11px;text-align:right;font-variant-numeric:tabular-nums}.summary-row.grand{background:#e3f7f0;color:#087d73;border-top:2px solid #344d91;border-bottom:0;padding:11px 12px}.summary-row.grand span,.summary-row.grand strong{color:#16877d;font-weight:900}.summary-row.grand strong{font-size:14px}.payment-chip{display:inline-block;margin:10px 12px;background:#ddf8ee;color:#087d70;border:1px solid #b8ebd9;border-radius:30px;padding:6px 10px;font-size:9px;font-weight:900}.invoice-note{margin:12px 0 0;padding:11px 14px;background:#eff6ff;border:1px solid #d7e7fa;border-left:4px solid #0879b7;border-radius:9px;color:#50627b;font-size:11px;line-height:1.6}.invoice-note strong{color:#344257}.schedule-wrap{margin-top:14px;border:1px solid #d6e3f1;border-radius:12px;overflow:hidden;background:#fff;box-shadow:0 3px 10px rgba(31,66,112,.04)}.schedule-title{padding:11px 13px;font-size:10px;font-weight:900;letter-spacing:.13em;color:#17365a;border-bottom:1px solid #dce7f3;background:#eff6ff}.schedule-title:before{content:'';display:inline-block;width:4px;height:18px;margin-right:9px;border-radius:3px;background:#1769b2;vertical-align:middle}.schedule-table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:10px}.schedule-table th{font-size:10px;letter-spacing:.025em;color:#43556e;text-align:left;padding:9px 10px;background:#f7faff;border-bottom:1px solid #dfe8f2}.schedule-table td{padding:10px;border-bottom:1px solid #e5e9ed;color:#344861;font-size:11px;font-variant-numeric:tabular-nums}.schedule-table tr:last-child td{border-bottom:0}.status-pill{display:inline-block;border:1px solid #b8ebd9;color:#078468;background:#dff9ef;border-radius:20px;padding:5px 10px;font-size:8px;font-weight:900;letter-spacing:.04em;white-space:nowrap}.status-pill.pending{border-color:#eee3ca;color:#9a6a25;background:#fffdf7}.invoice-bottom{display:grid;grid-template-columns:1fr 245px;gap:14px;padding:14px 0 0;align-items:start}.terms-card{border-top:1px solid #dce2e8;padding:11px 0;background:#fff;min-width:0}.qr-card{border:1px solid #d6e3f1;border-radius:12px;padding:11px;background:#f7faff;min-width:0;box-shadow:0 3px 10px rgba(31,66,112,.04)}.bottom-title{font-size:10px;font-weight:900;color:#17365a;margin-bottom:9px;letter-spacing:.12em}.bottom-title:before{content:'';display:inline-block;width:4px;height:17px;margin-right:8px;border-radius:3px;background:#1769b2;vertical-align:middle}.qr-row{display:flex;align-items:center;gap:10px}.qr-frame{position:relative;width:94px;height:94px;flex:0 0 94px;padding:0;background:transparent}.qr-frame .qr-code{width:100%;height:100%;display:block;object-fit:contain;background:white}.qr-center-logo{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:21px;height:21px;object-fit:contain;background:#fff;border-radius:4px;padding:2px;box-shadow:0 0 0 2px #fff}.qr-copy{font-size:9px;color:#5c6b80;line-height:1.55;overflow-wrap:anywhere}.qr-copy strong{display:block;color:#172b46;font-size:11px;margin-bottom:5px}.public-link{display:inline-block;margin-top:5px;color:#16877d!important;font-weight:800;text-decoration:none;font-size:8px}.terms-card .bottom-title{margin-bottom:6px}.terms-card ol{margin:7px 0 0;padding-left:17px;color:#53647b;font-size:10px;line-height:1.65}.terms-card li{padding-left:2px;margin-bottom:2px}.signature{margin-top:8px;text-align:right;color:#596574;font-size:8px}.signature-line{border-top:1px solid #8c97a4;width:135px;margin:16px 0 5px auto}.invoice-footer{margin-top:13px;padding:12px 0 0;color:#53647b;background:#fff;border-top:2px solid #d7e4f2;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:9px;line-height:1.5}.footer-contact{display:flex;gap:12px;flex-wrap:wrap}.footer-slogan{text-align:right;color:#16877d;font-weight:900;letter-spacing:.08em}.small-muted{color:#87919c}
   /* Refined Preface Fitness invoice masthead */
@@ -10110,6 +10256,7 @@ function openPrintWindow(title, html) {
   }
 
 </style></head><body>${html}<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),500));</script></body></html>`;
+  if (returnDocumentHtml) return documentHtml;
   if (!printWindow) {
     // Popup blockers can prevent window.open. Print the same invoice through a
     // temporary iframe instead of silently doing nothing.
@@ -10130,7 +10277,7 @@ function openPrintWindow(title, html) {
       }, 600);
     };
     document.body.appendChild(frame);
-    frame.srcdoc = documentHtml;
+    frame.srcdoc = documentHtml.replace("<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),500));</script>", '');
     return true;
   }
   printWindow.document.open();
@@ -10368,7 +10515,7 @@ function printMemberWorkoutPlan(member, settings, workoutPlans = []) {
   openPrintWindow(`${gymName} - ${member?.name || 'Member'} Workout Card`, html);
 }
 
-function printMemberIdCard(member, settings) {
+function printMemberIdCard(member, settings, returnDocumentHtml = false) {
   const gymName = settings?.gymName || 'Preface Fitness';
   const qrData = encodeURIComponent(`Preface Fitness | Member ID: ${member.id} | Name: ${member.name}`);
   const memberPhoto = member.photo
@@ -10434,16 +10581,20 @@ function printMemberIdCard(member, settings) {
       }
       * { box-sizing:border-box; }
     </style>`;
-  return openPrintWindow(`${gymName} - Member ID Card`, html);
+  return openPrintWindow(`${gymName} - Member ID Card`, html, returnDocumentHtml);
 }
-function shareMemberWhatsApp(member) {
-  const text = `Preface Fitness Member ID Card%0A%0AName: ${encodeURIComponent(member.name)}%0AMember ID: ${encodeURIComponent(member.id)}%0APlan: ${encodeURIComponent(member.plan || '')}%0ABirthday: ${encodeURIComponent(formatDate(member.dob))}%0AContact: ${encodeURIComponent(member.phone || '')}`;
+function shareMemberWhatsApp(member, settings = {}) {
+  const gymName = settings?.gymName || 'Preface Fitness';
+  const text = `${gymName} Member ID Card\n\nName: ${member.name}\nMember ID: ${member.id}\nPlan: ${member.plan || ''}\nBirthday: ${formatDate(member.dob)}\nContact: ${member.phone || ''}`;
   const phone = String(member.phone || '').replace(/\D/g, '');
   const target = phone.length === 10 ? `91${phone}` : phone;
-  window.open(`https://wa.me/${target}?text=${text}`, '_blank');
+  const url = target
+    ? `https://wa.me/${target}?text=${encodeURIComponent(text)}`
+    : `https://wa.me/?text=${encodeURIComponent(text)}`;
+  window.open(url, '_blank', 'noopener,noreferrer');
 }
 
-function printPaymentInvoice(member, payment, settings, overrideGstMode = null) {
+function printPaymentInvoice(member, payment, settings, overrideGstMode = null, returnDocumentHtml = false) {
   const gymName = settings?.gymName || 'Preface Fitness';
   const gstMode = overrideGstMode || (payment?.gstApplicable ? 'gst' : 'without');
   const invoiceAmount = Number(payment?.consolidated ? payment.planTotal : (payment?.invoiceAmount ?? (payment?.type === 'Membership' ? member.amount : payment?.amount) ?? member.amount ?? 0));
@@ -10498,7 +10649,7 @@ function printPaymentInvoice(member, payment, settings, overrideGstMode = null) 
     </section>
     <footer class="invoice-footer"><div class="footer-contact"><span>${escapeHtml(settings?.gymPhone || 'Preface Fitness')}</span>${settings?.gymEmail ? `<span>${escapeHtml(settings.gymEmail)}</span>` : ''}</div><div class="footer-slogan">THANK YOU FOR CHOOSING US</div></footer>
   </div>`;
-  return openPrintWindow(`${gymName} - ${invoiceNumber}`, html);
+  return openPrintWindow(`${gymName} - ${invoiceNumber}`, html, returnDocumentHtml);
 }
 
 function amountInWordsIndian(value) {
@@ -10519,13 +10670,16 @@ function amountInWordsIndian(value) {
   return `Rupees ${parts.join(' ')} Only`;
 }
 
-function shareBillWhatsApp(member, settings, payment = null) {
+async function shareBillWhatsApp(member, settings, payment = null) {
   const gymName = settings?.gymName || 'Preface Fitness';
   const invoiceNumber = makeInvoiceNumber(payment, settings);
   const text = `${gymName}\nInvoice: ${invoiceNumber}\nMember: ${member.name}\nMember ID: ${member.id}\nPlan: ${member.plan || 'Membership'}\nInvoice amount: ₹${Number(payment?.invoiceAmount || member.amount || 0).toLocaleString('en-IN')}\nPaid: ₹${Number(payment?.paidAmountAtInvoice ?? payment?.amount ?? member.paid ?? 0).toLocaleString('en-IN')}\nBalance: ₹${Number(payment?.balanceAtInvoice ?? member.due ?? 0).toLocaleString('en-IN')}`;
   const phone = String(member.phone || '').replace(/\D/g, '');
   const target = phone.length === 10 ? `91${phone}` : phone;
-  window.open(`https://wa.me/${target}?text=${encodeURIComponent(text)}`, '_blank');
+  const url = target
+    ? `https://wa.me/${target}?text=${encodeURIComponent(text)}`
+    : `https://wa.me/?text=${encodeURIComponent(text)}`;
+  window.open(url, '_blank', 'noopener,noreferrer');
 }
 
 function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = [], members = [], trainers = [], isOwner = false }) {
@@ -12423,24 +12577,52 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
                 const fy = String(series.financialYear || currentFinancialYear());
                 const nextNumber = Number(series.yearlyNext?.[fy] ?? series.nextNumber ?? 1);
                 const preview = `${String(series.prefix || 'PO').trim() || 'PO'}/${fy}/${String(nextNumber).padStart(Math.min(12,Math.max(1,Number(series.numberLength)||6)),'0')}`;
-                const updateSeries = (patch) => setForm((f) => ({...f,[key]:{...(f[key] || series),...patch}}));
+                const updateSeries = (patch) => setForm((f) => {
+                  const base = f[key] || getInvoiceSeriesSettings(current, key);
+                  const merged = { ...base, ...patch };
+                  // Keep the visible counter and FY-specific counter in sync.
+                  if (Object.prototype.hasOwnProperty.call(patch, 'nextNumber')) {
+                    const activeYear = String(merged.financialYear || currentFinancialYear()).trim();
+                    merged.yearlyNext = { ...(base.yearlyNext || {}), [activeYear]: Math.max(1, Number(patch.nextNumber) || 1) };
+                    merged.memberYearlyNext = { ...(base.memberYearlyNext || {}), [activeYear]: Math.max(1, Number(patch.nextNumber) || 1) };
+                    merged.memberNextNumber = Math.max(1, Number(patch.nextNumber) || 1);
+                  }
+                  if (Object.prototype.hasOwnProperty.call(patch, 'financialYear')) {
+                    const activeYear = String(merged.financialYear || currentFinancialYear()).trim();
+                    const currentCounter = Math.max(1, Number(merged.nextNumber) || 1);
+                    merged.yearlyNext = { ...(base.yearlyNext || {}), [activeYear]: currentCounter };
+                    merged.memberYearlyNext = { ...(base.memberYearlyNext || {}), [activeYear]: currentCounter };
+                  }
+                  return { ...f, [key]: merged };
+                });
                 const applyStart = async () => {
-                  const chosenYear = String(series.financialYear || currentFinancialYear()).trim();
-                  const chosenNumber = Math.max(1,parseInt(series.nextNumber,10)||1);
-                  const updatedSeries = { ...(form[key] || series), financialYear:chosenYear, nextNumber:chosenNumber, yearlyNext:{...((form[key] || series).yearlyNext || {}),[chosenYear]:chosenNumber}, memberNextNumber:chosenNumber, memberYearlyNext:{...((form[key] || series).memberYearlyNext || {}),[chosenYear]:chosenNumber} };
-                  const nextSettings = { ...(data.settings || {}), [key]: updatedSeries };
-                  setForm((f) => ({...f,[key]:updatedSeries}));
-                  setData((d) => ({...d,settings:{...(d.settings || {}),[key]:updatedSeries}}));
+                  const latestSeries = form[key] || getInvoiceSeriesSettings(current, key);
+                  const chosenYear = String(latestSeries.financialYear || currentFinancialYear()).trim();
+                  const chosenNumber = Math.max(1, parseInt(latestSeries.nextNumber, 10) || 1);
+                  const updatedSeries = {
+                    ...getInvoiceSeriesSettings({ [key]: latestSeries, invoicePrefix: current.invoicePrefix }, key),
+                    ...latestSeries,
+                    financialYear: chosenYear,
+                    nextNumber: chosenNumber,
+                    yearlyNext: { ...(latestSeries.yearlyNext || {}), [chosenYear]: chosenNumber },
+                    memberNextNumber: chosenNumber,
+                    memberYearlyNext: { ...(latestSeries.memberYearlyNext || {}), [chosenYear]: chosenNumber },
+                  };
+                  // Update both local settings and the settings form before syncing.
+                  setForm((f) => ({ ...f, [key]: updatedSeries }));
+                  setData((d) => ({ ...d, settings: { ...(d.settings || {}), [key]: updatedSeries } }));
                   try {
                     await saveCloudSettings({ [key]: updatedSeries });
-                    showActionFeedback(`Series ${letter} applied. Next invoice: ${String(updatedSeries.prefix || 'PO').trim() || 'PO'}/${chosenYear}/${String(chosenNumber).padStart(Math.min(12,Math.max(1,Number(updatedSeries.numberLength)||6)),'0')}`);
+                    const width = Math.min(12, Math.max(1, Number(updatedSeries.numberLength) || 6));
+                    const prefix = String(updatedSeries.prefix || 'PO').trim() || 'PO';
+                    showActionFeedback(`Series ${letter} applied. Next invoice: ${prefix}/${chosenYear}/${String(chosenNumber).padStart(width, '0')}`);
                   } catch (error) {
-                    console.error('Invoice series save failed:', error);
-                    showActionFeedback(error?.message || `Series ${letter} saved locally, but cloud save failed.`, 'error');
+                    console.error(`Invoice Series ${letter} save failed:`, error);
+                    showActionFeedback(error?.message || `Series ${letter} was updated locally, but cloud save failed.`, 'error');
                   }
                 };
                 return <div key={key} style={{border:'1px solid #e5e7eb',borderRadius:'12px',padding:'14px',display:'grid',gap:'10px'}}>
-                  <strong>Invoice Series {letter}</strong>
+                  <strong>Invoice Series {letter} · {letter === 'A' ? 'GST invoices' : 'Non-GST invoices'}</strong>
                   <FormField label="Prefix"><input value={series.prefix || ''} onChange={(e) => updateSeries({prefix:e.target.value})} placeholder="PO" /></FormField>
                   <FormField label="Number length"><input type="number" min="1" max="12" value={series.numberLength ?? 6} onChange={(e) => updateSeries({numberLength:Math.min(12,Math.max(1,Number(e.target.value)||1))})} /></FormField>
                   <div style={{fontSize:'13px',color:'#94a3b8'}}>Next: {preview}</div>
