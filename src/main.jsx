@@ -39,6 +39,7 @@ import {
   TrendingUp,
   Camera,
   UserPlus,
+  UserMinus,
   Users,
   X,
   QrCode,
@@ -113,6 +114,91 @@ function printPTMasterRecord({ member, sessions, trainers, settings = {} }) {
   <h2 class="section-title">Assigned PT packages</h2><table><thead><tr><th>Package start</th><th>Plan</th><th>Trainer</th><th>Completed / Total</th><th>Expiry</th><th>Fee</th><th>Status</th></tr></thead><tbody>${packages.map(p=>`<tr><td>${esc(p.date)}</td><td>${esc(p.planName||p.type||'Personal Training')}</td><td>${esc(trainers.find(t=>t.id===p.trainerId)?.name||p.trainer||'—')}</td><td>${Number(p.sessionsCompleted||0)} / ${Number(p.sessionsTotal||1)}</td><td>${esc(p.expiryDate||'—')}</td><td>${money(p.fee)}</td><td>${esc(p.status)}</td></tr>`).join('')}</tbody></table>
   <div class="signatures"><div>Client signature</div><div>Trainer / Gym representative</div></div></section><footer class="footer"><span>${esc(gymName.toUpperCase())} · PERSONAL TRAINING</span><span>CONSISTENCY · COACHING · PROGRESS</span></footer></main></body></html>`);
   win.document.close();
+}
+
+const DEFAULT_DIET_FOOD_ITEMS = [
+  { id: 'FOOD-001', name: 'Paneer (regular)', calories: 265, protein: 18.3, category: 'Dairy' },
+  { id: 'FOOD-002', name: 'Paneer (low fat)', calories: 150, protein: 24, category: 'Dairy' },
+  { id: 'FOOD-003', name: 'Milk (toned)', calories: 58, protein: 3.1, category: 'Dairy' },
+  { id: 'FOOD-004', name: 'Milk (full cream)', calories: 90, protein: 3.2, category: 'Dairy' },
+  { id: 'FOOD-005', name: 'Curd (plain)', calories: 61, protein: 3.5, category: 'Dairy' },
+  { id: 'FOOD-006', name: 'Greek yogurt (plain)', calories: 97, protein: 9, category: 'Dairy' },
+  { id: 'FOOD-007', name: 'Skim milk', calories: 34, protein: 3.4, category: 'Dairy' },
+  { id: 'FOOD-008', name: 'Buttermilk', calories: 40, protein: 3.3, category: 'Dairy' },
+  { id: 'FOOD-009', name: 'Cheese', calories: 350, protein: 25, category: 'Dairy' },
+  { id: 'FOOD-010', name: 'Whey protein powder', calories: 400, protein: 80, category: 'Protein' },
+  { id: 'FOOD-011', name: 'Whole egg', calories: 143, protein: 12.6, category: 'Eggs' },
+  { id: 'FOOD-012', name: 'Egg white', calories: 52, protein: 10.9, category: 'Eggs' },
+  { id: 'FOOD-013', name: 'Chicken breast (raw)', calories: 120, protein: 22.5, category: 'Meat' },
+  { id: 'FOOD-014', name: 'Chicken breast (cooked)', calories: 165, protein: 31, category: 'Meat' },
+  { id: 'FOOD-015', name: 'Fish (rohu, raw)', calories: 97, protein: 17, category: 'Meat' },
+  { id: 'FOOD-016', name: 'Tuna (canned, drained)', calories: 116, protein: 25.5, category: 'Meat' },
+  { id: 'FOOD-017', name: 'Soya chunks (dry)', calories: 345, protein: 52, category: 'Plant protein' },
+  { id: 'FOOD-018', name: 'Tofu', calories: 76, protein: 8, category: 'Plant protein' },
+  { id: 'FOOD-019', name: 'Boiled chickpeas', calories: 164, protein: 8.9, category: 'Pulses' },
+  { id: 'FOOD-020', name: 'Black chana (boiled)', calories: 164, protein: 8.9, category: 'Pulses' },
+  { id: 'FOOD-021', name: 'Rajma (boiled)', calories: 127, protein: 8.7, category: 'Pulses' },
+  { id: 'FOOD-022', name: 'Moong dal (cooked)', calories: 105, protein: 7, category: 'Pulses' },
+  { id: 'FOOD-023', name: 'Masoor dal (cooked)', calories: 116, protein: 9, category: 'Pulses' },
+  { id: 'FOOD-024', name: 'Toor dal (cooked)', calories: 121, protein: 6.8, category: 'Pulses' },
+  { id: 'FOOD-025', name: 'Urad dal (cooked)', calories: 116, protein: 7.5, category: 'Pulses' },
+  { id: 'FOOD-026', name: 'Roasted chana', calories: 369, protein: 22, category: 'Pulses' },
+  { id: 'FOOD-027', name: 'Besan', calories: 387, protein: 22, category: 'Pulses' },
+  { id: 'FOOD-028', name: 'Oats (dry)', calories: 389, protein: 16.9, category: 'Grains' },
+  { id: 'FOOD-029', name: 'Brown rice (cooked)', calories: 123, protein: 2.7, category: 'Grains' },
+  { id: 'FOOD-030', name: 'White rice (cooked)', calories: 130, protein: 2.7, category: 'Grains' },
+  { id: 'FOOD-031', name: 'Wheat roti', calories: 297, protein: 9.8, category: 'Grains' },
+  { id: 'FOOD-032', name: 'Whole wheat bread', calories: 247, protein: 13, category: 'Grains' },
+  { id: 'FOOD-033', name: 'Poha (dry)', calories: 350, protein: 6.7, category: 'Grains' },
+  { id: 'FOOD-034', name: 'Dalia (dry)', calories: 342, protein: 12.3, category: 'Grains' },
+  { id: 'FOOD-035', name: 'Quinoa (cooked)', calories: 120, protein: 4.4, category: 'Grains' },
+  { id: 'FOOD-036', name: 'Banana', calories: 89, protein: 1.1, category: 'Fruits' },
+  { id: 'FOOD-037', name: 'Apple', calories: 52, protein: 0.3, category: 'Fruits' },
+  { id: 'FOOD-038', name: 'Orange', calories: 47, protein: 0.9, category: 'Fruits' },
+  { id: 'FOOD-039', name: 'Papaya', calories: 43, protein: 0.5, category: 'Fruits' },
+  { id: 'FOOD-040', name: 'Mango', calories: 60, protein: 0.8, category: 'Fruits' },
+  { id: 'FOOD-041', name: 'Guava', calories: 68, protein: 2.6, category: 'Fruits' },
+  { id: 'FOOD-042', name: 'Dates', calories: 282, protein: 2.5, category: 'Fruits' },
+  { id: 'FOOD-043', name: 'Almonds', calories: 579, protein: 21.2, category: 'Nuts & seeds' },
+  { id: 'FOOD-044', name: 'Peanuts', calories: 567, protein: 25.8, category: 'Nuts & seeds' },
+  { id: 'FOOD-045', name: 'Peanut butter', calories: 588, protein: 25, category: 'Nuts & seeds' },
+  { id: 'FOOD-046', name: 'Cashews', calories: 553, protein: 18.2, category: 'Nuts & seeds' },
+  { id: 'FOOD-047', name: 'Walnuts', calories: 654, protein: 15.2, category: 'Nuts & seeds' },
+  { id: 'FOOD-048', name: 'Chia seeds', calories: 486, protein: 16.5, category: 'Nuts & seeds' },
+  { id: 'FOOD-049', name: 'Flax seeds', calories: 534, protein: 18.3, category: 'Nuts & seeds' },
+  { id: 'FOOD-050', name: 'Pumpkin seeds', calories: 559, protein: 30.2, category: 'Nuts & seeds' },
+  { id: 'FOOD-051', name: 'Potato', calories: 77, protein: 2, category: 'Vegetables' },
+  { id: 'FOOD-052', name: 'Sweet potato', calories: 86, protein: 1.6, category: 'Vegetables' },
+  { id: 'FOOD-053', name: 'Broccoli', calories: 34, protein: 2.8, category: 'Vegetables' },
+  { id: 'FOOD-054', name: 'Spinach', calories: 23, protein: 2.9, category: 'Vegetables' },
+  { id: 'FOOD-055', name: 'Carrot', calories: 41, protein: 0.9, category: 'Vegetables' },
+  { id: 'FOOD-056', name: 'Tomato', calories: 18, protein: 0.9, category: 'Vegetables' },
+  { id: 'FOOD-057', name: 'Cucumber', calories: 15, protein: 0.7, category: 'Vegetables' },
+  { id: 'FOOD-058', name: 'Mixed vegetables', calories: 65, protein: 3, category: 'Vegetables' },
+  { id: 'FOOD-059', name: 'Avocado', calories: 160, protein: 2, category: 'Fruits' },
+  { id: 'FOOD-060', name: 'Olive oil', calories: 884, protein: 0, category: 'Fats' },
+  { id: 'FOOD-061', name: 'Ghee', calories: 900, protein: 0, category: 'Fats' },
+  { id: 'FOOD-062', name: 'Honey', calories: 304, protein: 0.3, category: 'Fats' },
+  { id: 'FOOD-063', name: 'Jaggery', calories: 383, protein: 0.4, category: 'Fats' }
+].map(item => {
+  const servingUnits = {
+    'FOOD-003': ['ml', 1], 'FOOD-004': ['ml', 1], 'FOOD-005': ['g', 1],
+    'FOOD-006': ['g', 1], 'FOOD-007': ['ml', 1], 'FOOD-008': ['ml', 1],
+    'FOOD-011': ['piece', 50], 'FOOD-012': ['piece', 33],
+    'FOOD-036': ['piece', 118], 'FOOD-037': ['piece', 182],
+    'FOOD-038': ['piece', 130], 'FOOD-039': ['g', 1], 'FOOD-040': ['g', 1],
+    'FOOD-041': ['piece', 55], 'FOOD-042': ['piece', 8],
+    'FOOD-060': ['ml', 0.92], 'FOOD-061': ['g', 1], 'FOOD-062': ['g', 1]
+  };
+  const [unit, gramsPerUnit] = servingUnits[item.id] || ['g', 1];
+  return { ...item, unit, gramsPerUnit };
+});
+
+function normalizeDietFoodItems(items = []) {
+  return (items || []).map(item => {
+    const defaults = DEFAULT_DIET_FOOD_ITEMS.find(food => food.id === item.id);
+    return { ...defaults, ...item, unit: item.unit || defaults?.unit || 'g', gramsPerUnit: Number(item.gramsPerUnit || defaults?.gramsPerUnit || 1) };
+  });
 }
 
 const LOGO_URL = `${import.meta.env.BASE_URL}preface-logo.jpg`;
@@ -2144,6 +2230,380 @@ function useGentleInputAssist() {
   }, []);
 }
 
+
+
+
+const FITMITRA_EXERCISES = [
+  {name:'Barbell Bench Press',muscle:'Chest',equipment:'Barbell',level:'Intermediate',type:'Compound',alt:['Dumbbell Bench Press','Machine Chest Press']},
+  {name:'Dumbbell Bench Press',muscle:'Chest',equipment:'Dumbbells',level:'Beginner',type:'Compound',alt:['Machine Chest Press','Push-up']},
+  {name:'Incline Dumbbell Press',muscle:'Upper Chest',equipment:'Dumbbells',level:'Intermediate',type:'Compound',alt:['Incline Machine Press','Incline Push-up']},
+  {name:'Cable Fly',muscle:'Chest',equipment:'Cable',level:'Beginner',type:'Isolation',alt:['Pec Deck','Dumbbell Fly']},
+  {name:'Lat Pulldown',muscle:'Back',equipment:'Cable Machine',level:'Beginner',type:'Compound',alt:['Assisted Pull-up','Resistance Band Pulldown']},
+  {name:'Seated Cable Row',muscle:'Back',equipment:'Cable Machine',level:'Beginner',type:'Compound',alt:['Chest Supported Row','Dumbbell Row']},
+  {name:'One-arm Dumbbell Row',muscle:'Back',equipment:'Dumbbell',level:'Beginner',type:'Compound',alt:['Seated Cable Row','Machine Row']},
+  {name:'Goblet Squat',muscle:'Quads',equipment:'Dumbbell',level:'Beginner',type:'Compound',alt:['Leg Press','Box Squat']},
+  {name:'Leg Press',muscle:'Quads',equipment:'Leg Press Machine',level:'Beginner',type:'Compound',alt:['Goblet Squat','Bodyweight Squat']},
+  {name:'Romanian Deadlift',muscle:'Hamstrings',equipment:'Barbell/Dumbbells',level:'Intermediate',type:'Compound',alt:['Dumbbell RDL','Hamstring Curl']},
+  {name:'Hip Thrust',muscle:'Glutes',equipment:'Barbell/Bench',level:'Intermediate',type:'Compound',alt:['Glute Bridge','Cable Pull Through']},
+  {name:'Leg Curl',muscle:'Hamstrings',equipment:'Machine',level:'Beginner',type:'Isolation',alt:['Stability Ball Curl','Slider Curl']},
+  {name:'Leg Extension',muscle:'Quads',equipment:'Machine',level:'Beginner',type:'Isolation',alt:['Spanish Squat','Step-up']},
+  {name:'Dumbbell Shoulder Press',muscle:'Shoulders',equipment:'Dumbbells',level:'Intermediate',type:'Compound',alt:['Machine Shoulder Press','Landmine Press']},
+  {name:'Lateral Raise',muscle:'Shoulders',equipment:'Dumbbells/Cable',level:'Beginner',type:'Isolation',alt:['Cable Lateral Raise','Machine Lateral Raise']},
+  {name:'Biceps Curl',muscle:'Biceps',equipment:'Dumbbells',level:'Beginner',type:'Isolation',alt:['Cable Curl','Hammer Curl']},
+  {name:'Triceps Pushdown',muscle:'Triceps',equipment:'Cable',level:'Beginner',type:'Isolation',alt:['Close-grip Push-up','Overhead Extension']},
+  {name:'Plank',muscle:'Core',equipment:'Bodyweight',level:'Beginner',type:'Core',alt:['Dead Bug','Bird Dog']},
+  {name:'Dead Bug',muscle:'Core',equipment:'Bodyweight',level:'Beginner',type:'Core',alt:['Bird Dog','Heel Tap']},
+  {name:'Calf Raise',muscle:'Calves',equipment:'Bodyweight/Machine',level:'Beginner',type:'Isolation',alt:['Seated Calf Raise','Single-leg Calf Raise']}
+];
+const FITMITRA_FOODS = [
+  {name:'Paneer (100 g)',cal:265,p:18,c:3,f:20,category:'Dairy'},
+  {name:'Tofu (100 g)',cal:76,p:8,c:2,f:4,category:'Plant protein'},
+  {name:'Chicken breast cooked (100 g)',cal:165,p:31,c:0,f:3.6,category:'Non-veg'},
+  {name:'Egg (1 large)',cal:72,p:6.3,c:.4,f:4.8,category:'Egg'},
+  {name:'Milk (100 ml)',cal:61,p:3.2,c:4.8,f:3.3,category:'Dairy'},
+  {name:'Curd (100 g)',cal:61,p:3.5,c:4.7,f:3.3,category:'Dairy'},
+  {name:'Soya chunks dry (50 g)',cal:173,p:26,c:17,f:.5,category:'Plant protein'},
+  {name:'Dal cooked (150 g)',cal:174,p:12,c:30,f:1,category:'Plant protein'},
+  {name:'Chickpeas cooked (100 g)',cal:164,p:8.9,c:27.4,f:2.6,category:'Plant protein'},
+  {name:'Oats dry (40 g)',cal:156,p:6.8,c:26.5,f:2.8,category:'Grains'},
+  {name:'Cooked rice (150 g)',cal:195,p:4,c:42,f:.4,category:'Grains'},
+  {name:'Roti (1 medium)',cal:110,p:3.5,c:22,f:1.5,category:'Grains'},
+  {name:'Banana (1 medium)',cal:105,p:1.3,c:27,f:.4,category:'Fruit'},
+  {name:'Peanut butter (16 g)',cal:94,p:4,c:3.2,f:8,category:'Nuts'},
+  {name:'Almonds (15 g)',cal:87,p:3.2,c:3.2,f:7.5,category:'Nuts'},
+  {name:'Whey protein (1 scoop)',cal:120,p:24,c:3,f:2,category:'Supplement'}
+];
+function FitMitraToolsHub({members=[],progressRecords=[],onStartPlan=()=>{}}) {
+  const [question,setQuestion]=useState('');
+  const [answer,setAnswer]=useState(null);
+  const [busy,setBusy]=useState(false);
+  const [journal,setJournal]=useState(()=>{try{return JSON.parse(localStorage.getItem('fitmitra-local-journal')||'[]')}catch{return[]}});
+  const [journalNote,setJournalNote]=useState('');
+  const [journalMember,setJournalMember]=useState(members[0]?.id||'');
+  const [reportMember,setReportMember]=useState(members[0]?.id||'');
+  const [lift,setLift]=useState({exercise:'Barbell Bench Press',weight:'40',reps:'10'});
+  const [workoutLog,setWorkoutLog]=useState(()=>{try{return JSON.parse(localStorage.getItem('fitmitra-workout-log')||'[]')}catch{return[]}});
+  const [calendar,setCalendar]=useState(()=>{try{return JSON.parse(localStorage.getItem('fitmitra-calendar')||'{}')}catch{return{}}});
+  const [calendarDate,setCalendarDate]=useState(new Date().toISOString().slice(0,10));
+  const [calendarText,setCalendarText]=useState('');
+  const [macroInput,setMacroInput]=useState('2200');
+  useEffect(()=>{try{localStorage.setItem('fitmitra-workout-log',JSON.stringify(workoutLog))}catch{}},[workoutLog]);
+  useEffect(()=>{try{localStorage.setItem('fitmitra-calendar',JSON.stringify(calendar))}catch{}},[calendar]);
+  useEffect(()=>{try{localStorage.setItem('fitmitra-local-journal',JSON.stringify(journal))}catch{}},[journal]);
+  const prompts=['Plan my diet and workout','Show exercise library','Suggest a 4-day workout split','Find alternative to bench press','Log progressive overload','Search food nutrition database','Calculate BMI, BMR and TDEE','Suggest food substitution for paneer','Calculate macros for 2200 calories','Show member progress analysis','Open transformation journal','Show trainer insights','Create fitness report','Schedule a workout'];
+  const ask=(input=question)=>{
+    const q=String(input||'').trim();
+    if(!q)return;
+    if(/plan my diet|diet and workout|create.*(diet|workout).*plan|fat loss plan|muscle.*plan|workout plan for/i.test(q)){onStartPlan(q);return;}
+    setBusy(true);
+    window.setTimeout(()=>{
+      const s=q.toLowerCase();
+      let result={title:'I could not identify that request',type:'text',body:'Try a specific question such as “Show chest exercises”, “Suggest food substitutes for paneer”, “Calculate macros for 2200 calories”, or “Show member progress”.'};
+      const findFood=()=>{
+        const aliases=[
+          ['paneer',/paneer|cottage cheese/],['tofu',/\btofu\b/],['chicken',/\bchicken\b/],['egg',/\beggs?\b/],
+          ['milk',/\bmilk\b/],['curd',/\bcurd\b|yogurt/],['soya',/soya|soy chunks/],['dal',/\bdal\b|lentils/],
+          ['chickpeas',/chickpeas|chana/],['oats',/\boats?\b/],['rice',/\brice\b/],['roti',/\broti\b|chapati/],
+          ['banana',/\bbanana\b/],['peanut butter',/peanut butter/],['almonds',/almonds?/],['whey',/whey protein|whey/]
+        ];
+        const alias=aliases.find(([,re])=>re.test(s));
+        if(!alias)return null;
+        return FITMITRA_FOODS.find(x=>x.name.toLowerCase().startsWith(alias[0]))||null;
+      };
+      const food=findFood();
+      const namedExercise=FITMITRA_EXERCISES.find(x=>s.includes(x.name.toLowerCase()));
+      const foodSubstitution=/food substitution|food substitute|substitut(e|es|ion).*food|food.*(alternative|replace|substitut)|alternative.*(paneer|tofu|chicken|egg)|replace.*(paneer|tofu|chicken|egg)|substitut.*(paneer|tofu|chicken|egg)|instead of (paneer|tofu|chicken|egg)/.test(s);
+      const exerciseReplacement=/exercise replacement|exercise alternative|alternative.*(exercise|bench|press|squat|deadlift)|replace.*(exercise|bench|press|squat|deadlift)|substitut.*(exercise|bench|press|squat|deadlift)|instead of (bench|press|squat|deadlift)/.test(s);
+      const macroRequest=/\bmacro(s)?\b|protein.*carb.*fat|carb.*fat.*protein/.test(s);
+      const calorieCalc=/\bbmi\b|\bbmr\b|\btdee\b|calorie target|calculate.*calorie|calories for/.test(s);
+
+      // Intent-specific branches must run before generic exercise/food/calorie matching.
+      if(macroRequest){
+        const match=s.match(/(?:for|at|of)\s*(\d{3,5})\s*(?:kcal|cal(?:ories?)?)?/i)||s.match(/\b(\d{3,5})\s*(?:kcal|cal(?:ories?))\b/i);
+        const kcal=Number(match?.[1]||2200);
+        if(kcal<800||kcal>8000){
+          result={title:'Please check the calorie value',type:'text',body:'Enter a daily calorie target between 800 and 8000 kcal. This is a broad validation range, not a recommended intake.'};
+        } else {
+          const proteinPct=30,fatPct=25,carbPct=45;
+          const protein=Math.round(kcal*proteinPct/100/4);
+          const fat=Math.round(kcal*fatPct/100/9);
+          const carbs=Math.round(kcal*carbPct/100/4);
+          result={title:`Macro targets for ${kcal.toLocaleString('en-IN')} kcal/day`,type:'stats',items:[['Daily calories',`${kcal.toLocaleString('en-IN')} kcal`],['Protein · 30%',`${protein} g/day`],['Fat · 25%',`${fat} g/day`],['Carbohydrates · 45%',`${carbs} g/day`]],note:'Illustrative 30/25/45 calorie split. A trainer or qualified dietitian should personalize the ratio for the member; this is not a medical prescription.'};
+        }
+      } else if(foodSubstitution){
+        if(!food){
+          result={title:'Which food do you want to replace?',type:'text',body:'Try: “Suggest food substitutes for paneer”, “Alternative to chicken” or “Replace eggs with vegetarian food”.'};
+        } else {
+          const key=food.name.toLowerCase();
+          let alternatives=[];
+          if(key.includes('paneer')) alternatives=['Tofu','Soya chunks','Low-fat paneer','Greek yogurt / hung curd','Chickpeas or dal'];
+          else if(key.includes('chicken')) alternatives=['Soya chunks','Tofu','Paneer','Eggs (if included in the diet)','Dal plus curd'];
+          else if(key.includes('egg')) alternatives=['Tofu bhurji','Soya chunks','Paneer','Greek yogurt / hung curd','Chickpeas'];
+          else if(key.includes('tofu')) alternatives=['Paneer','Soya chunks','Tempeh (if available)','Dal and chickpeas'];
+          else if(key.includes('milk')) alternatives=['Lactose-free milk','Fortified soy milk','Curd (if tolerated)'];
+          else if(key.includes('soya')) alternatives=['Tofu','Paneer','Dal plus curd','Chickpeas'];
+          else alternatives=['Paneer','Tofu','Soya chunks','Dal','Chickpeas'];
+          result={title:`Food substitutes for ${food.name}`,type:'list',items:alternatives,note:'These foods are not one-to-one nutritional equivalents. Match serving size and compare protein, calories, allergies, dietary preference and tolerance before substituting.'};
+        }
+      } else if(exerciseReplacement){
+        const ex=namedExercise||FITMITRA_EXERCISES.find(x=>/bench press/.test(s)&&/bench press/i.test(x.name))||FITMITRA_EXERCISES.find(x=>/squat/.test(s)&&/squat/i.test(x.name))||FITMITRA_EXERCISES[0];
+        result={title:`Exercise alternatives for ${ex.name}`,type:'list',items:ex.alt,note:'Choose based on equipment, technique and the member’s limitations. Do not use an alternative that causes pain; injury-related exercise choices need trainer/clinician review.'};
+      } else if(macroRequest===false&&calorieCalc){
+        const labelled=(re)=>{const m=s.match(re);return m?Number(m[1]):null;};
+        const kg=labelled(/(?:weight|weighing)\s*(?:is|of|:)?\s*(\d+(?:\.\d+)?)/)||labelled(/(\d+(?:\.\d+)?)\s*kg\b/)||70;
+        const cm=labelled(/(?:height)\s*(?:is|of|:)?\s*(\d+(?:\.\d+)?)/)||labelled(/(\d+(?:\.\d+)?)\s*cm\b/)||170;
+        const age=labelled(/(?:age)\s*(?:is|of|:)?\s*(\d+(?:\.\d+)?)/)||labelled(/(\d+(?:\.\d+)?)\s*(?:years?|yrs?)\b/)||30;
+        const female=/\bfemale\b|\bwoman\b/.test(s);
+        const activity=s.includes('sedentary')?1.2:s.includes('light')?1.375:s.includes('very active')?1.725:1.55;
+        if(kg<25||kg>350||cm<100||cm>250||age<15||age>100){
+          result={title:'Please check the body measurements',type:'text',body:'Enter realistic labelled values, for example: “Calculate BMI, BMR and TDEE for weight 75 kg, height 170 cm, age 30, male”.'};
+        } else {
+          const bmi=kg/((cm/100)**2);
+          const bmr=10*kg+6.25*cm-5*age+(female?-161:5);
+          const tdee=bmr*activity;
+          result={title:'Estimated fitness calculations',type:'stats',items:[['Weight',`${kg} kg`],['Height',`${cm} cm`],['Age',`${age} years`],['BMI',bmi.toFixed(1)],['BMR',`${Math.round(bmr)} kcal/day`],['Estimated TDEE',`${Math.round(tdee)} kcal/day`],['Protein guide',`${Math.round(kg*1.6)}–${Math.round(kg*2)} g/day`]],note:`Estimate using Mifflin–St Jeor, ${female?'female':'male'} equation and ${activity===1.2?'sedentary':activity===1.375?'light':activity===1.725?'very active':'moderate'} activity multiplier. BMI is a screening measure, not a diagnosis. Confirm inputs and personalize with a qualified professional.`};
+        }
+      } else if(/progressive overload|log workout|strength log|track.*(weight|reps)|next.*(weight|reps)/.test(s)){
+        result={title:'Progressive overload tracker',type:'overload'};
+      } else if(/split|days per week|workout routine|training schedule/.test(s)){
+        const n=Number((s.match(/\b([2-6])\s*(?:day|days)\b/)||[])[1]||4);
+        const days=n===2?['Full Body A','Full Body B']:n===3?['Push','Pull','Legs']:n===4?['Upper Body','Lower Body','Upper Body','Lower Body']:n===5?['Push','Pull','Legs','Upper Body','Lower Body']:['Push','Pull','Legs','Push','Pull','Legs'];
+        result={title:`Suggested ${n}-day workout split`,type:'list',items:days.map((x,i)=>`Day ${i+1}: ${x}`),note:'Template only. Trainer should adjust exercise selection, volume and recovery for the member.'};
+      } else if(/exercise|workout|chest|back|legs|shoulder|biceps|triceps|muscle group/.test(s)&&!exerciseReplacement){
+        const group=['chest','back','legs','shoulder','biceps','triceps','core','hamstrings','glutes'].find(g=>s.includes(g));
+        const items=FITMITRA_EXERCISES.filter(x=>!group||x.muscle.toLowerCase().includes(group)||(group==='legs'&&/quads|hamstrings|glutes|calves/i.test(x.muscle)));
+        result={title:`${group?group[0].toUpperCase()+group.slice(1):'Exercise'} exercise suggestions`,type:'exercises',items};
+      } else if(/food|nutrition|protein in|paneer|tofu|chicken|egg|oats|dal|rice|roti|soya|milk|curd|banana/.test(s)){
+        if(food) result={title:`Nutrition: ${food.name}`,type:'foods',items:[food]};
+        else result={title:'Food nutrition database',type:'foods',items:FITMITRA_FOODS.filter(x=>s.includes(x.category.toLowerCase()))};
+      } else if(/progress|weight change|measurement|transformation/.test(s)){
+        const m=members.find(x=>s.includes(String(x.name||'').toLowerCase()));
+        const id=m?.id||reportMember||members[0]?.id;
+        const person=members.find(x=>String(x.id)===String(id));
+        const rows=progressRecords.filter(r=>String(r.memberId)===String(id)).sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')));
+        const weights=rows.filter(r=>Number(r.weight)>0);
+        const change=weights.length>1?(Number(weights.at(-1).weight)-Number(weights[0].weight)).toFixed(1)+' kg':'Not enough weight records';
+        result={title:`Progress summary: ${person?.name||'Select a member'}`,type:'stats',items:[['Progress records',rows.length],['First recorded weight',weights[0]?.weight?weights[0].weight+' kg':'—'],['Latest weight',weights.at(-1)?.weight?weights.at(-1).weight+' kg':'—'],['Weight change',change],['Latest record date',rows.at(-1)?.date||'—']],note:'Based on existing progress records. No records are created or modified.'};
+      } else if(/journal|log progress|save progress/.test(s)){
+        result={title:'Transformation Journal',type:'journal'};
+      } else if(/trainer|inactive|attention|not updated|insight/.test(s)){
+        const rows=members.map(m=>{const latest=progressRecords.filter(r=>String(r.memberId)===String(m.id)).sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))[0];const days=latest?.date?Math.floor((Date.now()-new Date(latest.date).getTime())/86400000):null;return {name:m.name,date:latest?.date||'No progress record',days};});
+        result={title:'Trainer member insights',type:'insights',items:rows};
+      } else if(/report|print|pdf/.test(s)){
+        result={title:'Fitness report',type:'report'};
+      } else if(/calendar|schedule/.test(s)){
+        result={title:'Workout scheduling',type:'calendar'};
+      }
+      setAnswer(result);setBusy(false);
+    },180);
+  };
+  const saveJournal=()=>{if(!journalNote.trim())return;setJournal(a=>[{id:Date.now(),memberId:journalMember,date:new Date().toISOString().slice(0,10),notes:journalNote.trim()},...a]);setJournalNote('');};
+  const selectedReport=members.find(m=>String(m.id)===String(reportMember));
+  const reportRows=progressRecords.filter(r=>String(r.memberId)===String(reportMember)).sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')));
+  return <section style={{maxWidth:1180,margin:'0 auto 26px',padding:'clamp(18px,3vw,30px)',borderRadius:22,background:'linear-gradient(135deg,#fff,#f7f5ff 55%,#effbf8)',border:'1px solid rgba(109,74,255,.13)',boxShadow:'0 12px 34px rgba(54,48,108,.06)'}}>
+    <div style={{textAlign:'center',maxWidth:820,margin:'0 auto'}}>
+      <div style={{fontSize:11,fontWeight:850,color:'#6d4aff',letterSpacing:'.09em'}}>FITMITRA SMART ASSISTANT</div>
+      <h2 style={{margin:'7px 0',fontSize:'clamp(24px,3vw,34px)',color:'#18243a'}}>What would you like to know?</h2>
+      <p style={{margin:'0 0 18px',color:'#718096'}}>Ask about exercises, workout splits, replacements, overload, food, diet calculations, macros, progress, journal, trainer insights, reports or scheduling — results appear below.</p>
+      <div style={{display:'flex',gap:8,padding:7,background:'#fff',borderRadius:15,border:'1px solid #dfe4ef',boxShadow:'0 8px 24px rgba(30,35,80,.08)'}}>
+        <input value={question} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>e.key==='Enter'&&ask()} placeholder="e.g. Show chest exercises, calories in paneer, 4-day workout split..." style={{border:0,outline:0,flex:1,minWidth:0,padding:'12px 10px',fontSize:15,color:'#18243a',background:'transparent'}}/>
+        <button onClick={ask} disabled={!question.trim()||busy} style={{border:0,borderRadius:11,padding:'0 22px',background:'linear-gradient(135deg,#6e4cff,#159b91)',color:'#fff',fontWeight:850,cursor:'pointer'}}> {busy?'Searching...':'Search'} </button>
+      </div>
+      <div style={{marginTop:13,display:'flex',gap:7,justifyContent:'center',flexWrap:'wrap'}}>
+        {prompts.map(q=><button key={q} onClick={()=>{setQuestion(q);ask(q);}} style={{border:'1px solid rgba(109,74,255,.16)',background:'#fff',color:'#5541a8',borderRadius:99,padding:'8px 12px',fontSize:12,fontWeight:700,cursor:'pointer'}}>{q}</button>)}
+      </div>
+    </div>
+    {busy&&<div style={{padding:28,textAlign:'center',color:'#6d4aff',fontWeight:750}}>Searching FitMitra knowledge...</div>}
+    {answer&&!busy&&<div style={{marginTop:22,background:'#fff',border:'1px solid #e4e8f1',borderRadius:16,padding:'18px 20px'}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,flexWrap:'wrap'}}><h3 style={{margin:0,color:'#202b43'}}>{answer.title}</h3><button onClick={()=>setAnswer(null)} style={{border:0,background:'#f4f1ff',color:'#6046cf',padding:'7px 11px',borderRadius:8,cursor:'pointer'}}>Clear result</button></div>
+      {answer.body&&<p style={{color:'#667085'}}>{answer.body}</p>}
+      {answer.type==='exercises'&&<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(210px,1fr))',gap:9,marginTop:12}}>{answer.items.map(x=><div key={x.name} style={{border:'1px solid #e6eaf1',borderRadius:11,padding:12}}><b>{x.name}</b><div style={{fontSize:12,color:'#667085',marginTop:4}}>{x.muscle} · {x.equipment}</div><small style={{color:'#159b91'}}>{x.level} · {x.type}</small></div>)}</div>}
+      {answer.type==='foods'&&<div style={{overflowX:'auto',marginTop:12}}><table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}><thead><tr>{['Food','Calories','Protein','Carbs','Fat'].map(x=><th style={{textAlign:'left',padding:9,borderBottom:'1px solid #e8edf3'}}>{x}</th>)}</tr></thead><tbody>{answer.items.map(x=><tr key={x.name}><td style={{padding:9,borderBottom:'1px solid #f0f2f6'}}>{x.name}</td><td>{x.cal} kcal</td><td>{x.p} g</td><td>{x.c} g</td><td>{x.f} g</td></tr>)}</tbody></table></div>}
+      {answer.type==='list'&&<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:8,marginTop:12}}>{answer.items.map(x=><div style={{padding:11,background:'#f8f9fc',borderRadius:9}}>{x}</div>)}</div>}
+      {answer.type==='stats'&&<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(145px,1fr))',gap:9,marginTop:12}}>{answer.items.map(([k,v])=><div style={{padding:12,background:'#f8f9fc',borderRadius:10}}><small style={{color:'#667085'}}>{k}</small><b style={{display:'block',fontSize:18,color:'#39277a',marginTop:4}}>{v}</b></div>)}</div>}
+      {answer.type==='insights'&&<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(210px,1fr))',gap:9,marginTop:12}}>{answer.items.map(x=><div style={{padding:12,border:'1px solid #e8edf3',borderRadius:10}}><b>{x.name}</b><div style={{fontSize:12,color:'#667085'}}>Last progress: {x.date}</div><small style={{color:x.days===null?'#b7791f':x.days>14?'#c2410c':'#159b91'}}>{x.days===null?'Progress record missing':x.days>14?`${x.days} days since update`:'Recently updated'}</small></div>)}</div>}
+      {answer.type==='overload'&&<div style={{marginTop:12,display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:9}}>
+        <label>Exercise<select value={lift.exercise} onChange={e=>setLift(x=>({...x,exercise:e.target.value}))} style={{display:'block',width:'100%',padding:9,border:'1px solid #dce2ec',borderRadius:8,marginTop:4}}>{FITMITRA_EXERCISES.map(x=><option key={x.name}>{x.name}</option>)}</select></label>
+        <label>Weight (kg)<input type="number" value={lift.weight} onChange={e=>setLift(x=>({...x,weight:e.target.value}))} style={{display:'block',width:'100%',padding:9,border:'1px solid #dce2ec',borderRadius:8,marginTop:4}}/></label>
+        <label>Reps<input type="number" value={lift.reps} onChange={e=>setLift(x=>({...x,reps:e.target.value}))} style={{display:'block',width:'100%',padding:9,border:'1px solid #dce2ec',borderRadius:8,marginTop:4}}/></label>
+        <button onClick={()=>{if(Number(lift.weight)>0&&Number(lift.reps)>0)setWorkoutLog(a=>[{...lift,id:Date.now(),date:new Date().toISOString().slice(0,10)},...a]);}} style={{alignSelf:'end',padding:10,border:0,borderRadius:8,background:'#6d4aff',color:'#fff'}}>Save workout log</button>
+        <div style={{gridColumn:'1/-1',background:'#f8f9fc',padding:12,borderRadius:10}}><b>Recent logs</b>{workoutLog.filter(x=>x.exercise===lift.exercise).slice(0,6).map(x=><div key={x.id} style={{padding:6,borderBottom:'1px solid #e8edf3'}}>{x.date}: {x.weight} kg × {x.reps} reps</div>)}<small style={{color:'#667085'}}>Suggested progression: add a rep first; increase load slightly only when target reps are completed with controlled form. Stored in this browser.</small></div>
+      </div>}
+      {answer.type==='calendar'&&<div style={{marginTop:12,display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:9}}>
+        <label>Date<input type="date" value={calendarDate} onChange={e=>setCalendarDate(e.target.value)} style={{display:'block',width:'100%',padding:9,border:'1px solid #dce2ec',borderRadius:8,marginTop:4}}/></label>
+        <label>Workout / session<input value={calendarText} onChange={e=>setCalendarText(e.target.value)} placeholder="e.g. Upper body" style={{display:'block',width:'100%',padding:9,border:'1px solid #dce2ec',borderRadius:8,marginTop:4}}/></label>
+        <button onClick={()=>{if(calendarText.trim())setCalendar(x=>({...x,[calendarDate]:calendarText.trim()}));setCalendarText('');}} style={{alignSelf:'end',padding:10,border:0,borderRadius:8,background:'#6d4aff',color:'#fff'}}>Add session</button>
+        <div style={{gridColumn:'1/-1',background:'#f8f9fc',padding:12,borderRadius:10}}><b>Scheduled sessions</b>{Object.entries(calendar).sort(([a],[b])=>a.localeCompare(b)).map(([d,v])=><div key={d} style={{padding:6,borderBottom:'1px solid #e8edf3'}}>{d} · {v}</div>)}</div>
+      </div>}
+      {answer.type==='journal'&&<div style={{marginTop:12,display:'grid',gap:9}}><label>Member<select value={journalMember} onChange={e=>setJournalMember(e.target.value)} style={{display:'block',padding:9,border:'1px solid #dce2ec',borderRadius:8,marginTop:4}}>{members.map(m=><option value={m.id}>{m.name}</option>)}</select></label><textarea value={journalNote} onChange={e=>setJournalNote(e.target.value)} placeholder="Add progress note..." rows={3} style={{padding:10,border:'1px solid #dce2ec',borderRadius:8}}/><button onClick={saveJournal} style={{justifySelf:'start',padding:'9px 14px',border:0,borderRadius:8,background:'#6d4aff',color:'#fff'}}>Save journal note</button><small style={{color:'#667085'}}>Saved locally in this browser only.</small>{journal.filter(x=>String(x.memberId)===String(journalMember)).slice(0,5).map(x=><div style={{padding:9,background:'#f8f9fc',borderRadius:8}}>{x.date}: {x.notes}</div>)}</div>}
+      {answer.type==='report'&&<div style={{marginTop:12}}><label>Member<select value={reportMember} onChange={e=>setReportMember(e.target.value)} style={{display:'block',padding:9,border:'1px solid #dce2ec',borderRadius:8,marginTop:4}}>{members.map(m=><option value={m.id}>{m.name}</option>)}</select></label><div style={{padding:14,marginTop:10,border:'1px solid #e8edf3',borderRadius:10}}><h3>Preface Fitness Progress Report</h3><b>{selectedReport?.name||'Member'}</b><p>Progress records: {reportRows.length}</p>{reportRows.map(r=><div style={{padding:6,borderBottom:'1px solid #eee'}}>{r.date} · Weight {r.weight||'—'} kg · Waist {r.waist||'—'} · Chest {r.chest||'—'}</div>)}</div><button onClick={()=>window.print()} style={{marginTop:10,padding:10,border:0,borderRadius:8,background:'#6d4aff',color:'#fff'}}>Print / Save PDF</button></div>}
+      {answer.note&&<p style={{marginTop:12,fontSize:12,color:'#667085'}}>{answer.note}</p>}
+    </div>}
+    <div style={{textAlign:'center',marginTop:14,fontSize:11,color:'#98a2b3'}}>Built-in rule-based search · No AI API · No Supabase schema changes</div>
+  </section>;
+}
+
+function PrefaceFitMitraPage({ members = [], progressRecords = [], createWorkoutPlan, createDietPlan }) {
+  const [prompt, setPrompt] = useState('');
+  const [open, setOpen] = useState(false);
+  const [memberSearch, setMemberSearch] = useState('');
+  const [memberId, setMemberId] = useState('');
+  const [stage, setStage] = useState('member');
+  const [busy, setBusy] = useState(false);
+  const [profile, setProfile] = useState({});
+  const [answers, setAnswers] = useState({ goal:['Fat Loss'], days:4, minutes:45, workoutTime:'Evening', dietPreference:'', restrictions:'', experience:'Beginner', focus:'General fitness' });
+  const [generated, setGenerated] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const member = members.find(m => String(m.id) === String(memberId));
+  const meta = member ? readMemberMeta(member.notes || '') : {};
+  const latestProgress = member ? (progressRecords || []).filter(r => String(r.memberId) === String(member.id)).sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')))[0] : null;
+  const weight = latestProgress?.weight || member?.weight || '';
+  const height = member?.height || '';
+  const medical = [...(meta.medicalConditions || []), meta.medicalOther, meta.additionalMedicalNotes].filter(Boolean).join(', ');
+  const filteredMembers = members.filter(m => [m.name,m.id,m.phone].join(' ').toLowerCase().includes(memberSearch.toLowerCase()));
+  const suggestions = ['Plan my diet and workout','Create a fat loss plan','Build muscle with a diet plan','Improve strength and stamina'];
+  const start = (text = prompt) => { setPrompt(text); setOpen(true); setStage('member'); setGenerated(null); setMemberId(''); setMemberSearch(''); setAnswers(prev=>({...prev,goal:['Fat Loss']})); };
+  const updateAnswer = (key,value) => setAnswers(prev => ({...prev,[key]:value}));
+  const thinking = (next) => {
+    setBusy(true);
+    window.setTimeout(() => { setBusy(false); setStage(next); }, 1150);
+  };
+  const analyzeMember = () => {
+    if (!memberId) return;
+    setProfile({weight:weight || '',height:height || '',medical:medical || '',waist:meta.waist || '',chest:meta.chest || '',weakness:meta.additionalMedicalNotes || ''});
+    const notesText = String(member?.notes || '');
+    const prefMatch = notesText.match(/(?:dietary preference|diet preference|food preference)\s*[:=-]\s*([^|\n]+)/i);
+    const savedPreference = member?.dietaryPreference || member?.dietPreference || meta.dietaryPreference || meta.dietPreference || prefMatch?.[1]?.trim() || '';
+    if (savedPreference) setAnswers(prev => ({...prev,dietPreference:savedPreference}));
+    thinking('details');
+  };
+  const buildPlan = () => {
+    const selectedGoals = Array.isArray(answers.goal) ? answers.goal : [answers.goal].filter(Boolean);
+    if (!selectedGoals.length) { window.alert('Please select at least one primary goal.'); return; }
+    const goalLabel = selectedGoals.join(' + ');
+    const hasFatLoss = selectedGoals.includes('Fat Loss');
+    const hasMuscleBuilding = selectedGoals.includes('Muscle Building');
+    const hasWeightGain = selectedGoals.includes('Weight Gain');
+    const kg = Number(profile.weight || 70);
+    const kcalFactor = hasFatLoss && (hasMuscleBuilding || hasWeightGain) ? 30 : hasWeightGain ? 36 : hasMuscleBuilding ? 34 : hasFatLoss ? 27 : 30;
+    const kcal = Math.max(1400, Math.round(kg * kcalFactor));
+    const protein = Math.round(kg * (hasMuscleBuilding ? 1.9 : hasFatLoss ? 1.8 : 1.7));
+    const weekdayOptions = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    const dayCount = Math.max(1, Math.min(7, Number(answers.days) || 4));
+    const workoutDays = weekdayOptions.slice(0, dayCount);
+    const phase1 = [
+      {name:'Goblet Squat',muscle:'Legs',sets:3,reps:'10-12',rest:'75 sec'},
+      {name:'Machine Chest Press',muscle:'Chest',sets:3,reps:'10-12',rest:'75 sec'},
+      {name:'Lat Pulldown',muscle:'Back',sets:3,reps:'10-12',rest:'75 sec'},
+      {name:'Dumbbell Romanian Deadlift',muscle:'Hamstrings',sets:2,reps:'10',rest:'90 sec'},
+      {name:'Plank',muscle:'Core',sets:3,reps:'20-30 sec',rest:'45 sec'}
+    ];
+    const phase2 = [
+      {name:'Leg Press',muscle:'Legs',sets:4,reps:'8-12',rest:'90 sec'},
+      {name:'Dumbbell Bench Press',muscle:'Chest',sets:4,reps:'8-12',rest:'90 sec'},
+      {name:'Seated Cable Row',muscle:'Back',sets:4,reps:'10-12',rest:'75 sec'},
+      {name:'Dumbbell Shoulder Press',muscle:'Shoulders',sets:3,reps:'10',rest:'75 sec'},
+      {name:'Dead Bug',muscle:'Core',sets:3,reps:'10 each side',rest:'45 sec'}
+    ];
+    const phase3 = [
+      {name:'Squat Variation',muscle:'Legs',sets:4,reps:'6-10',rest:'120 sec'},
+      {name:'Incline Dumbbell Press',muscle:'Chest',sets:4,reps:'8-10',rest:'90 sec'},
+      {name:'Chest Supported Row',muscle:'Back',sets:4,reps:'8-12',rest:'90 sec'},
+      {name:'Hip Thrust',muscle:'Glutes',sets:3,reps:'10-12',rest:'90 sec'},
+      {name:'Farmer Carry',muscle:'Core',sets:3,reps:'30 sec',rest:'60 sec'}
+    ];
+    const exercises = [
+      ...phase1.map((e,i)=>({...e,id:`AI-P1-${i}`,phase:'Phase 1 · Foundation (Weeks 1–2)',day:workoutDays[i%dayCount]})),
+      ...phase2.map((e,i)=>({...e,id:`AI-P2-${i}`,phase:'Phase 2 · Build (Weeks 3–6)',day:workoutDays[i%dayCount]})),
+      ...phase3.map((e,i)=>({...e,id:`AI-P3-${i}`,phase:'Phase 3 · Progress (Weeks 7–8)',day:workoutDays[i%dayCount]})),
+    ];
+    const pref = answers.dietPreference || 'No preference specified';
+    const dietMeals = [
+      {meal:'Breakfast',food:'Oats + milk + banana + curd',calories:Math.round(kcal*.25),protein:Math.round(protein*.22),items:[]},
+      {meal:'Lunch',food:'Dal / chicken / paneer + rice or roti + vegetables',calories:Math.round(kcal*.32),protein:Math.round(protein*.32),items:[]},
+      {meal:'Snack',food:'Greek yogurt / roasted chana + seasonal fruit',calories:Math.round(kcal*.15),protein:Math.round(protein*.16),items:[]},
+      {meal:'Dinner',food:'Paneer / tofu / chicken + roti + vegetables',calories:kcal-Math.round(kcal*.72),protein:protein-Math.round(protein*.70),items:[]}
+    ];
+    setGenerated({
+      workout:{name:`${goalLabel} · ${member?.name || 'Member'} Workout`,goal:goalLabel,level:answers.experience,durationWeeks:8,trainer:'Preface FitMitra AI',assignedMemberIds:[member.id],exercises,notes:`PHASE 1 (Weeks 1–2): Learn technique, easy-moderate effort, leave 3 reps in reserve.\nPHASE 2 (Weeks 3–6): Gradually add reps or small weight increments, leave 2 reps in reserve.\nPHASE 3 (Weeks 7–8): Progress load only with clean form; review recovery and measurements.\nSchedule: ${dayCount} days/week (${workoutDays.join(', ')}), ${answers.minutes} minutes/session, preferred time: ${answers.workoutTime}. Profile considerations: ${profile.medical || 'None reported'}. Avoid painful movements and obtain medical clearance for relevant conditions.`},
+      diet:{name:`${goalLabel} Nutrition · ${member?.name || 'Member'}`,goal:goalLabel,calories:kcal,protein,durationWeeks:8,coach:'Preface FitMitra AI',assignedMemberIds:[member.id],meals:dietMeals,notes:`Diet preference: ${pref}. Restrictions: ${answers.restrictions || 'None specified'}. Illustrative targets only; adjust to progress, appetite and clinician/dietitian advice.`}
+    });
+    thinking('preview');
+  };
+  const savePlans = async () => {
+    if (!generated || !member) return;
+    setSaving(true);
+    try {
+      await createWorkoutPlan(generated.workout);
+      await createDietPlan(generated.diet);
+      setStage('saved');
+    } finally { setSaving(false); }
+  };
+  return <div className="page fitmitra-page">
+    <PageTitle title="Preface FitMitra" subtitle="Your fitness companion — goals se results tak, ek smart raasta." />
+    <FitMitraToolsHub members={members} progressRecords={progressRecords} onStartPlan={start} />
+    {open && <div className="modal-backdrop" style={{zIndex:1500}} onMouseDown={e=>e.target===e.currentTarget&&setOpen(false)}>
+      <div className="modal" style={{width:'min(850px,calc(100vw - 24px))',maxHeight:'90vh',overflowY:'auto',borderRadius:20}}>
+        <div className="modal-header"><div><h2 style={{margin:0}}>FitMitra · Plan builder</h2><p style={{margin:'4px 0 0',color:'#71839a',fontSize:13}}>{prompt || 'Plan my diet and workout'}</p></div><button className="icon-btn" onClick={()=>setOpen(false)} aria-label="Close"><X size={18}/></button></div>
+        <div style={{padding:20}}>
+          {busy ? <div style={{padding:'48px 12px',textAlign:'center'}}><div className="fitmitra-orbit"><Sparkles size={30}/></div><h3>FitMitra is analysing...</h3><p style={{color:'#71839a'}}>Member profile aur plan requirements check ho rahe hain.</p></div> : null}
+          {!busy && stage==='member' && <>
+            <h3>1. Select a member</h3><div className="search-box" style={{marginBottom:10}}><Search size={16}/><input autoFocus value={memberSearch} onChange={e=>setMemberSearch(e.target.value)} placeholder="Search member by name, ID or phone..."/></div>
+            <div style={{display:'grid',gap:7,maxHeight:300,overflowY:'auto'}}>{filteredMembers.map(m=><button key={m.id} onClick={()=>setMemberId(m.id)} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:12,borderRadius:11,border:memberId===m.id?'1px solid #159b91':'1px solid #e4eaf1',background:memberId===m.id?'#effaf8':'#fff',cursor:'pointer',textAlign:'left'}}><span><strong>{m.name}</strong><small style={{display:'block',color:'#71839a'}}>{m.id} · {m.phone || 'No phone'}</small></span>{memberId===m.id&&<CheckCircle2 color="#159b91"/>}</button>)}</div>
+            <div style={{display:'flex',justifyContent:'flex-end',marginTop:16}}><button className="btn btn-primary" disabled={!memberId} onClick={analyzeMember}>Analyse member <Sparkles size={15}/></button></div>
+          </>}
+          {!busy && stage==='details' && member && <>
+            <h3>2. Member profile review</h3><p style={{color:'#71839a',fontSize:13}}>Available information automatically fetched from member profile and progress records.</p>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(145px,1fr))',gap:9,marginBottom:15}}>
+              {[['Member',member.name],['Weight',profile.weight?`${profile.weight} kg`:'Not available'],['Height',profile.height?`${profile.height} cm`:'Not available'],['Medical / injury notes',profile.medical || 'Not recorded'],['Waist',profile.waist?`${profile.waist} cm`:'Not recorded'],['Chest',profile.chest?`${profile.chest} cm`:'Not recorded']].map(([k,v])=><div key={k} style={{padding:11,border:'1px solid #e7edf4',borderRadius:11}}><small style={{color:'#71839a'}}>{k}</small><strong style={{display:'block',marginTop:4,fontSize:13}}>{v}</strong></div>)}
+            </div>
+            <div className="form-grid two">
+              <FormField label="Current weight (kg)"><input type="text" inputMode="decimal" autoComplete="off" value={profile.weight} onChange={e=>setProfile(p=>({...p,weight:e.target.value}))} placeholder="Enter current weight (e.g. 85)"/></FormField>
+              <FormField label="Height (cm)"><input type="text" inputMode="decimal" autoComplete="off" value={profile.height} onChange={e=>setProfile(p=>({...p,height:e.target.value}))} placeholder="Enter height (e.g. 175)"/></FormField>
+              <FormField label="Any injuries, pain or physical limitations?"><input type="text" value={profile.medical || ''} onChange={e=>setProfile(p=>({...p,medical:e.target.value}))} placeholder="Describe injury / pain, or type None"/></FormField>
+            </div>
+            <div style={{display:'flex',justifyContent:'flex-end',marginTop:16}}><button className="btn btn-primary" onClick={()=>thinking('preferences')}>Continue <Sparkles size={15}/></button></div>
+          </>}
+          {!busy && stage==='preferences' && <>
+            <h3>3. Goals & daily routine</h3>
+            <div className="form-grid two">
+              <FormField label="Primary goal (select all that apply)">
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(145px,1fr))',gap:8}}>
+                  {['Fat Loss','Muscle Building','Weight Gain','General Fitness','Strength & Stamina'].map(goalOption=>{
+                    const selected=(answers.goal||[]).includes(goalOption);
+                    return <label key={goalOption} style={{display:'flex',alignItems:'center',gap:8,padding:'10px 12px',borderRadius:10,border:selected?'1px solid #6d4aff':'1px solid #dce4ef',background:selected?'#f3efff':'#fff',color:'#24344d',fontWeight:650,cursor:'pointer'}}>
+                      <input type="checkbox" checked={selected} onChange={()=>updateAnswer('goal',selected?(answers.goal||[]).filter(g=>g!==goalOption):[...(answers.goal||[]),goalOption])}/>
+                      {goalOption}
+                    </label>;
+                  })}
+                </div>
+                {!(answers.goal||[]).length&&<small style={{color:'#c2410c'}}>Please select at least one goal.</small>}
+              </FormField>
+              <FormField label="Experience"><select value={answers.experience} onChange={e=>updateAnswer('experience',e.target.value)}><option>Beginner</option><option>Intermediate</option><option>Advanced</option></select></FormField>
+              <FormField label="Workout days per week"><select value={answers.days} onChange={e=>updateAnswer('days',e.target.value)}>{[2,3,4,5,6].map(n=><option key={n} value={n}>{n} days</option>)}</select></FormField>
+              <FormField label="Time per workout"><select value={answers.minutes} onChange={e=>updateAnswer('minutes',e.target.value)}>{[30,45,60,75,90].map(n=><option key={n} value={n}>{n} minutes</option>)}</select></FormField>
+              <FormField label="Preferred workout time"><select value={answers.workoutTime} onChange={e=>updateAnswer('workoutTime',e.target.value)}>{['Early morning','Morning','Afternoon','Evening','Night','Flexible'].map(n=><option key={n}>{n}</option>)}</select></FormField>
+              <FormField label="Diet preference"><select value={answers.dietPreference} onChange={e=>updateAnswer('dietPreference',e.target.value)}><option value="">Not specified</option><option>Vegetarian</option><option>Vegetarian + Eggs</option><option>Non-vegetarian</option><option>Vegan</option></select></FormField>
+              <FormField label="Food allergies / restrictions"><input value={answers.restrictions} onChange={e=>updateAnswer('restrictions',e.target.value)} placeholder="e.g. lactose intolerance, peanuts"/></FormField>
+              <FormField label="Focus area (optional)"><input value={answers.focus} onChange={e=>updateAnswer('focus',e.target.value)} placeholder="e.g. back strength, stamina"/></FormField>
+            </div>
+            <div style={{display:'flex',justifyContent:'space-between',marginTop:16}}><button className="btn btn-secondary" onClick={()=>setStage('details')}>Back</button><button className="btn btn-primary" onClick={buildPlan}>Generate my plan <Sparkles size={15}/></button></div>
+          </>}
+          {!busy && stage==='preview' && generated && <>
+            <div style={{display:'flex',alignItems:'center',gap:10}}><Sparkles color="#159b91"/><div><h3 style={{margin:0}}>Your 8-week plan is ready</h3><small style={{color:'#71839a'}}>For {member?.name} · {answers.goal}</small></div></div>
+            <div className="panel" style={{padding:15,marginTop:14}}><h4>Workout plan · 3 phases</h4>{['Phase 1 · Foundation (Weeks 1–2)','Phase 2 · Build (Weeks 3–6)','Phase 3 · Progress (Weeks 7–8)'].map((p,i)=><div key={p} style={{padding:'10px 0',borderTop:'1px solid #edf1f5'}}><strong>{p}</strong><p style={{margin:'4px 0',fontSize:13,color:'#71839a'}}>{['Technique, movement quality and easy-moderate effort.','Progressive overload with gradual increases in reps or load.','Consolidate strength gains and review recovery and progress.'][i]}</p>{generated.workout.exercises.filter(e=>e.phase.startsWith(`Phase ${i+1}`)).map(e=><span key={e.id} className="data-pill" style={{margin:'2px 4px 2px 0',display:'inline-flex'}}>{e.name}</span>)}</div>)}</div>
+            <div className="panel" style={{padding:15,marginTop:12}}><h4>Diet plan · daily targets</h4><div style={{display:'flex',gap:16,flexWrap:'wrap',marginBottom:10}}><strong>{generated.diet.calories} kcal</strong><strong>{generated.diet.protein} g protein</strong></div>{generated.diet.meals.map(m=><div key={m.meal} style={{padding:'8px 0',borderTop:'1px solid #edf1f5'}}><strong>{m.meal}</strong><div style={{fontSize:13,color:'#71839a'}}>{m.food} · {m.calories} kcal · {m.protein}g protein</div></div>)}</div>
+            <p style={{fontSize:12,color:'#8a6470',lineHeight:1.5}}>Review before assigning. This is a structured planning draft, not a medical prescription. Injuries, chronic conditions and dietary allergies should be reviewed by a qualified professional.</p>
+            <div style={{display:'flex',justifyContent:'space-between',gap:8,flexWrap:'wrap'}}><button className="btn btn-secondary" onClick={()=>setStage('preferences')}>Adjust answers</button><button className="btn btn-primary" disabled={saving} onClick={savePlans}>{saving?'Adding plans…':'Add both plans to member profile'} <CheckCircle2 size={16}/></button></div>
+          </>}
+          {!busy && stage==='saved' && <div style={{textAlign:'center',padding:'35px 10px'}}><CheckCircle2 size={48} color="#159b91"/><h3>Plans added successfully!</h3><p style={{color:'#71839a'}}>Workout plan and diet plan are assigned to {member?.name}. They will appear in the member profile, Training / Diet & Nutrition and Member Portal.</p><button className="btn btn-primary" onClick={()=>setOpen(false)}>Done</button></div>}
+        </div>
+      </div>
+    </div>}
+    <style>{`.fitmitra-page .fitmitra-hero{background:linear-gradient(135deg,rgba(255,255,255,.96),rgba(246,243,255,.92) 56%,rgba(235,251,248,.92));border:1px solid rgba(109,74,255,.12);box-shadow:0 16px 42px rgba(54,48,108,.08)}.fitmitra-page .fitmitra-card{background:rgba(255,255,255,.88);border:1px solid rgba(109,74,255,.10);box-shadow:0 8px 24px rgba(42,46,85,.055);border-radius:16px}.fitmitra-page .fitmitra-accent{background:linear-gradient(135deg,#6d4aff,#12bfa6);color:#fff}.fitmitra-page .fitmitra-prompt{border:1px solid rgba(109,74,255,.15);background:linear-gradient(135deg,#fff,#f7f4ff);border-radius:13px;transition:transform .16s ease,box-shadow .16s ease}.fitmitra-page .fitmitra-prompt:hover{transform:translateY(-2px);box-shadow:0 9px 20px rgba(109,74,255,.10)}@keyframes fitMitraPulse{0%,100%{transform:scale(.92);opacity:.7;box-shadow:0 0 0 0 rgba(21,155,145,.2)}50%{transform:scale(1.08);opacity:1;box-shadow:0 0 0 18px rgba(21,155,145,0)}}.fitmitra-orbit{width:76px;height:76px;margin:0 auto 16px;border-radius:50%;display:grid;place-items:center;color:#fff;background:linear-gradient(135deg,#6e4cff,#159b91);animation:fitMitraPulse 1.1s ease-in-out infinite}`}</style>
+  </div>;
+}
+
 function App() {
   useGentleInputAssist();
   useEffect(() => {
@@ -2168,7 +2628,14 @@ function App() {
   const [dbReady, setDbReady] = useState(false);
   const [active, setActive] = useState(() => {
     try {
-      return window.localStorage.getItem('preface-fitness-active-page') || 'Dashboard';
+      // Restore the last section only for an actual browser reload.
+      // A fresh tab/session (including reopening the website) starts at Dashboard.
+      const navigationEntry = window.performance?.getEntriesByType?.('navigation')?.[0];
+      const isReload = navigationEntry
+        ? navigationEntry.type === 'reload'
+        : window.performance?.navigation?.type === 1;
+      if (!isReload) return 'Dashboard';
+      return window.sessionStorage.getItem('preface-fitness-reload-page') || 'Dashboard';
     } catch {
       return 'Dashboard';
     }
@@ -3235,6 +3702,7 @@ function App() {
       meals: (plan.meals || []).map((meal, index) => ({
         ...meal,
         id: meal.id || `MEAL-${Date.now()}-${index}`,
+        items: Array.isArray(meal.items) ? meal.items : [],
         calories: Number(meal.calories || 0),
         protein: Number(meal.protein || 0),
       })),
@@ -3263,6 +3731,7 @@ function App() {
       meals: (plan.meals || []).map((meal, index) => ({
         ...meal,
         id: meal.id || `MEAL-${Date.now()}-${index}`,
+        items: Array.isArray(meal.items) ? meal.items : [],
         calories: Number(meal.calories || 0),
         protein: Number(meal.protein || 0),
       })),
@@ -3299,6 +3768,27 @@ function App() {
     }
   };
 
+
+  const saveDietPlanMembers = async (planId, nextMemberIds, successMessage) => {
+    const existing = (data.dietPlans || []).find((item) => item.id === planId);
+    if (!existing) return;
+    const clean = { ...existing, assignedMemberIds: [...new Set(nextMemberIds)] };
+    try {
+      let cloudId = existing.cloudId;
+      const payload = getDietPlanCloudPayload(clean);
+      if (cloudId) { delete payload.legacy_id; await updateRecord('diet_plans', cloudId, payload); }
+      else { const row = await insertRecord('diet_plans', payload); cloudId = row.id; }
+      setData((d) => ({ ...d, dietPlans: (d.dietPlans || []).map((p) => p.id === planId ? { ...clean, cloudId } : p) }));
+      setModal(null); setToast(successMessage);
+    } catch (error) { console.error('Diet member assignment sync failed:', error); setToast(error?.message || 'Unable to update assigned members'); }
+  };
+
+  const saveDietFoodItems = async (items) => {
+    const patch = { dietFoodItems: items };
+    setData((d) => ({ ...d, settings: { ...(d.settings || {}), ...patch } }));
+    try { await saveCloudSettings(patch); setToast('Food master list saved and synced'); }
+    catch (error) { console.error('Food master sync failed:', error); setToast(error?.message || 'Food list saved locally; cloud sync failed'); }
+  };
 
   const addTrainer = async (trainer) => {
     const clean = {
@@ -4144,6 +4634,7 @@ function App() {
     { label: 'Trainers & PT', icon: Users, permission: 'trainers' },
     { label: 'Progress', icon: TrendingUp, permission: 'progress' },
     { label: 'Diet & Nutrition', icon: Target, permission: 'diet' },
+    { label: 'Preface FitMitra', icon: Sparkles, permission: 'fitmitra' },
     { label: 'Communication', icon: MessageCircle, permission: 'communication' },
     { label: 'Customer Feedback', icon: MessageCircle, permission: 'feedback' },
     { label: 'Reports', icon: ClipboardList, permission: 'reports' },
@@ -4178,15 +4669,14 @@ function App() {
     setQuery('');
   };
 
-  // Remember the last page so a browser reload restores the same section.
-  // The existing permission guard below still redirects staff away from
-  // sections they are not allowed to access.
+  // Store the current page only for this tab. The initializer reads it only
+  // when the browser navigation type is "reload", never on a fresh visit.
   useEffect(() => {
     if (!isAuthenticated) return;
     try {
-      window.localStorage.setItem('preface-fitness-active-page', active || 'Dashboard');
+      window.sessionStorage.setItem('preface-fitness-reload-page', active || 'Dashboard');
     } catch (error) {
-      console.warn('Could not remember the last opened page:', error);
+      console.warn('Could not store the page for reload:', error);
     }
   }, [active, isAuthenticated]);
 
@@ -4231,7 +4721,10 @@ function App() {
     }
 
     setIsAuthenticated(false);
-    try { window.localStorage.removeItem('preface-fitness-active-page'); } catch {}
+    try {
+      window.sessionStorage.removeItem('preface-fitness-reload-page');
+      window.localStorage.removeItem('preface-fitness-active-page');
+    } catch {}
     setActive('Dashboard');
     setSidebarOpen(false);
     setModal(null);
@@ -4307,6 +4800,11 @@ function App() {
               <Icon size={21} strokeWidth={2.1} /><span>{label}</span>
             </button>
           ))}
+          {visibleNav.filter((item) => item.label === 'Preface FitMitra').map(({ label, icon: Icon }) => (
+            <button key={label} className={`nav-item ${active === label ? 'active' : ''}`} onClick={() => navigate(label)} title={label}>
+              <Icon size={21} strokeWidth={2.1} /><span>{label}</span>
+            </button>
+          ))}
         </nav>
         <div className="sidebar-bottom compact-sidebar-bottom">
           {visibleNav.filter((item) => item.label === 'Reports').map(({ label, icon: Icon }) => (
@@ -4342,7 +4840,7 @@ function App() {
           </div>
           <div className="top-navigation-scroll" aria-label="Main navigation">
             {visibleNav
-              .filter(({ label }) => !['Dashboard', 'Members', 'Attendance', 'Payments', 'Reports', 'Settings', 'Staff Access'].includes(label))
+              .filter(({ label }) => !['Dashboard', 'Members', 'Attendance', 'Payments', 'Reports', 'Settings', 'Staff Access', 'Preface FitMitra'].includes(label))
               .map(({ label, icon: Icon }) => (
                 <button key={label} className={`top-navigation-item ${active === label ? 'active' : ''}`} onClick={() => navigate(label)}>
                   <Icon size={18} strokeWidth={2.2} /><span>{label}</span>
@@ -4382,7 +4880,8 @@ function App() {
           {active === 'Progress' && <ProgressPage progressRecords={data.progressRecords || []} members={data.members} setModal={setModal} deleteProgressRecord={deleteProgressRecord} />}
           {active === 'Trainers & PT' && <TrainersPTPage trainers={data.trainers || []} sessions={data.ptSessions || []} members={data.members} setModal={setModal} updatePTSessionStatus={updatePTSessionStatus} deletePTSession={deletePTSession} deleteTrainer={deleteTrainer} />}
           {active === 'Training' && <TrainingPage plans={data.workoutPlans || []} members={data.members} setModal={setModal} deleteWorkoutPlan={deleteWorkoutPlan} updateWorkoutPlan={updateWorkoutPlan} />}
-          {active === 'Diet & Nutrition' && <DietPage plans={data.dietPlans || []} members={data.members} setModal={setModal} deleteDietPlan={deleteDietPlan} />}
+          {active === 'Diet & Nutrition' && <DietPage plans={data.dietPlans || []} members={data.members} foodItems={data.settings?.dietFoodItems || DEFAULT_DIET_FOOD_ITEMS} setModal={setModal} deleteDietPlan={deleteDietPlan} />}
+          {active === 'Preface FitMitra' && <PrefaceFitMitraPage members={data.members || []} progressRecords={data.progressRecords || []} createWorkoutPlan={createWorkoutPlan} createDietPlan={createDietPlan} />}
           {active === 'Communication' && <CommunicationPage members={data.members} logs={data.communicationLogs || []} setModal={setModal} deleteCommunicationLog={deleteCommunicationLog} />}
           {active === 'Customer Feedback' && <FeedbackPage feedbacks={data.feedbacks || []} members={data.members || []} setModal={setModal} deleteFeedback={deleteFeedback} />}
           {active === 'Reports' && <ReportsPage data={data} revenue={revenue} />}
@@ -4428,7 +4927,9 @@ function App() {
           return { ...d, settings: { ...(d.settings || {}), workoutMuscleGroups: [...existing, cleanGroup] } };
         });
       }} plan={modal?.type === 'editWorkoutPlan' ? modal.plan : null} onClose={() => setModal(null)} onSave={modal?.type === 'editWorkoutPlan' ? updateWorkoutPlan : createWorkoutPlan} />}
-      {(modal === 'dietPlan' || modal?.type === 'editDietPlan') && <DietPlanModal members={data.members} plan={modal?.type === 'editDietPlan' ? modal.plan : null} onClose={() => setModal(null)} onSave={modal?.type === 'editDietPlan' ? updateDietPlan : createDietPlan} />}
+      {(modal === 'dietPlan' || modal?.type === 'editDietPlan') && <DietPlanModal members={data.members} foodItems={data.settings?.dietFoodItems || DEFAULT_DIET_FOOD_ITEMS} plan={modal?.type === 'editDietPlan' ? modal.plan : null} onClose={() => setModal(null)} onSave={modal?.type === 'editDietPlan' ? updateDietPlan : createDietPlan} />}
+      {(modal?.type === 'assignDietMembers' || modal?.type === 'removeDietMembers') && <DietMembersModal mode={modal.type === 'assignDietMembers' ? 'assign' : 'remove'} plan={modal.plan} members={data.members || []} onClose={() => setModal(null)} onSave={(ids) => saveDietPlanMembers(modal.plan.id, ids, modal.type === 'assignDietMembers' ? 'Members assigned successfully' : 'Selected members removed from this diet plan')} />}
+      {modal?.type === 'dietFoodMaster' && <DietFoodMasterModal items={data.settings?.dietFoodItems || DEFAULT_DIET_FOOD_ITEMS} onClose={() => setModal(null)} onSave={saveDietFoodItems} />}
       {modal === 'feedback' && <FeedbackModal members={data.members || []} onClose={() => setModal(null)} onSave={addFeedback} />}
       {modal?.type === 'invoiceOptions' && <InvoiceOptionsModal member={modal.member} payment={modal.payment} payments={data.payments || []} mode={modal.source === 'member' ? 'member' : 'single'} settings={data.settings || {}} onClose={() => setModal(null)} onPrint={(mode, rate, selected) => {
         try {
@@ -6332,6 +6833,8 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
   const [selectedMember, setSelectedMember] = useState(null);
   const [workoutPlansExpanded, setWorkoutPlansExpanded] = useState(false);
   const [dietPlansExpanded, setDietPlansExpanded] = useState(false);
+  const [ptHistoryExpanded, setPtHistoryExpanded] = useState(false);
+  const [fitnessMedicalExpanded, setFitnessMedicalExpanded] = useState(false);
 
   const filtered = members.filter((member) => {
     const q = query.toLowerCase();
@@ -6728,8 +7231,13 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
           <div className="profile-card pt-profile-history-card" style={cardStyle}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,flexWrap:'wrap'}}>
               <PanelHeader title="Personal Training Session History" subtitle="Detailed PT attendance and assigned package record" icon={Dumbbell} />
-              <button type="button" className="btn btn-secondary" onClick={() => printPTMasterRecord({ member, sessions: memberPTPackages, trainers, settings })} style={{display:'inline-flex',alignItems:'center',gap:7,flexShrink:0}}><Printer size={17}/> Print PT record</button>
+              <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                <button type="button" className="btn btn-secondary" onClick={() => printPTMasterRecord({ member, sessions: memberPTPackages, trainers, settings })} style={{display:'inline-flex',alignItems:'center',gap:7,flexShrink:0}}><Printer size={17}/> Print PT record</button>
+                <button type="button" className="btn btn-secondary" aria-expanded={ptHistoryExpanded} onClick={() => setPtHistoryExpanded(value => !value)} style={{display:'inline-flex',alignItems:'center',gap:7,flexShrink:0,minWidth:112,justifyContent:'center'}}>{ptHistoryExpanded ? <><ChevronUp size={17}/> Collapse</> : <><ChevronDown size={17}/> Expand</>}</button>
+              </div>
             </div>
+            {!ptHistoryExpanded && <div style={{display:'flex',alignItems:'center',gap:8,marginTop:12,padding:'9px 11px',borderRadius:11,background:'linear-gradient(90deg,#f1f7ff,#f0fbf8)',border:'1px solid #e2edf6',color:'#58718a',fontSize:12}}><ClipboardList size={15} color="#159b91"/><span>{memberPTHistory.length} completed PT {memberPTHistory.length === 1 ? 'session' : 'sessions'} · {memberPTPackages.length} {memberPTPackages.length === 1 ? 'package' : 'packages'} assigned. Expand to view session and package history.</span></div>}
+            {ptHistoryExpanded && <>
             <div className="membership-history-summary" style={{marginTop:16}}>
               <div><span>Completed sessions</span><strong>{memberPTHistory.length}</strong></div>
               <div><span>PT packages</span><strong>{memberPTPackages.length}</strong></div>
@@ -6740,16 +7248,21 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
             {memberPTHistory.length ? <div className="membership-history-table"><table><thead><tr><th>Date</th><th>Time</th><th>Trainer</th><th>Package</th><th>Session notes</th></tr></thead><tbody>{memberPTHistory.map((item,index)=><tr key={item.id||`${item.date}-${index}`}><td><strong>{formatDate(item.date)}</strong></td><td>{item.time||'—'}</td><td>{item.trainerName}</td><td>{item.pkg.planName||item.pkg.type||'Personal Training'}</td><td>{cleanPTSessionNotes(item.notes)||'—'}</td></tr>)}</tbody></table></div> : <div className="membership-activity-empty">No individual dated PT sessions recorded yet. Future sessions will appear here after staff mark them Complete.</div>}
             <h3 style={{margin:'22px 0 10px',color:'#1b2942'}}>PT package history</h3>
             {memberPTPackages.length ? <div className="membership-history-table"><table><thead><tr><th>Start date</th><th>Plan</th><th>Trainer</th><th>Sessions used</th><th>Expiry</th><th>Fee</th><th>Status</th></tr></thead><tbody>{memberPTPackages.map((pkg)=><tr key={pkg.id}><td>{formatDate(pkg.date)}</td><td><strong>{pkg.planName||pkg.type||'Personal Training'}</strong></td><td>{trainers.find(t=>t.id===pkg.trainerId)?.name||pkg.trainer||'—'}</td><td>{Number(pkg.sessionsCompleted||0)} / {Number(pkg.sessionsTotal||1)}</td><td>{formatDate(pkg.expiryDate)}</td><td>₹{Number(pkg.fee||0).toLocaleString('en-IN')}</td><td><StatusBadge status={pkg.status}/></td></tr>)}</tbody></table></div> : <div className="membership-activity-empty">No PT packages assigned to this member yet.</div>}
+            </>}
           </div>
 
           <div className="profile-card" style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' }}>
               <PanelHeader title="Fitness, measurements & medical history" subtitle="Training baseline and health information reported by the member" icon={Activity} />
-              <button type="button" className="btn btn-secondary" onClick={() => printMemberFitnessMedical(member, settings, memberWorkoutPlans)} style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', flexShrink: 0 }}>
-                <FileDown size={17} /> Print profile
-              </button>
+              <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                <button type="button" className="btn btn-secondary" onClick={() => printMemberFitnessMedical(member, settings, memberWorkoutPlans)} style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', flexShrink: 0 }}>
+                  <FileDown size={17} /> Print profile
+                </button>
+                <button type="button" className="btn btn-secondary" aria-expanded={fitnessMedicalExpanded} onClick={() => setFitnessMedicalExpanded(value => !value)} style={{display:'inline-flex',alignItems:'center',gap:7,flexShrink:0,minWidth:112,justifyContent:'center'}}>{fitnessMedicalExpanded ? <><ChevronUp size={17}/> Collapse</> : <><ChevronDown size={17}/> Expand</>}</button>
+              </div>
             </div>
-            {(() => {
+            {!fitnessMedicalExpanded && <div style={{display:'flex',alignItems:'center',gap:8,marginTop:12,padding:'9px 11px',borderRadius:11,background:'linear-gradient(90deg,#f1f7ff,#f0fbf8)',border:'1px solid #e2edf6',color:'#58718a',fontSize:12}}><Activity size={15} color="#159b91"/><span>Fitness measurements and medical history are available. Expand to view the member's recorded details.</span></div>}
+            {fitnessMedicalExpanded && (() => {
               const meta = readMemberMeta(member.notes);
               const conditions = Array.isArray(meta.medicalConditions) ? meta.medicalConditions : (Array.isArray(member.medicalConditions) ? member.medicalConditions : []);
               const measurements = [
@@ -8376,76 +8889,35 @@ function WorkoutPlanModal({ members, onClose, onSave, plan, muscleGroups = [], o
   </Modal>;
 }
 
-function DietPage({ plans, members, setModal, deleteDietPlan }) {
+function DietPage({ plans, members, setModal, deleteDietPlan, foodItems = DEFAULT_DIET_FOOD_ITEMS }) {
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState(plans[0]?.id || null);
-
   useEffect(() => {
     if (selectedId && !plans.some((plan) => plan.id === selectedId)) setSelectedId(plans[0]?.id || null);
     if (!selectedId && plans[0]) setSelectedId(plans[0].id);
   }, [plans, selectedId]);
-
   const filteredPlans = plans.filter((plan) => {
     const q = search.trim().toLowerCase();
-    if (!q) return true;
-    return [plan.name, plan.goal, plan.coach, ...(plan.assignedMemberIds || []).map((id) => members.find((m) => m.id === id)?.name || '')]
-      .join(' ').toLowerCase().includes(q);
+    return !q || [plan.name, plan.goal, plan.coach, ...(plan.assignedMemberIds || []).map((id) => members.find((m) => m.id === id)?.name || '')].join(' ').toLowerCase().includes(q);
   });
-
   const selected = plans.find((plan) => plan.id === selectedId) || filteredPlans[0] || null;
   const totalAssigned = new Set(plans.flatMap((plan) => plan.assignedMemberIds || [])).size;
   const avgCalories = plans.length ? Math.round(plans.reduce((sum, plan) => sum + Number(plan.calories || 0), 0) / plans.length) : 0;
   const avgProtein = plans.length ? Math.round(plans.reduce((sum, plan) => sum + Number(plan.protein || 0), 0) / plans.length) : 0;
-
   return <div className="page">
-    <PageTitle title="Diet & Nutrition" subtitle="Create nutrition plans, assign them to members and track daily targets." action={<button className="btn btn-primary" onClick={() => setModal('dietPlan')}><Plus size={18} /> New diet plan</button>} />
-
-    <div className="member-summary">
-      <MetricBox label="Diet plans" value={plans.length} tone="green" />
-      <MetricBox label="Members assigned" value={totalAssigned} tone="teal" />
-      <MetricBox label="Avg. calories" value={avgCalories ? `${avgCalories} kcal` : '—'} />
-      <MetricBox label="Avg. protein" value={avgProtein ? `${avgProtein} g` : '—'} tone="amber" />
-    </div>
-
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, .95fr) minmax(0, 1.55fr)', gap: 16, alignItems: 'start' }}>
-      <section className="panel">
-        <div className="panel-header">
-          <div><div className="panel-title"><div className="panel-icon"><Target size={17} /></div><div><h3>Diet plans</h3><span>Reusable nutrition templates</span></div></div></div>
-          <div className="search-box compact-search"><Search size={16} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search plan..." /></div>
-        </div>
-        <div style={{ display: 'grid', gap: 8, padding: '0 14px 14px' }}>
-          {filteredPlans.map((plan) => <div key={plan.id} style={{textAlign:'left',border:selected?.id===plan.id?'1px solid #39b6a7':'1px solid #e7ebef',background:selected?.id===plan.id?'#f2fbf9':'#fff',borderRadius:12,padding:13}}>
-            <div style={{display:'flex',justifyContent:'space-between',gap:10,alignItems:'flex-start'}}>
-              <button type="button" onClick={() => setSelectedId(plan.id)} style={{textAlign:'left',border:0,background:'transparent',padding:0,cursor:'pointer',minWidth:0,flex:1}}>
-                <strong style={{display:'block',color:'#16242d'}}>{plan.name}</strong>
-                <span style={{display:'block',marginTop:3,color:'#71808d',fontSize:12}}>{plan.goal} · {plan.durationWeeks} weeks</span>
-              </button>
-              <div style={{display:'flex',alignItems:'center',gap:5,flexShrink:0}}>
-                <button type="button" className="icon-btn" title="Assign members" aria-label={`Assign members to ${plan.name}`} onClick={() => setModal({type:'editDietPlan',plan,focusAssign:true})} style={{color:'#0f9b8e',border:'1px solid #cdece6',background:'#f0fbf8'}}><Plus size={16}/></button>
-                <button type="button" className="icon-btn" title="Edit diet plan" aria-label={`Edit ${plan.name}`} onClick={() => setModal({type:'editDietPlan',plan})}><Pencil size={15}/></button>
-                <button type="button" className="icon-btn" title="Delete diet plan" aria-label={`Delete ${plan.name}`} onClick={() => deleteDietPlan(plan.id)} style={{color:'#dc5555',border:'1px solid #f3d6d6',background:'#fff8f8'}}><X size={16}/></button>
-              </div>
-            </div>
-            <div style={{display:'flex',gap:14,marginTop:10,fontSize:12,color:'#5f6f7b'}}><span>{plan.calories || 0} kcal/day</span><span>{(plan.assignedMemberIds || []).length} members</span><span className="status-badge active">{plan.protein || 0}g protein</span></div>
-          </div>)}
-          {!filteredPlans.length && <EmptyState title="No diet plans" text="Create your first nutrition plan." />}
-        </div>
+    <PageTitle title="Diet & Nutrition" subtitle="Create nutrition plans, assign them to members and track daily targets." action={<div style={{display:'flex',gap:8,flexWrap:'wrap'}}><button className="btn btn-secondary" onClick={() => setModal({type:'dietFoodMaster'})}><ClipboardList size={17}/> Food master list</button><button className="btn btn-primary" onClick={() => setModal('dietPlan')}><Plus size={18}/> New diet plan</button></div>} />
+    <div className="member-summary"><MetricBox label="Diet plans" value={plans.length} tone="green"/><MetricBox label="Members assigned" value={totalAssigned} tone="teal"/><MetricBox label="Avg. calories" value={avgCalories ? `${avgCalories} kcal` : '—'}/><MetricBox label="Avg. protein" value={avgProtein ? `${avgProtein} g` : '—'} tone="amber"/></div>
+    <section className="panel" style={{marginBottom:16}}><div className="panel-header"><div className="panel-title"><div className="panel-icon"><ClipboardList size={17}/></div><div><h3>Food nutrition master</h3><span>{foodItems.length} foods · nutritional values per 100 g unless specified</span></div></div><button className="btn btn-secondary btn-sm" onClick={() => setModal({type:'dietFoodMaster'})}><Pencil size={14}/> Manage foods</button></div><div style={{padding:'0 16px 14px',display:'flex',gap:8,flexWrap:'wrap'}}>{['Dairy','Protein','Pulses','Grains','Fruits','Vegetables','Nuts & seeds'].map(cat=><span key={cat} className="status-badge active">{cat}: {foodItems.filter(x=>x.category===cat).length}</span>)}</div></section>
+    <div style={{display:'grid',gridTemplateColumns:'minmax(320px,.95fr) minmax(0,1.55fr)',gap:16,alignItems:'start'}}>
+      <section className="panel"><div className="panel-header"><div><div className="panel-title"><div className="panel-icon"><Target size={17}/></div><div><h3>Diet plans</h3><span>Reusable nutrition templates</span></div></div></div><div className="search-box compact-search"><Search size={16}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search plan..."/></div></div>
+        <div style={{display:'grid',gap:8,padding:'0 14px 14px'}}>{filteredPlans.map(plan=><div key={plan.id} style={{border:'1px solid #e7ebef',background:selected?.id===plan.id?'#f2fbf9':'#fff',borderRadius:12,padding:13}}><div style={{display:'flex',justifyContent:'space-between',gap:10,alignItems:'flex-start'}}><button type="button" onClick={()=>setSelectedId(plan.id)} style={{textAlign:'left',border:0,background:'transparent',padding:0,cursor:'pointer',minWidth:0,flex:1}}><strong style={{display:'block',color:'#16242d'}}>{plan.name}</strong><span style={{display:'block',marginTop:3,color:'#71808d',fontSize:12}}>{plan.goal} · {plan.durationWeeks} weeks</span></button></div><div style={{display:'flex',gap:14,marginTop:10,fontSize:12,color:'#5f6f7b',flexWrap:'wrap'}}><span>{plan.calories||0} kcal/day</span><span>{(plan.assignedMemberIds||[]).length} members</span><span>{plan.protein||0}g protein</span></div></div>)}{!filteredPlans.length&&<EmptyState title="No diet plans" text="Create your first nutrition plan."/>}</div>
       </section>
-
-      <section className="panel">
-        {selected ? <>
-          <PanelHeader title={selected.name} subtitle={`${selected.goal} · ${selected.durationWeeks} weeks · Coach: ${selected.coach || '—'}`} icon={Target} action={<div style={{ display: 'flex', gap: 8 }}><button className="btn btn-secondary btn-sm" onClick={() => setModal({ type: 'editDietPlan', plan: selected, focusAssign: true })}><Plus size={14}/> Assign</button><button className="btn btn-secondary btn-sm" onClick={() => setModal({ type: 'editDietPlan', plan: selected })}><Pencil size={14}/> Edit</button><button className="btn btn-danger btn-sm" onClick={() => deleteDietPlan(selected.id)}><X size={14}/> Delete</button></div>} />
-          <div style={{ padding: '0 16px 16px' }}>
-            <div className="member-summary" style={{ marginBottom: 16 }}><MetricBox label="Daily calories" value={`${selected.calories || 0} kcal`} tone="green" /><MetricBox label="Daily protein" value={`${selected.protein || 0} g`} tone="teal" /><MetricBox label="Meals" value={(selected.meals || []).length} /><MetricBox label="Assigned" value={(selected.assignedMemberIds || []).length} tone="amber" /></div>
-            <div className="form-section-title">Meal plan</div>
-            <div className="table-wrap"><table><thead><tr><th>Meal</th><th>Food / description</th><th>Calories</th><th>Protein</th></tr></thead><tbody>{(selected.meals || []).map((meal) => <tr key={meal.id}><td><strong>{meal.meal}</strong></td><td>{meal.food}</td><td>{Number(meal.calories || 0)} kcal</td><td>{Number(meal.protein || 0)} g</td></tr>)}</tbody></table></div>
-            <div className="form-section-title">Assigned members</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>{members.filter((member) => (selected.assignedMemberIds || []).includes(member.id)).map((member) => <div key={member.id} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: 10, border: '1px solid #e7ebef', borderRadius: 10 }}><div className="avatar soft">{initials(member.name)}</div><div><strong style={{ display: 'block', fontSize: 13 }}>{member.name}</strong><span style={{ color: '#71808d', fontSize: 11 }}>{member.id} · {member.plan || 'Member'}</span></div></div>)}</div>
-            {!(selected.assignedMemberIds || []).length && <div className="form-hint">No members assigned to this plan yet.</div>}
-            {selected.notes && <><div className="form-section-title">Coach notes</div><div style={{ padding: 12, borderRadius: 10, background: '#f7f9fa', color: '#5f6f7b', lineHeight: 1.55 }}>{selected.notes}</div></>}
-          </div>
-        </> : <EmptyState title="Select a diet plan" text="Choose a plan from the list to see its details." />}
-      </section>
+      <section className="panel">{selected?<><PanelHeader title={selected.name} subtitle={`${selected.goal} · ${selected.durationWeeks} weeks · Coach: ${selected.coach||'—'}`} icon={Target} action={<div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+          <button type="button" className="icon-btn" title="Assign members" aria-label="Assign members" onClick={()=>setModal({type:'assignDietMembers',plan:selected})} style={{width:38,height:38,minWidth:38,padding:0,display:'grid',placeItems:'center',borderRadius:10,color:'#0d9488',background:'#effaf8',border:'1px solid #cceee8'}}><UserPlus size={18}/></button>
+          <button type="button" className="icon-btn" title="Remove assigned members" aria-label="Remove assigned members" onClick={()=>setModal({type:'removeDietMembers',plan:selected})} style={{width:38,height:38,minWidth:38,padding:0,display:'grid',placeItems:'center',borderRadius:10,color:'#d97706',background:'#fff8eb',border:'1px solid #f5dfb7'}}><UserMinus size={18}/></button>
+          <button type="button" className="icon-btn" title="Edit diet plan" aria-label="Edit diet plan" onClick={()=>setModal({type:'editDietPlan',plan:selected})} style={{width:38,height:38,minWidth:38,padding:0,display:'grid',placeItems:'center',borderRadius:10,color:'#475569',background:'#f8fafc',border:'1px solid #dbe3ec'}}><Pencil size={18}/></button>
+          <button type="button" className="icon-btn" title="Delete entire diet plan" aria-label="Delete entire diet plan" onClick={()=>deleteDietPlan(selected.id)} style={{width:38,height:38,minWidth:38,padding:0,display:'grid',placeItems:'center',borderRadius:10,color:'#dc2626',background:'#fff5f5',border:'1px solid #f2cccc'}}><Trash2 size={18}/></button>
+        </div>}/><div style={{padding:'0 16px 16px'}}><div className="member-summary" style={{marginBottom:16}}><MetricBox label="Daily calories" value={`${selected.calories||0} kcal`} tone="green"/><MetricBox label="Daily protein" value={`${selected.protein||0} g`} tone="teal"/><MetricBox label="Meals" value={(selected.meals||[]).length}/><MetricBox label="Assigned" value={(selected.assignedMemberIds||[]).length} tone="amber"/></div><div className="form-section-title">Meal plan</div><div className="table-wrap"><table><thead><tr><th>Meal</th><th>Food / quantity</th><th>Calories</th><th>Protein</th></tr></thead><tbody>{(selected.meals||[]).map(meal=><tr key={meal.id}><td><strong>{meal.meal}</strong></td><td>{meal.items?.length ? meal.items.map(i=>`${i.name} — ${i.quantity??i.grams} ${i.unit||'g'}`).join(', ') : meal.food}</td><td>{Number(meal.calories||0)} kcal</td><td>{Number(meal.protein||0)} g</td></tr>)}</tbody></table></div><div className="form-section-title">Assigned members</div><div style={{display:'grid',gridTemplateColumns:'repeat(2,minmax(0,1fr))',gap:8}}>{members.filter(m=>(selected.assignedMemberIds||[]).some(id=>String(id)===String(m.id))).map(member=><div key={member.id} style={{display:'flex',alignItems:'center',gap:9,padding:10,border:'1px solid #e7ebef',borderRadius:10}}><div className="avatar soft">{initials(member.name)}</div><div><strong style={{display:'block',fontSize:13}}>{member.name}</strong><span style={{color:'#71808d',fontSize:11}}>{member.id} · {member.plan||'Member'}</span></div></div>)}</div>{!(selected.assignedMemberIds||[]).length&&<div className="form-hint">No members assigned to this plan yet.</div>}{selected.notes&&<><div className="form-section-title">Coach notes</div><div style={{padding:12,borderRadius:10,background:'#f7f9fa',color:'#5f6f7b',lineHeight:1.55}}>{selected.notes}</div></>}</div></>:<EmptyState title="Select a diet plan" text="Choose a plan from the list to see its details."/>}</section>
     </div>
   </div>;
 }
@@ -8477,27 +8949,81 @@ function DietMemberPicker({ members, selectedIds, onToggle }) {
   </div>;
 }
 
-function DietPlanModal({ members, onClose, onSave, plan }) {
-  const defaultMeal = (index = 0) => ({ id: `MEAL-${Date.now()}-${index}`, meal: ['Breakfast', 'Lunch', 'Snack', 'Dinner'][index] || 'Meal', food: '', calories: 0, protein: 0 });
-  const [form, setForm] = useState(() => plan ? { ...plan, goal: plan.goal || 'General Fitness', calories: plan.calories || 0, protein: plan.protein || 0, durationWeeks: plan.durationWeeks || 4, coach: plan.coach || 'Administrator', notes: plan.notes || '', assignedMemberIds: plan.assignedMemberIds || [], meals: plan.meals?.length ? plan.meals : [defaultMeal(0)] } : { name: '', goal: 'General Fitness', calories: 2000, protein: 120, durationWeeks: 4, coach: 'Administrator', notes: '', assignedMemberIds: [], meals: [defaultMeal(0), defaultMeal(1), defaultMeal(2), defaultMeal(3)] });
-  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
-  const updateMeal = (index, key, value) => setForm((current) => ({ ...current, meals: current.meals.map((meal, i) => i === index ? { ...meal, [key]: value } : meal) }));
-  const addMeal = () => setForm((current) => ({ ...current, meals: [...current.meals, defaultMeal(current.meals.length)] }));
-  const removeMeal = (index) => setForm((current) => ({ ...current, meals: current.meals.filter((_, i) => i !== index) }));
-  const toggleMember = (id) => setForm((current) => ({ ...current, assignedMemberIds: current.assignedMemberIds.includes(id) ? current.assignedMemberIds.filter((item) => item !== id) : [...current.assignedMemberIds, id] }));
-  const valid = form.name.trim() && form.meals.some((meal) => meal.food.trim());
-  const submit = () => onSave({ ...form, name: form.name.trim(), calories: Number(form.calories || 0), protein: Number(form.protein || 0), durationWeeks: Number(form.durationWeeks || 1), meals: form.meals.filter((meal) => meal.food.trim()).map((meal) => ({ ...meal, calories: Number(meal.calories || 0), protein: Number(meal.protein || 0) })) });
+function DietMembersModal({ mode, plan, members, onClose, onSave }) {
+  const [selected, setSelected] = useState([]);
+  const [search, setSearch] = useState('');
+  const currentAssigned = (plan.assignedMemberIds || []).map(String);
+  const list = members.filter(m => mode === 'assign' ? !currentAssigned.includes(String(m.id)) : currentAssigned.includes(String(m.id))).filter(m => !search || [m.name,m.id,m.phone].join(' ').toLowerCase().includes(search.toLowerCase()));
+  const toggle = id => setSelected(v => v.includes(id) ? v.filter(x=>x!==id) : [...v,id]);
+  const save = () => onSave(mode === 'assign' ? [...(plan.assignedMemberIds||[]),...selected] : (plan.assignedMemberIds||[]).filter(id=>!selected.includes(id)));
+  return <Modal title={mode==='assign'?'Assign members':'Delete assigned members'} onClose={onClose}>
+    <p className="form-hint">{mode==='assign'?'Select customers to assign to this diet plan.':'Select only the members to remove. The diet plan itself will remain unchanged.'}</p>
+    <div className="search-box" style={{marginBottom:10}}><Search size={16}/><input autoFocus value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search customer name..."/></div>
+    <div style={{maxHeight:360,overflowY:'auto',display:'grid',gap:5}}>{list.map(m=><label key={m.id} style={{display:'flex',alignItems:'center',gap:10,padding:10,border:'1px solid #e7ebef',borderRadius:9,cursor:'pointer'}}><input type="checkbox" checked={selected.includes(m.id)} onChange={()=>toggle(m.id)}/><span style={{fontWeight:700}}>{m.name}</span></label>)}{!list.length&&<div className="form-hint">{mode==='assign'?'No unassigned customers found.':'There are no assigned members matching this search.'}</div>}</div>
+    <ModalActions onClose={onClose} disabled={!selected.length} onSave={save} saveLabel={mode==='assign'?'Assign selected':'Remove selected'}/>
+  </Modal>;
+}
 
-  return <Modal title={plan ? 'Edit diet plan' : 'Create diet plan'} onClose={onClose} wide>
-    <div className="form-section-title">Plan details</div>
-    <div className="form-grid three"><FormField label="Plan name"><input autoFocus value={form.name} onChange={(e) => update('name', e.target.value)} placeholder="e.g. Fat Loss Starter" /></FormField><FormField label="Goal"><select value={form.goal} onChange={(e) => update('goal', e.target.value)}><option>General Fitness</option><option>Fat Loss</option><option>Muscle Building</option><option>Weight Gain</option><option>Performance</option><option>Maintenance</option></select></FormField><FormField label="Duration (weeks)"><input type="number" min="1" max="52" value={form.durationWeeks} onChange={(e) => update('durationWeeks', e.target.value)} /></FormField></div>
-    <div className="form-grid three"><FormField label="Daily calories"><input type="number" min="0" value={form.calories} onChange={(e) => update('calories', e.target.value)} /></FormField><FormField label="Daily protein (g)"><input type="number" min="0" value={form.protein} onChange={(e) => update('protein', e.target.value)} /></FormField><FormField label="Coach / dietitian"><input value={form.coach} onChange={(e) => update('coach', e.target.value)} placeholder="Name" /></FormField></div>
-    <FormField label="Plan notes"><textarea rows="2" value={form.notes} onChange={(e) => update('notes', e.target.value)} placeholder="Nutrition instructions, restrictions, meal timing, etc." /></FormField>
-    <div className="form-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span>Meals</span><button className="btn btn-secondary btn-sm" onClick={addMeal}><Plus size={14} /> Add meal</button></div>
-    <div style={{ display: 'grid', gap: 10 }}>{form.meals.map((meal, index) => <div key={meal.id || index} style={{ border: '1px solid #e7ebef', borderRadius: 12, padding: 12 }}><div className="form-grid four"><FormField label="Meal"><select value={meal.meal} onChange={(e) => updateMeal(index, 'meal', e.target.value)}><option>Breakfast</option><option>Mid-morning</option><option>Lunch</option><option>Pre-workout</option><option>Post-workout</option><option>Snack</option><option>Dinner</option><option>Other</option></select></FormField><FormField label="Food / description"><input value={meal.food} onChange={(e) => updateMeal(index, 'food', e.target.value)} placeholder="e.g. Paneer + roti + salad" /></FormField><FormField label="Calories"><input type="number" min="0" value={meal.calories} onChange={(e) => updateMeal(index, 'calories', e.target.value)} /></FormField><FormField label="Protein (g)"><input type="number" min="0" value={meal.protein} onChange={(e) => updateMeal(index, 'protein', e.target.value)} /></FormField></div>{form.meals.length > 1 && <button className="link-btn" style={{ color: '#d45d5d' }} onClick={() => removeMeal(index)}><Trash2 size={14} /> Remove meal</button>}</div>)}</div>
-    <div className="form-section-title">Assign members</div>
-    <DietMemberPicker members={members} selectedIds={form.assignedMemberIds} onToggle={toggleMember} />
-    <ModalActions onClose={onClose} disabled={!valid} onSave={submit} saveLabel={plan ? 'Save changes' : 'Create plan'} />
+function DietFoodMasterModal({ items, onClose, onSave }) {
+  const [list,setList]=useState(()=>normalizeDietFoodItems(items));
+  const [search,setSearch]=useState('');
+  const [draft,setDraft]=useState(null);
+  const [editingId,setEditingId]=useState(null);
+  const filtered=list.filter(x=>[x.name,x.category].join(' ').toLowerCase().includes(search.toLowerCase()));
+  const startNew=()=>{setEditingId(null);setDraft({name:'',calories:'',protein:'',category:'Other',unit:'g',gramsPerUnit:1});};
+  const edit=x=>{setEditingId(x.id);setDraft({...x});};
+  const saveItem=()=>{
+    if(!draft?.name?.trim() || !Number.isFinite(Number(draft.calories)) || !Number.isFinite(Number(draft.protein))) return;
+    const clean={...draft,id:editingId||`FOOD-${Date.now()}`,name:draft.name.trim(),calories:Number(draft.calories),protein:Number(draft.protein),category:draft.category||'Other',unit:draft.unit||'g',gramsPerUnit:Math.max(0.001,Number(draft.gramsPerUnit||1))};
+    setList(v=>editingId?v.map(x=>x.id===editingId?clean:x):[...v,clean]);setDraft(null);setEditingId(null);
+  };
+  const remove=id=>{if(window.confirm('Delete this food item from the master list? Existing diet plans will not be changed.'))setList(v=>v.filter(x=>x.id!==id));};
+  return <Modal title="Food nutrition master list" onClose={onClose} wide>
+    <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:12,flexWrap:'wrap'}}><div className="search-box" style={{flex:1,minWidth:220}}><Search size={16}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search food or category..."/></div><button className="btn btn-primary btn-sm" onClick={startNew}><Plus size={14}/> Add food</button></div>
+    {draft&&<div style={{border:'1px solid #d9e4f0',borderRadius:12,padding:14,marginBottom:14,background:'#f8fbff'}}><div className="form-grid four"><FormField label="Food name"><input value={draft.name} onChange={e=>setDraft(v=>({...v,name:e.target.value}))} placeholder="e.g. Low fat paneer"/></FormField><FormField label="Calories / 100 g"><input type="number" min="0" value={draft.calories} onChange={e=>setDraft(v=>({...v,calories:e.target.value}))}/></FormField><FormField label="Protein g / 100 g"><input type="number" min="0" step="0.1" value={draft.protein} onChange={e=>setDraft(v=>({...v,protein:e.target.value}))}/></FormField><FormField label="Category"><input value={draft.category} onChange={e=>setDraft(v=>({...v,category:e.target.value}))}/></FormField><FormField label="Serving unit"><select value={draft.unit||'g'} onChange={e=>setDraft(v=>({...v,unit:e.target.value}))}><option value="g">Grams (g)</option><option value="ml">Millilitres (ml)</option><option value="piece">Piece</option><option value="slice">Slice</option><option value="scoop">Scoop</option><option value="cup">Cup</option><option value="tbsp">Tablespoon</option><option value="tsp">Teaspoon</option></select></FormField><FormField label="Weight per unit (g)"><input type="number" min="0.001" step="0.1" value={draft.gramsPerUnit??1} onChange={e=>setDraft(v=>({...v,gramsPerUnit:e.target.value}))}/></FormField></div><div style={{display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn btn-secondary btn-sm" onClick={()=>setDraft(null)}>Cancel</button><button className="btn btn-primary btn-sm" disabled={!draft.name.trim()} onClick={saveItem}>Save food</button></div></div>}
+    <div className="table-wrap" style={{maxHeight:470,overflowY:'auto'}}><table><thead><tr><th>Food item</th><th>Category</th><th>Calories / 100 g</th><th>Protein / 100 g</th><th>Serving unit</th><th>Actions</th></tr></thead><tbody>{filtered.map(x=><tr key={x.id}><td><strong>{x.name}</strong></td><td>{x.category}</td><td>{x.calories}</td><td>{x.protein} g</td><td>{x.unit||'g'} {x.unit && x.unit!=='g' ? `(${x.gramsPerUnit||1} g)` : ''}</td><td><div style={{display:'flex',gap:5}}><button className="icon-btn" title="Edit food" onClick={()=>edit(x)}><Pencil size={14}/></button><button className="icon-btn" title="Delete food" onClick={()=>remove(x.id)} style={{color:'#d44'}}><Trash2 size={14}/></button></div></td></tr>)}{!filtered.length&&<tr><td colSpan="6">No food items found.</td></tr>}</tbody></table></div>
+    <div className="form-hint" style={{marginTop:10}}>Values are reference estimates per 100 g; actual nutrition varies by brand, recipe and preparation. Saving updates the master list for future meal plans.</div>
+    <ModalActions onClose={onClose} onSave={()=>{onSave(list);onClose();}} saveLabel="Save master list"/>
+  </Modal>;
+}
+
+function DietFoodPicker({ items, onSelect }) {
+  const [query,setQuery]=useState('');
+  const [open,setOpen]=useState(false);
+  const filtered=items.filter(x=>[x.name,x.category].join(' ').toLowerCase().includes(query.toLowerCase())).slice(0,80);
+  return <div style={{position:'relative'}}>
+    <div className="search-box"><Search size={15}/><input value={query} onFocus={()=>setOpen(true)} onChange={e=>{setQuery(e.target.value);setOpen(true);}} placeholder="Search food items..."/></div>
+    {open&&<><button aria-label="Close food search" onClick={()=>setOpen(false)} style={{position:'fixed',inset:0,zIndex:35,background:'transparent',border:0}}/><div style={{position:'absolute',zIndex:36,top:'calc(100% + 5px)',left:0,right:0,maxHeight:230,overflowY:'auto',background:'#fff',border:'1px solid #dce5ef',borderRadius:10,boxShadow:'0 12px 28px rgba(20,40,70,.15)',padding:5}}>{filtered.map(food=><button type="button" key={food.id} onClick={()=>{onSelect(food.id);setQuery('');setOpen(false);}} style={{display:'flex',justifyContent:'space-between',gap:8,width:'100%',padding:'9px 8px',border:0,borderRadius:7,background:'#fff',textAlign:'left',cursor:'pointer'}}><span><strong style={{display:'block',fontSize:13}}>{food.name}</strong><small style={{color:'#71808d'}}>{food.category}</small></span><small style={{whiteSpace:'nowrap',color:'#247f74'}}>{food.calories} kcal · {food.protein} g / 100g · {food.unit||'g'}</small></button>)}{!filtered.length&&<div style={{padding:12,color:'#71808d'}}>No food items found.</div>}</div></>}
+  </div>;
+}
+
+function DietPlanModal({ members, foodItems = DEFAULT_DIET_FOOD_ITEMS, onClose, onSave, plan }) {
+  const normalizedFoodItems = normalizeDietFoodItems(foodItems);
+  const defaultMeal = (index=0)=>({id:`MEAL-${Date.now()}-${index}`,meal:['Breakfast','Lunch','Snack','Dinner'][index]||'Meal',food:'',items:[],calories:0,protein:0});
+  const initialMeals=plan?.meals?.length?plan.meals.map(m=>({...m,items:Array.isArray(m.items)?m.items:[]})):[defaultMeal(0),defaultMeal(1),defaultMeal(2),defaultMeal(3)];
+  const [form,setForm]=useState(()=>plan?{...plan,goal:plan.goal||'General Fitness',calories:plan.calories||0,protein:plan.protein||0,durationWeeks:plan.durationWeeks||4,coach:plan.coach||'Administrator',notes:plan.notes||'',assignedMemberIds:plan.assignedMemberIds||[],meals:initialMeals}:{name:'',goal:'General Fitness',calories:2000,protein:120,durationWeeks:4,coach:'Administrator',notes:'',assignedMemberIds:[],meals:initialMeals});
+  const update=(k,v)=>setForm(c=>({...c,[k]:v}));
+  const updateMeal=(i,patch)=>setForm(c=>({...c,meals:c.meals.map((m,j)=>j===i?{...m,...patch}:m)}));
+  const addMeal=()=>setForm(c=>({...c,meals:[...c.meals,defaultMeal(c.meals.length)]}));
+  const removeMeal=i=>setForm(c=>({...c,meals:c.meals.filter((_,j)=>j!==i)}));
+  const addFood=(index,foodId)=>{const food=normalizedFoodItems.find(x=>x.id===foodId);if(!food)return;const meal=form.meals[index];updateMeal(index,{items:[...(meal.items||[]),{foodId:food.id,name:food.name,quantity:food.unit==='g'||!food.unit?100:1,unit:food.unit||'g',gramsPerUnit:Number(food.gramsPerUnit||1),grams:(food.unit==='g'||!food.unit?100:1)*Number(food.gramsPerUnit||1),calories:Math.round(Number(food.calories||0)*((food.unit==='g'||!food.unit?100:1)*Number(food.gramsPerUnit||1))/100),protein:Number((Number(food.protein||0)*((food.unit==='g'||!food.unit?100:1)*Number(food.gramsPerUnit||1))/100).toFixed(1))}]});};
+  const updateFood=(mi,ii,key,value)=>{const items=[...(form.meals[mi].items||[])];const item={...items[ii],[key]:value};const master=normalizedFoodItems.find(x=>x.id===item.foodId);const unit=master?.unit||item.unit||'g';const gramsPerUnit=Number(master?.gramsPerUnit||item.gramsPerUnit||1);const quantity=Math.max(0,Number(item.quantity??item.grams??0));const grams=quantity*gramsPerUnit;if(master){item.unit=unit;item.gramsPerUnit=gramsPerUnit;item.quantity=quantity;item.grams=grams;item.calories=Math.round(Number(master.calories||0)*grams/100);item.protein=Number((Number(master.protein||0)*grams/100).toFixed(1));}items[ii]=item;updateMeal(mi,{items});};
+  const removeFood=(mi,ii)=>updateMeal(mi,{items:form.meals[mi].items.filter((_,j)=>j!==ii)});
+  const normalizedMeals=form.meals.map(m=>{const items=m.items||[];const calories=items.length?items.reduce((a,x)=>a+Number(x.calories||0),0):Number(m.calories||0);const protein=items.length?items.reduce((a,x)=>a+Number(x.protein||0),0):Number(m.protein||0);const food=items.length?items.map(x=>`${x.name} (${x.quantity??x.grams} ${x.unit||'g'})`).join(', '):m.food;return {...m,food,calories:Math.round(calories),protein:Number(protein.toFixed(1))};});
+  const totalCalories=normalizedMeals.reduce((a,m)=>a+m.calories,0);const totalProtein=normalizedMeals.reduce((a,m)=>a+m.protein,0);
+  const valid=form.name.trim()&&normalizedMeals.some(m=>m.food.trim());
+  const submit=()=>onSave({...form,name:form.name.trim(),calories:totalCalories,protein:Number(totalProtein.toFixed(1)),durationWeeks:Number(form.durationWeeks||1),meals:normalizedMeals});
+  return <Modal title={plan?'Edit diet plan':'Create diet plan'} onClose={onClose} wide>
+    <div className="form-section-title">Plan details</div><div className="form-grid three"><FormField label="Plan name"><input autoFocus value={form.name} onChange={e=>update('name',e.target.value)} placeholder="e.g. Fat Loss Starter"/></FormField><FormField label="Goal"><select value={form.goal} onChange={e=>update('goal',e.target.value)}>{['General Fitness','Fat Loss','Muscle Building','Weight Gain','Performance','Maintenance'].map(x=><option key={x}>{x}</option>)}</select></FormField><FormField label="Duration (weeks)"><input type="number" min="1" max="52" value={form.durationWeeks} onChange={e=>update('durationWeeks',e.target.value)}/></FormField></div>
+    <div className="form-grid three"><FormField label="Coach / dietitian"><input value={form.coach} onChange={e=>update('coach',e.target.value)} placeholder="Name"/></FormField><FormField label="Calculated daily calories"><input readOnly value={`${totalCalories} kcal`}/></FormField><FormField label="Calculated protein"><input readOnly value={`${totalProtein.toFixed(1)} g`}/></FormField></div><FormField label="Plan notes"><textarea rows="2" value={form.notes} onChange={e=>update('notes',e.target.value)} placeholder="Nutrition instructions, restrictions, meal timing, etc."/></FormField>
+    <div className="form-section-title" style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}><span>Meals & food quantities</span><button className="btn btn-secondary btn-sm" onClick={addMeal}><Plus size={14}/> Add meal</button></div>
+    <div style={{display:'grid',gap:12}}>{form.meals.map((meal,index)=><div key={meal.id||index} style={{border:'1px solid #e7ebef',borderRadius:12,padding:12}}><div style={{display:'flex',justifyContent:'space-between',gap:10,alignItems:'center',marginBottom:10}}><div style={{fontWeight:850,color:'#27364b'}}>Meal {index+1}</div>{form.meals.length>1&&<button className="link-btn" style={{color:'#d45d5d'}} onClick={()=>removeMeal(index)}><Trash2 size={14}/> Remove meal</button>}</div><div className="form-grid two"><FormField label="Meal timing"><select value={meal.meal} onChange={e=>updateMeal(index,{meal:e.target.value})}>{['Breakfast','Mid-morning','Lunch','Pre-workout','Post-workout','Snack','Dinner','Other'].map(x=><option key={x}>{x}</option>)}</select></FormField><FormField label="Add food from master list"><DietFoodPicker items={normalizedFoodItems} onSelect={foodId=>addFood(index,foodId)}/></FormField></div>
+      {(meal.items||[]).map((item,ii)=><div key={`${item.foodId}-${ii}`} style={{display:'grid',gridTemplateColumns:'minmax(150px,1.5fr) minmax(90px,.7fr) minmax(85px,.7fr) minmax(85px,.7fr) 34px',gap:8,alignItems:'end',marginTop:9}}><FormField label={ii===0?'Food item':''}><input readOnly value={item.name}/></FormField><FormField label={ii===0?`Quantity (${item.unit||'g'})`:''}><input type="number" min="0" step={item.unit==='piece'||item.unit==='slice'?1:0.1} value={item.quantity??(item.unit==='g'||!item.unit?item.grams:(Number(item.grams||0)/Number(item.gramsPerUnit||1)))} onChange={e=>updateFood(index,ii,'quantity',e.target.value)}/></FormField><FormField label={ii===0?'Calories':''}><input readOnly value={item.calories}/></FormField><FormField label={ii===0?'Protein (g)':''}><input readOnly value={item.protein}/></FormField><button className="icon-btn" title="Remove food" onClick={()=>removeFood(index,ii)} style={{color:'#d44',marginBottom:2}}><X size={15}/></button></div>)}
+      {!meal.items?.length&&meal.food&&<div className="form-hint">Existing saved meal: {meal.food}. Add foods from the master list to calculate quantities automatically; legacy nutrition totals are retained until then.</div>}
+      <div style={{display:'flex',justifyContent:'flex-end',gap:16,marginTop:10,fontSize:13,fontWeight:800,color:'#247f74'}}><span>Meal: {normalizedMeals[index]?.calories||0} kcal</span><span>{normalizedMeals[index]?.protein||0} g protein</span></div></div>)}</div>
+    <div style={{marginTop:14,padding:13,borderRadius:12,background:'#f1faf8',display:'flex',justifyContent:'space-between',fontWeight:900}}><span>Daily total</span><span>{totalCalories} kcal · {totalProtein.toFixed(1)} g protein</span></div>
+    <div className="form-hint" style={{marginTop:8}}>Nutrition values are estimates based on the master list per 100 g. Food brand and cooking method can change actual values.</div>
+    <ModalActions onClose={onClose} disabled={!valid} onSave={submit} saveLabel={plan?'Save changes':'Create plan'}/>
   </Modal>;
 }
 
@@ -8849,7 +9375,6 @@ function LeadModal({ onClose, onSave, lead }) {
 
   const save = () => {
     if (!form.name.trim()) return;
-
     onSave({
       ...form,
       name: form.name.trim(),
@@ -8859,118 +9384,132 @@ function LeadModal({ onClose, onSave, lead }) {
   };
 
   return (
-    <div className="modal-backdrop">
-      <div className="modal">
-        <div className="modal-header">
-          <div>
-            <h3>{lead ? 'Edit lead' : 'Add lead'}</h3>
-            <span>Capture prospect details and the next follow-up.</span>
-          </div>
-          <button className="icon-btn" onClick={onClose}><X size={18} /></button>
-        </div>
+    <div className="lead-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <style>{`
+        .lead-modal-backdrop{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;padding:22px;background:rgba(19,25,48,.48);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);overflow-y:auto}
+        .lead-modal-card{width:min(760px,100%);max-height:min(90vh,850px);display:flex;flex-direction:column;overflow:hidden;background:#fff;border:1px solid rgba(255,255,255,.8);border-radius:22px;box-shadow:0 28px 90px rgba(25,30,70,.24);animation:leadModalIn .18s ease-out}
+        @keyframes leadModalIn{from{opacity:0;transform:translateY(10px) scale(.99)}to{opacity:1;transform:translateY(0) scale(1)}}
+        .lead-modal-head{position:relative;padding:25px 28px 21px;background:linear-gradient(115deg,#f5f1ff 0%,#f7f9ff 58%,#edfbf8 100%);border-bottom:1px solid #e9eaf3}
+        .lead-modal-eyebrow{display:inline-flex;align-items:center;gap:7px;margin-bottom:9px;color:#6848e8;font-size:10px;font-weight:850;letter-spacing:.12em;text-transform:uppercase}
+        .lead-modal-title-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+        .lead-modal-head h3{margin:0;color:#1b2540;font-size:25px;line-height:1.2;font-weight:850;letter-spacing:-.035em}
+        .lead-modal-head p{margin:7px 0 0;color:#71809b;font-size:13px}
+        .lead-modal-close{width:36px;height:36px;flex:0 0 36px;display:grid;place-items:center;border:1px solid #e5e5f0;border-radius:11px;background:rgba(255,255,255,.8);color:#68748d;cursor:pointer;transition:.18s}
+        .lead-modal-close:hover{background:#fff;color:#5e43dc;transform:translateY(-1px)}
+        .lead-modal-body{padding:23px 28px 26px;overflow-y:auto}
+        .lead-form-section{margin-bottom:21px}
+        .lead-form-section:last-child{margin-bottom:0}
+        .lead-form-section-title{display:flex;align-items:center;gap:9px;margin-bottom:13px;color:#27324c;font-size:13px;font-weight:800}
+        .lead-form-section-title:before{content:"";width:4px;height:17px;border-radius:8px;background:linear-gradient(180deg,#7957ff,#19b9a5)}
+        .lead-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px 18px}
+        .lead-field{display:flex;flex-direction:column;gap:7px;min-width:0}
+        .lead-field.full{grid-column:1/-1}
+        .lead-field label{color:#43516c;font-size:12px;font-weight:750}
+        .lead-field label em{color:#e05b70;font-style:normal}
+        .lead-field input,.lead-field select,.lead-field textarea{box-sizing:border-box;width:100%;min-width:0;border:1px solid #dfe4ef;border-radius:11px;background:#fbfcff;color:#26334e;font:inherit;font-size:14px;outline:none;transition:border-color .16s,box-shadow .16s,background .16s}
+        .lead-field input,.lead-field select{height:45px;padding:0 13px}
+        .lead-field textarea{min-height:94px;padding:11px 13px;resize:vertical;line-height:1.5}
+        .lead-field input::placeholder,.lead-field textarea::placeholder{color:#a0a9ba}
+        .lead-field input:focus,.lead-field select:focus,.lead-field textarea:focus{border-color:#8a70ff;background:#fff;box-shadow:0 0 0 3px rgba(109,74,255,.11)}
+        .lead-field-hint{font-size:10px;color:#9aa3b4}
+        .lead-modal-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 28px;background:#fbfcff;border-top:1px solid #edf0f5}
+        .lead-modal-foot-note{color:#929caf;font-size:11px}
+        .lead-modal-actions{display:flex;align-items:center;gap:9px}
+        .lead-modal-btn{height:41px;padding:0 17px;border-radius:10px;font-size:13px;font-weight:800;cursor:pointer;transition:.18s}
+        .lead-modal-cancel{border:1px solid #dfe4ee;background:#fff;color:#53617a}
+        .lead-modal-cancel:hover{background:#f5f6fb}
+        .lead-modal-save{border:0;background:linear-gradient(120deg,#6d4aff,#8b4dff 58%,#13ad9c);color:#fff;box-shadow:0 7px 16px rgba(109,74,255,.2)}
+        .lead-modal-save:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 10px 20px rgba(109,74,255,.25)}
+        .lead-modal-save:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+        @media(max-width:600px){.lead-modal-backdrop{padding:10px;align-items:flex-start}.lead-modal-card{max-height:calc(100vh - 20px);border-radius:17px}.lead-modal-head{padding:20px 18px 17px}.lead-modal-body{padding:19px 18px}.lead-form-grid{grid-template-columns:1fr;gap:12px}.lead-field.full{grid-column:auto}.lead-modal-foot{padding:13px 18px;align-items:flex-start;flex-direction:column}.lead-modal-actions{width:100%}.lead-modal-btn{flex:1}.lead-modal-head h3{font-size:22px}}
+      `}</style>
 
-        <div className="modal-body">
-          <div className="form-grid">
-            <label>
-              Name *
-              <input
-                value={form.name}
-                onChange={(e) => update('name', e.target.value)}
-                placeholder="Lead name"
-              />
-            </label>
-
-            <label>
-              Phone
-              <input
-                value={form.phone}
-                onChange={(e) => update('phone', e.target.value)}
-                placeholder="Phone number"
-              />
-            </label>
-
-            <label>
-              Email
-              <input
-                type="email"
-                value={form.email}
-                onChange={(e) => update('email', e.target.value)}
-                placeholder="Email address"
-              />
-            </label>
-
-            <label>
-              Source
-              <select value={form.source} onChange={(e) => update('source', e.target.value)}>
-                <option>Walk-in</option>
-                <option>Instagram</option>
-                <option>Facebook</option>
-                <option>Google</option>
-                <option>Referral</option>
-                <option>Website</option>
-                <option>WhatsApp</option>
-                <option>Other</option>
-              </select>
-            </label>
-
-            <label>
-              Stage
-              <select value={form.stage} onChange={(e) => update('stage', e.target.value)}>
-                <option>New</option>
-                <option>Contacted</option>
-                <option>Trial Booked</option>
-                <option>Trial Attended</option>
-                <option>Negotiation</option>
-                <option>Converted</option>
-                <option>Lost</option>
-              </select>
-            </label>
-
-            <label>
-              Follow-up date
-              <input
-                type="date"
-                value={form.followUp}
-                onChange={(e) => update('followUp', e.target.value)}
-              />
-            </label>
-
-            <label>
-              Interested plan
-              <select
-                value={form.interestedPlan}
-                onChange={(e) => update('interestedPlan', e.target.value)}
-              >
-                <option>Monthly</option>
-                <option>Quarterly</option>
-                <option>Half-yearly</option>
-                <option>Annual</option>
-              </select>
-            </label>
-
-            <label style={{ gridColumn: '1 / -1' }}>
-              Notes
-              <textarea
-                rows="4"
-                value={form.notes}
-                onChange={(e) => update('notes', e.target.value)}
-                placeholder="Lead requirements, objections, follow-up notes..."
-              />
-            </label>
+      <div className="lead-modal-card" role="dialog" aria-modal="true" aria-labelledby="lead-modal-title">
+        <div className="lead-modal-head">
+          <div className="lead-modal-eyebrow"><span>✦</span> Leads & Sales CRM</div>
+          <div className="lead-modal-title-row">
+            <div>
+              <h3 id="lead-modal-title">{lead ? 'Edit lead details' : 'Add a new lead'}</h3>
+              <p>Capture prospect information and keep the next follow-up on track.</p>
+            </div>
+            <button className="lead-modal-close" type="button" onClick={onClose} aria-label="Close">
+              <X size={18} />
+            </button>
           </div>
         </div>
 
-        <div className="modal-footer">
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={save} disabled={!form.name.trim()}>
-            {lead ? 'Save changes' : 'Add lead'}
-          </button>
+        <div className="lead-modal-body">
+          <div className="lead-form-section">
+            <div className="lead-form-section-title">Prospect information</div>
+            <div className="lead-form-grid">
+              <div className="lead-field">
+                <label>Full name <em>*</em></label>
+                <input autoFocus value={form.name} onChange={(e) => update('name', e.target.value)} placeholder="e.g. Rahul Sharma" />
+              </div>
+              <div className="lead-field">
+                <label>Phone number</label>
+                <input type="tel" value={form.phone} onChange={(e) => update('phone', e.target.value)} placeholder="Enter contact number" />
+              </div>
+              <div className="lead-field">
+                <label>Email address</label>
+                <input type="email" value={form.email} onChange={(e) => update('email', e.target.value)} placeholder="name@example.com" />
+              </div>
+              <div className="lead-field">
+                <label>Lead source</label>
+                <select value={form.source} onChange={(e) => update('source', e.target.value)}>
+                  <option>Walk-in</option><option>Instagram</option><option>Facebook</option><option>Google</option><option>Referral</option><option>Website</option><option>WhatsApp</option><option>Other</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div className="lead-form-section">
+            <div className="lead-form-section-title">Interest & follow-up</div>
+            <div className="lead-form-grid">
+              <div className="lead-field">
+                <label>Pipeline stage</label>
+                <select value={form.stage} onChange={(e) => update('stage', e.target.value)}>
+                  <option>New</option><option>Contacted</option><option>Trial Booked</option><option>Trial Attended</option><option>Negotiation</option><option>Converted</option><option>Lost</option>
+                </select>
+              </div>
+              <div className="lead-field">
+                <label>Follow-up date</label>
+                <input type="date" value={form.followUp} onChange={(e) => update('followUp', e.target.value)} />
+              </div>
+              <div className="lead-field">
+                <label>Interested membership plan</label>
+                <select value={form.interestedPlan} onChange={(e) => update('interestedPlan', e.target.value)}>
+                  <option>Monthly</option><option>Quarterly</option><option>Half-yearly</option><option>Annual</option>
+                </select>
+              </div>
+              <div className="lead-field">
+                <label>Next step</label>
+                <div style={{height:45,display:'flex',alignItems:'center',padding:'0 13px',border:'1px solid #e4e8f1',borderRadius:11,background:'#f8f9fd',color:'#74809a',fontSize:12}}>
+                  {form.stage === 'New' ? 'Make the first contact' : form.stage === 'Contacted' ? 'Arrange a gym visit or trial' : form.stage === 'Trial Booked' ? 'Confirm trial attendance' : form.stage === 'Trial Attended' ? 'Discuss membership options' : form.stage === 'Negotiation' ? 'Follow up on the offer' : form.stage === 'Converted' ? 'Complete member onboarding' : 'Record the reason for loss'}
+                </div>
+              </div>
+              <div className="lead-field full">
+                <label>Notes & requirements</label>
+                <textarea rows="3" value={form.notes} onChange={(e) => update('notes', e.target.value)} placeholder="Fitness goals, preferred timings, budget, objections or follow-up notes..." />
+                <span className="lead-field-hint">Add details that will help the team make the next conversation more relevant.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="lead-modal-foot">
+          <span className="lead-modal-foot-note"><em style={{color:'#e05b70',fontStyle:'normal'}}>*</em> Required field</span>
+          <div className="lead-modal-actions">
+            <button className="lead-modal-btn lead-modal-cancel" type="button" onClick={onClose}>Cancel</button>
+            <button className="lead-modal-btn lead-modal-save" type="button" onClick={save} disabled={!form.name.trim()}>
+              {lead ? 'Save changes' : 'Add lead'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
 }
-
 
 function PaymentsPage({ payments, overdue, setModal, deletePayment, members = [], settings = {} }) {
   const [typeFilter, setTypeFilter] = useState('All');
