@@ -4436,8 +4436,17 @@ function App() {
 
     try {
       await deleteRecord('members', member.cloudId);
-      setData((d) => ({ ...d, members: d.members.filter((m) => m.id !== id) }));
-      setToast('Member deleted');
+      setData((d) => ({
+        ...d,
+        members: d.members.filter((m) => m.id !== id),
+        // Keep the local ledger in sync with the server-side member/payment cascade.
+        payments: d.payments.filter((payment) =>
+          String(payment.memberId || '') !== String(member.id) &&
+          String(payment.memberId || '') !== String(member.cloudId) &&
+          String(payment.memberCloudId || '') !== String(member.cloudId)
+        ),
+      }));
+      setToast('Member and linked payment records deleted');
     } catch (error) {
       console.error('Cloudflare member delete failed:', error);
       setToast(error?.message || 'Could not delete member from Cloudflare');
@@ -9698,6 +9707,15 @@ function PaymentsPage({ payments, overdue, setModal, deletePayment, members = []
     const typeMatch = typeFilter === 'All' || payment.type === typeFilter;
     const modeMatch = modeFilter === 'All' || payment.mode === modeFilter;
     return searchMatch && typeMatch && modeMatch;
+  }).sort((a, b) => {
+    const timeOf = (payment) => {
+      const explicit = payment.createdAt || payment.created_at || payment.paymentDate || payment.payment_date || payment.date;
+      const parsed = explicit ? new Date(explicit).getTime() : 0;
+      if (Number.isFinite(parsed) && parsed) return parsed;
+      const idMatch = String(payment.id || '').match(/(?:PAY[-_])?(\d{10,})/i);
+      return idMatch ? Number(idMatch[1]) : 0;
+    };
+    return timeOf(b) - timeOf(a);
   });
 
   return <div className="page">

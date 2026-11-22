@@ -238,7 +238,8 @@ export default {
     if(req.method==='GET'){
      if(id){const row=await env.DB.prepare(`SELECT * FROM ${table} WHERE id=? AND gym_id=?`).bind(id,user.gym_id).first();return row?response({data:decodeRow(table,row)},200,headers):response({error:'Record not found'},404,headers);}
      const limit=Math.min(500,Math.max(1,Number(url.searchParams.get('limit')||100)));
-     const rows=await env.DB.prepare(`SELECT * FROM ${table} WHERE gym_id=? ORDER BY COALESCE(created_at,'') DESC LIMIT ?`).bind(user.gym_id,limit).all();
+     const orderBy=table==='payments' ? "COALESCE(created_at,payment_date,'') DESC, rowid DESC" : "COALESCE(created_at,'') DESC";
+     const rows=await env.DB.prepare(`SELECT * FROM ${table} WHERE gym_id=? ORDER BY ${orderBy} LIMIT ?`).bind(user.gym_id,limit).all();
      return response({data:(rows.results||[]).map(r=>decodeRow(table,r))},200,headers);
     }
     if(!canWrite(user,table)) return response({error:'Permission denied'},403,headers);
@@ -248,7 +249,7 @@ export default {
      for(const row of rows){const rid=String(row.id||uid());const encoded=encodeRow(table,{...row,id:rid,gym_id:user.gym_id});encoded.id=rid;encoded.gym_id=user.gym_id;
       // D1's members.created_at is nullable and has no default. Ensure new member
       // records always receive a timestamp, including writes from older clients.
-      if(table==='members' && !encoded.created_at) encoded.created_at=new Date().toISOString();
+      if((table==='members' || table==='payments') && !encoded.created_at) encoded.created_at=new Date().toISOString();
       const cols=Object.keys(encoded);const placeholders=cols.map(()=>'?').join(',');const updates=cols.filter(c=>!['id','gym_id'].includes(c)).map(c=>`${c}=excluded.${c}`).join(',');
       const conflict=table==='app_settings'?'gym_id,setting_key':'id';
       stmts.push(env.DB.prepare(`INSERT INTO ${table}(${cols.join(',')}) VALUES(${placeholders}) ON CONFLICT(${conflict}) DO UPDATE SET ${updates||'id=excluded.id'} WHERE ${table}.gym_id=excluded.gym_id`).bind(...cols.map(c=>encoded[c])));
@@ -256,7 +257,39 @@ export default {
      }
      await env.DB.batch(stmts);await publish(env,user.gym_id,{type:'data_changed',gymId:user.gym_id,table,ids,at:Date.now()});return response({ok:true,ids},200,headers);
     }
-    if(req.method==='DELETE'&&id){const result=await env.DB.prepare(`DELETE FROM ${table} WHERE id=? AND gym_id=?`).bind(id,user.gym_id).run();await env.DB.prepare('INSERT INTO change_events(gym_id,table_name,record_id,operation) VALUES(?,?,?,?)').bind(user.gym_id,table,id,'delete').run();await publish(env,user.gym_id,{type:'data_changed',gymId:user.gym_id,table,ids:[id],at:Date.now()});return response({ok:true,changes:result.meta?.changes||0},200,headers);}
+    if(req.method==='DELETE'&&id){
+     if(table==='members'){
+      // Remove the member's ledger rows first, in the same D1 transaction.
+      // This avoids orphaned payment entries when a member is deleted.
+      const memberRow=await env.DB.prepare('SELECT member_code,name FROM members WHERE id=? AND gym_id=?').bind(id,user.gym_id).first();
+      const memberCode=String(memberRow?.member_code||id);
+      // Some imported legacy ledger rows have no member_id. Match those by name
+      // only when the name is unique inside this gym, avoiding duplicate-name deletion.
+      const sameName=memberRow?.name ? await env.DB.prepare("SELECT COUNT(*) AS count FROM members WHERE gym_id=? AND lower(trim(name))=lower(trim(?))").bind(user.gym_id,memberRow.name).first() : null;
+      const uniqueName=Number(sameName?.count||0)===1 && Boolean(memberRow?.name);
+      const paymentWhere=uniqueName
+       ? "gym_id=? AND (member_id=? OR member_id=? OR (member_id IS NULL AND lower(trim(COALESCE(member_name,'')))=lower(trim(?))))"
+       : 'gym_id=? AND (member_id=? OR member_id=?)';
+      const paymentArgs=uniqueName ? [user.gym_id,id,memberCode,memberRow.name] : [user.gym_id,id,memberCode];
+      const paymentRows=await env.DB.prepare(`SELECT id FROM payments WHERE ${paymentWhere}`).bind(...paymentArgs).all();
+      const paymentIds=(paymentRows.results||[]).map(row=>row.id);
+      const batch=[
+       env.DB.prepare(`INSERT INTO change_events(gym_id,table_name,record_id,operation) SELECT gym_id,'payments',id,'delete' FROM payments WHERE ${paymentWhere}`).bind(...paymentArgs),
+       env.DB.prepare(`DELETE FROM payments WHERE ${paymentWhere}`).bind(...paymentArgs),
+       env.DB.prepare('DELETE FROM members WHERE id=? AND gym_id=?').bind(id,user.gym_id),
+       env.DB.prepare('INSERT INTO change_events(gym_id,table_name,record_id,operation) VALUES(?,?,?,?)').bind(user.gym_id,'members',id,'delete')
+      ];
+      const results=await env.DB.batch(batch);
+      const memberChanges=results?.[2]?.meta?.changes||0;
+      if(paymentIds.length) await publish(env,user.gym_id,{type:'data_changed',gymId:user.gym_id,table:'payments',ids:paymentIds,at:Date.now()});
+      await publish(env,user.gym_id,{type:'data_changed',gymId:user.gym_id,table:'members',ids:[id],at:Date.now()});
+      return response({ok:true,changes:memberChanges,paymentsDeleted:paymentIds.length},200,headers);
+     }
+     const result=await env.DB.prepare(`DELETE FROM ${table} WHERE id=? AND gym_id=?`).bind(id,user.gym_id).run();
+     await env.DB.prepare('INSERT INTO change_events(gym_id,table_name,record_id,operation) VALUES(?,?,?,?)').bind(user.gym_id,table,id,'delete').run();
+     await publish(env,user.gym_id,{type:'data_changed',gymId:user.gym_id,table,ids:[id],at:Date.now()});
+     return response({ok:true,changes:result.meta?.changes||0},200,headers);
+    }
     return response({error:'Method not allowed'},405,headers);
    }
    return response({error:'Not found'},404,headers);
