@@ -2995,6 +2995,9 @@ function App() {
         attendance_number: clean.attendanceNumber || '',
         referral_points: Number(clean.referralPoints || 0),
         referred_by_member_id: referredMember?.cloudId || null,
+        // Persist the join timestamp in D1 so newest members sort first everywhere.
+        created_at: clean.createdAt,
+        updated_at: clean.createdAt,
       });
 
       // Portal PIN is stored only as a server-side hash via a restricted RPC.

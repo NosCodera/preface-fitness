@@ -246,6 +246,9 @@ export default {
      const body=await req.json();const rows=Array.isArray(body)?body:[body];if(rows.length>100)return response({error:'Maximum 100 records per batch'},413,headers);
      const stmts=[],ids=[];
      for(const row of rows){const rid=String(row.id||uid());const encoded=encodeRow(table,{...row,id:rid,gym_id:user.gym_id});encoded.id=rid;encoded.gym_id=user.gym_id;
+      // D1's members.created_at is nullable and has no default. Ensure new member
+      // records always receive a timestamp, including writes from older clients.
+      if(table==='members' && !encoded.created_at) encoded.created_at=new Date().toISOString();
       const cols=Object.keys(encoded);const placeholders=cols.map(()=>'?').join(',');const updates=cols.filter(c=>!['id','gym_id'].includes(c)).map(c=>`${c}=excluded.${c}`).join(',');
       const conflict=table==='app_settings'?'gym_id,setting_key':'id';
       stmts.push(env.DB.prepare(`INSERT INTO ${table}(${cols.join(',')}) VALUES(${placeholders}) ON CONFLICT(${conflict}) DO UPDATE SET ${updates||'id=excluded.id'} WHERE ${table}.gym_id=excluded.gym_id`).bind(...cols.map(c=>encoded[c])));
