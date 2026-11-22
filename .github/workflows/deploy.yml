@@ -1,3 +1,4 @@
+
 name: Deploy Preface Fitness to GitHub Pages
 
 on:
@@ -7,8 +8,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
@@ -29,7 +28,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build
         env:
@@ -37,14 +36,24 @@ jobs:
           VITE_CLOUDFLARE_GYM_ID: ${{ secrets.VITE_CLOUDFLARE_GYM_ID }}
         run: npm run build
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload artifact
+      - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./dist
 
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    runs-on: ubuntu-latest
+    needs: build
+
+    permissions:
+      pages: write
+      id-token: write
+
+    steps:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
