@@ -66,6 +66,7 @@ import {
   publicSubmitEnquiry,
   getMyAccess,
   getGymStaff,
+  provisionStaffLogin,
   updateStaffPermissions,
   setStaffActive,
 } from './cloudData';
@@ -11920,6 +11921,8 @@ function PublicFeedbackPage() {
 
 function StaffAccessPage() {
   const [staff, setStaff] = useState([]);
+  const [newStaff, setNewStaff] = useState({ name: '', email: '', password: '' });
+  const [creatingStaff, setCreatingStaff] = useState(false);
   const [selectedStaffId, setSelectedStaffId] = useState('');
   const [permissions, setPermissions] = useState(DEFAULT_STAFF_PERMISSIONS);
   const [loading, setLoading] = useState(true);
@@ -11951,6 +11954,33 @@ function StaffAccessPage() {
   useEffect(() => {
     loadStaff();
   }, []);
+
+  const createStaff = async (event) => {
+    event.preventDefault();
+    setCreatingStaff(true);
+    setMessage('');
+    setError('');
+    try {
+      const created = await provisionStaffLogin({
+        email: newStaff.email,
+        password: newStaff.password,
+        displayName: newStaff.name,
+        permissions: DEFAULT_STAFF_PERMISSIONS,
+      });
+      const account = created?.user || created;
+      if (!account?.user_id) throw new Error('Staff account was not confirmed by the server.');
+      const row = { ...account, permissions: account.permissions || DEFAULT_STAFF_PERMISSIONS, is_active: true };
+      setStaff((current) => [...current, row]);
+      setSelectedStaffId(row.user_id);
+      setPermissions({ ...DEFAULT_STAFF_PERMISSIONS, ...(row.permissions || {}) });
+      setNewStaff({ name: '', email: '', password: '' });
+      setMessage(`Staff account created for ${row.email}. They can now sign in using the email and password.`);
+    } catch (err) {
+      setError(err?.message || 'Unable to create staff account.');
+    } finally {
+      setCreatingStaff(false);
+    }
+  };
 
   const selectedStaff = staff.find((item) => item.user_id === selectedStaffId);
 
@@ -12049,14 +12079,32 @@ function StaffAccessPage() {
         </div>
       )}
 
+      <section className="card" style={{ marginBottom: '18px' }}>
+        <div className="card-header">
+          <div>
+            <h3><UserPlus size={18} style={{ verticalAlign: 'middle', marginRight: 7 }} />Add staff account</h3>
+            <p>Create a separate login for a staff member. Password must contain at least 8 characters.</p>
+          </div>
+        </div>
+        <form onSubmit={createStaff} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 12, alignItems: 'end' }}>
+          <label className="professional-field">Staff name
+            <input required maxLength={100} value={newStaff.name} onChange={(event) => setNewStaff((v) => ({ ...v, name: event.target.value }))} placeholder="Full name" />
+          </label>
+          <label className="professional-field">Email address
+            <input required type="email" maxLength={254} value={newStaff.email} onChange={(event) => setNewStaff((v) => ({ ...v, email: event.target.value }))} placeholder="staff@example.com" />
+          </label>
+          <label className="professional-field">Temporary password
+            <input required type="password" minLength={8} maxLength={128} autoComplete="new-password" value={newStaff.password} onChange={(event) => setNewStaff((v) => ({ ...v, password: event.target.value }))} placeholder="At least 8 characters" />
+          </label>
+          <button className="btn btn-primary" type="submit" disabled={creatingStaff}>
+            {creatingStaff ? 'Creating account...' : 'Create staff login'}
+          </button>
+        </form>
+      </section>
+
       {staff.length === 0 ? (
         <section className="card">
-          <div className="card-header">
-            <div>
-              <h3>No staff accounts found</h3>
-              <p>Create a new user in Cloudflare Authentication and add it to <strong>gym_users</strong> with role <strong>staff</strong>.</p>
-            </div>
-          </div>
+          <div className="card-header"><div><h3>No staff accounts yet</h3><p>Create the first staff login using the form above. You can then configure its permissions below.</p></div></div>
         </section>
       ) : (
         <>
@@ -12075,7 +12123,7 @@ function StaffAccessPage() {
               >
                 {staff.map((item) => (
                   <option key={item.user_id} value={item.user_id}>
-                    {item.email}
+                    {item.display_name ? `${item.display_name} — ${item.email}` : item.email}
                   </option>
                 ))}
               </select>

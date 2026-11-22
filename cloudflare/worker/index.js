@@ -174,9 +174,29 @@ export default {
     }
     const user=await auth(req,env); if(!user) return response({error:'Unauthorized'},401,headers);
     if(name==='get_my_access') return response({userId:user.id,gymId:user.gym_id,role:user.role,permissions:JSON.parse(user.permissions_json||'{}')},200,headers);
+    if(name==='provision_staff_login'){
+     if(user.role!=='owner') return response({error:'Only the gym owner can create staff accounts'},403,headers);
+     const email=String(a.p_email||a.email||'').trim().toLowerCase();
+     const displayName=String(a.p_display_name||a.displayName||'').trim();
+     const password=String(a.p_password||a.password||'');
+     const permissions=a.p_permissions??a.permissions??{};
+     if(!displayName) return response({error:'Staff name is required'},400,headers);
+     if(displayName.length>100) return response({error:'Staff name must be 100 characters or fewer'},400,headers);
+     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length>254) return response({error:'Enter a valid email address'},400,headers);
+     if(password.length<8 || password.length>128) return response({error:'Password must be between 8 and 128 characters'},400,headers);
+     if(!permissions || typeof permissions!=='object' || Array.isArray(permissions)) return response({error:'Staff permissions must be an object'},400,headers);
+     const existing=await env.DB.prepare('SELECT id FROM users WHERE gym_id=? AND email=? COLLATE NOCASE').bind(user.gym_id,email).first();
+     if(existing) return response({error:'A user with this email already exists in this gym'},409,headers);
+     const id=uid(); const salt=uid()+uid(); const hash=await passwordHash(password,salt);
+     await env.DB.batch([
+      env.DB.prepare(`INSERT INTO users(id,gym_id,email,password_hash,password_salt,role,display_name,member_id,is_active,created_at,updated_at) VALUES(?,?,?,?,?,'staff',?,NULL,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).bind(id,user.gym_id,email,hash,salt,displayName),
+      env.DB.prepare(`INSERT INTO gym_users(id,gym_id,role,created_at,permissions_json,is_active) VALUES(?,?,'staff',CURRENT_TIMESTAMP,?,1)`).bind(id,user.gym_id,JSON.stringify(permissions))
+     ]);
+     return response({success:true,user:{user_id:id,email,display_name:displayName,role:'staff',permissions,is_active:true}},201,headers);
+    }
     if(name==='get_gym_staff'){
      if(user.role!=='owner') return response({error:'Only the gym owner can view staff accounts'},403,headers);
-     const rows=await env.DB.prepare("SELECT gu.id AS user_id,u.email,gu.role,gu.permissions_json AS permissions,gu.is_active FROM gym_users gu JOIN users u ON u.id=gu.id WHERE gu.gym_id=? AND gu.role<>'owner' ORDER BY u.email").bind(user.gym_id).all();
+     const rows=await env.DB.prepare("SELECT gu.id AS user_id,u.email,u.display_name,gu.role,gu.permissions_json AS permissions,gu.is_active FROM gym_users gu JOIN users u ON u.id=gu.id WHERE gu.gym_id=? AND gu.role<>'owner' ORDER BY u.email").bind(user.gym_id).all();
      return response({staff:(rows.results||[]).map(r=>({...r,permissions:JSON.parse(r.permissions||'{}'),is_active:!!r.is_active}))},200,headers);
     }
     if(name==='update_staff_permissions'){
