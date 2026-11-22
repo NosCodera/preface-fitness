@@ -39,7 +39,7 @@ const response = (data, status=200, headers={}) => new Response(JSON.stringify(d
 const uid = () => crypto.randomUUID();
 const hex = b => [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');
 async function sha256(value){ return hex(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))); }
-async function passwordHash(password,salt){ const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveBits']); return hex(await crypto.subtle.deriveBits({name:'PBKDF2',salt:new TextEncoder().encode(salt),iterations:180000,hash:'SHA-256'},key,256)); }
+async function passwordHash(password,salt){ const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveBits']); return hex(await crypto.subtle.deriveBits({name:'PBKDF2',salt:new TextEncoder().encode(salt),iterations:100000,hash:'SHA-256'},key,256)); }
 function bearer(req){ return (req.headers.get('authorization')||'').replace(/^Bearer\s+/i,'').trim(); }
 async function auth(req,env){ const token=bearer(req); if(!token) return null; const hash=await sha256(token); const now=Math.floor(Date.now()/1000); return env.DB.prepare(`SELECT u.id,u.gym_id,u.email,gu.role,u.display_name,u.member_id,gu.permissions_json FROM sessions s JOIN users u ON u.id=s.user_id JOIN gym_users gu ON gu.id=u.id AND gu.gym_id=u.gym_id WHERE s.token_hash=? AND s.expires_at>? AND u.is_active=1 AND gu.is_active=1`).bind(hash,now).first(); }
 function canWrite(user,table){
