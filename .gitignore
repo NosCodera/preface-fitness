@@ -3,3 +3,8 @@ dist/
 .env
 .env.*
 !.env.example
+cloudflare/.wrangler/
+cloudflare/import-output/
+cloudflare/scripts/seed-local-owner.mjs
+cloudflare/scripts/.seed-owner.sql
+dist/

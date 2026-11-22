@@ -48,13 +48,13 @@ import {
 } from 'lucide-react';
 import './styles.css';
 import { readState, writeState, clearState } from './db';
-import { supabase } from './supabase';
+import { backendClient } from './backend';
 import {
   signInOwner,
   signOutOwner,
-  getSupabaseSession,
+  getAuthSession,
   subscribeToAuthChanges,
-} from './supabaseAuth';
+} from './cloudflareAuth';
 import {
   loadCloudState,
   insertRecord,
@@ -2014,9 +2014,9 @@ async function hashPassword(password) {
 async function getPublicGymProfile(gymId) {
   const cleanGymId = String(gymId || '').trim();
   if (!cleanGymId) throw new Error('Public gym page is missing the gym ID.');
-  const { data, error } = await supabase.rpc('public_get_gym_profile', { p_gym_id: cleanGymId });
+  const { data, error } = await backendClient.rpc('public_get_gym_profile', { p_gym_id: cleanGymId });
   if (error) throw new Error(error.message || 'Unable to load public gym profile');
-  if (!data || !data.settings) throw new Error('Public gym profile returned no settings. Run the public gym profile SQL in Supabase.');
+  if (!data || !data.settings) throw new Error('Public gym profile returned no settings. Run the public gym profile SQL in Cloudflare.');
   return data;
 }
 
@@ -2449,7 +2449,7 @@ function FitMitraToolsHub({members=[],progressRecords=[],onStartPlan=()=>{}}) {
       {answer.type==='report'&&<div style={{marginTop:12}}><label>Member<select value={reportMember} onChange={e=>setReportMember(e.target.value)} style={{display:'block',padding:9,border:'1px solid #dce2ec',borderRadius:8,marginTop:4}}>{members.map(m=><option value={m.id}>{m.name}</option>)}</select></label><div style={{padding:14,marginTop:10,border:'1px solid #e8edf3',borderRadius:10}}><h3>Preface Fitness Progress Report</h3><b>{selectedReport?.name||'Member'}</b><p>Progress records: {reportRows.length}</p>{reportRows.map(r=><div style={{padding:6,borderBottom:'1px solid #eee'}}>{r.date} · Weight {r.weight||'—'} kg · Waist {r.waist||'—'} · Chest {r.chest||'—'}</div>)}</div><button onClick={()=>window.print()} style={{marginTop:10,padding:10,border:0,borderRadius:8,background:'#6d4aff',color:'#fff'}}>Print / Save PDF</button></div>}
       {answer.note&&<p style={{marginTop:12,fontSize:12,color:'#667085'}}>{answer.note}</p>}
     </div>}
-    <div style={{textAlign:'center',marginTop:14,fontSize:11,color:'#98a2b3'}}>Built-in rule-based search · No AI API · No Supabase schema changes</div>
+    <div style={{textAlign:'center',marginTop:14,fontSize:11,color:'#98a2b3'}}>Built-in rule-based search · No AI API · No Cloudflare schema changes</div>
   </section>;
 }
 
@@ -2675,7 +2675,7 @@ function App() {
 
   // Staff may add a new member and record payments. Other mutations are
   // blocked at the app-shell capture layer; deletion remains blocked always.
-  // This is UI protection and should be paired with Supabase RLS policies.
+  // This is UI protection and should be paired with Cloudflare RLS policies.
   const blockStaffMutation = (event) => {
     if (!isReadOnlyStaff) return;
     const target = event.target instanceof Element ? event.target : null;
@@ -2776,13 +2776,13 @@ function App() {
       setDbReady(true);
 
       try {
-        const session = await getSupabaseSession();
+        const session = await getAuthSession();
 
         if (!cancelled) {
           setIsAuthenticated(Boolean(session?.user));
         }
       } catch (error) {
-        console.error('Supabase session check failed:', error);
+        console.error('Cloudflare session check failed:', error);
 
         if (!cancelled) {
           setIsAuthenticated(false);
@@ -2840,7 +2840,7 @@ function App() {
         setData((current) => ({
           ...current,
           gym: cloud.gym || current.gym,
-          // Supabase is the source of truth. An empty cloud table must stay
+          // Cloudflare is the source of truth. An empty cloud table must stay
           // empty in the UI; do not resurrect stale browser-only records.
           // Missing properties still fall back for compatibility, but [] is authoritative.
           membershipPlans: Array.isArray(cloud.membershipPlans)
@@ -2997,19 +2997,20 @@ function App() {
       });
 
       // Portal PIN is stored only as a server-side hash via a restricted RPC.
-      // Never include the PIN in the members row or local app state.
+      // A PIN failure must not prevent the already-created member from appearing
+      // in the staff UI or prevent the initial payment from being recorded.
       const pinValue = String(member.portalPin || '');
+      let pinSetupError = null;
       if (!/^\d{6}$/.test(pinValue)) {
-        throw new Error('Enter a valid 6-digit Member Portal PIN.');
+        pinSetupError = new Error('Enter a valid 6-digit Member Portal PIN.');
+      } else {
+        const { error: pinError } = await backendClient.rpc('set_member_portal_pin', {
+          p_member_id: row.id,
+          p_pin: pinValue,
+        });
+        if (pinError) pinSetupError = pinError;
       }
-      const { error: pinError } = await supabase.rpc('set_member_portal_pin', {
-        p_member_id: row.id,
-        p_pin: pinValue,
-      });
-      if (pinError) {
-        console.error('Member Portal PIN setup failed:', pinError);
-        throw new Error(`Member was created, but PIN setup failed. Ask the admin to set the PIN from the member profile. Details: ${pinError.message}`);
-      }
+      if (pinSetupError) console.error('Member Portal PIN setup failed:', pinSetupError);
 
       const saved = { ...clean, cloudId: row.id, id: row.member_code || clean.id };
       delete saved.portalPin;
@@ -3073,17 +3074,21 @@ function App() {
       }));
       saveCloudSettings({ invoiceSeriesA: invoiceSettingsAfterMember.invoiceSeriesA, invoiceSeriesB: invoiceSettingsAfterMember.invoiceSeriesB }).catch((error) => console.error('Member invoice series sync failed:', error));
       setModal(null);
-      setToast(initialPayment ? 'Member added and payment recorded successfully' : 'Member added successfully');
+      if (pinSetupError) {
+        setToast(`Member${initialPayment ? ' and payment' : ''} saved successfully, but Portal PIN setup failed: ${pinSetupError.message || 'Please ask the owner to set the PIN.'}`);
+      } else {
+        setToast(initialPayment ? 'Member added and payment recorded successfully' : 'Member added successfully');
+      }
     } catch (error) {
-      console.error('Supabase member insert failed:', error);
-      setToast(error?.message || 'Could not save member to Supabase');
+      console.error('Cloudflare member insert failed:', error);
+      setToast(error?.message || 'Could not save member to Cloudflare');
     }
   };
 
   const updateMember = async (updated) => {
     const existing = data.members.find((m) => m.id === updated.id);
     if (!existing?.cloudId) {
-      setToast('This member is not linked to Supabase yet');
+      setToast('This member is not linked to Cloudflare yet');
       return;
     }
 
@@ -3133,7 +3138,7 @@ function App() {
       if (requestedPin) {
         if (!isOwner) throw new Error('Only an Admin can change or reset a member portal PIN.');
         if (!/^\d{6}$/.test(requestedPin)) throw new Error('PIN must be exactly 6 digits.');
-        const { error: pinError } = await supabase.rpc('set_member_portal_pin', {
+        const { error: pinError } = await backendClient.rpc('set_member_portal_pin', {
           p_member_id: existing.cloudId,
           p_pin: requestedPin,
         });
@@ -3149,8 +3154,8 @@ function App() {
       setModal(null);
       setToast('Member updated successfully');
     } catch (error) {
-      console.error('Supabase member update failed:', error);
-      setToast(error?.message || 'Could not update member in Supabase');
+      console.error('Cloudflare member update failed:', error);
+      setToast(error?.message || 'Could not update member in Cloudflare');
     }
   };
 
@@ -3159,7 +3164,7 @@ function App() {
     if (!plan) return;
 
     if (!member.cloudId) {
-      setToast('This member is not linked to Supabase yet');
+      setToast('This member is not linked to Cloudflare yet');
       return;
     }
 
@@ -3233,8 +3238,8 @@ function App() {
       setModal(null);
       setToast(`${member.name}'s membership renewed successfully`);
     } catch (error) {
-      console.error('Supabase membership renewal failed:', error);
-      setToast(error?.message || 'Unable to renew membership in Supabase');
+      console.error('Cloudflare membership renewal failed:', error);
+      setToast(error?.message || 'Unable to renew membership in Cloudflare');
     }
   };
 
@@ -3254,7 +3259,7 @@ function App() {
       lastContact: lead.lastContact || today,
     };
 
-    // Persist to the gym-scoped Supabase leads table before showing success.
+    // Persist to the gym-scoped Cloudflare leads table before showing success.
     // This prevents the next cloud refresh/reload from replacing a local-only lead.
     if (isAuthenticated && cloudStatus !== 'connected') {
       setToast('Cloud is not connected. Lead was not added; please retry after connection is restored.');
@@ -3282,8 +3287,8 @@ function App() {
       setModal(null);
       setToast('Lead added and saved successfully');
     } catch (error) {
-      console.error('Supabase lead insert failed:', error);
-      setToast(error?.message || 'Unable to save lead to Supabase');
+      console.error('Cloudflare lead insert failed:', error);
+      setToast(error?.message || 'Unable to save lead to Cloudflare');
     }
   };
 
@@ -3293,7 +3298,7 @@ function App() {
     );
 
     if (!member?.cloudId) {
-      setToast('Please select a Supabase-linked member');
+      setToast('Please select a Cloudflare-linked member');
       return;
     }
 
@@ -3312,11 +3317,11 @@ function App() {
     const nextDue = Math.max(0, currentDue - paidAgainstDue);
 
     try {
-      // Resolve the authoritative Supabase member UUID before inserting a payment.
+      // Resolve the authoritative Cloudflare member UUID before inserting a payment.
       // UI IDs/cloudIds may be stale for legacy or imported members, so verify by
       // UUID first, then member code, then exact phone + name within visible RLS rows.
       let dbMemberId = null;
-      const { data: memberByUuid, error: memberUuidError } = await supabase
+      const { data: memberByUuid, error: memberUuidError } = await backendClient
         .from('members')
         .select('id')
         .eq('id', member.cloudId)
@@ -3327,7 +3332,7 @@ function App() {
       }
 
       if (!dbMemberId) {
-        const { data: memberByCode, error: memberCodeError } = await supabase
+        const { data: memberByCode, error: memberCodeError } = await backendClient
           .from('members')
           .select('id, member_code, name, phone')
           .eq('member_code', String(member.id))
@@ -3338,7 +3343,7 @@ function App() {
       }
 
       if (!dbMemberId && member.phone) {
-        const { data: matchingMembers, error: phoneLookupError } = await supabase
+        const { data: matchingMembers, error: phoneLookupError } = await backendClient
           .from('members')
           .select('id, member_code, name, phone')
           .eq('phone', String(member.phone).trim());
@@ -3352,7 +3357,7 @@ function App() {
       }
 
       if (!dbMemberId) {
-        throw new Error(`Could not match ${member.name} (${member.id}) to a saved Supabase member. Refresh the app data; if the member is missing from Supabase, add/import the member first.`);
+        throw new Error(`Could not match ${member.name} (${member.id}) to a saved Cloudflare member. Refresh the app data; if the member is missing from Cloudflare, add/import the member first.`);
       }
 
       const gstApplicable = payment.gstMode === 'gst';
@@ -3432,10 +3437,10 @@ function App() {
       }));
 
       setModal(null);
-      setToast('Payment recorded in Supabase');
+      setToast('Payment recorded in Cloudflare');
     } catch (error) {
-      console.error('Supabase payment insert failed:', error);
-      setToast(error?.message || 'Unable to save payment in Supabase');
+      console.error('Cloudflare payment insert failed:', error);
+      setToast(error?.message || 'Unable to save payment in Cloudflare');
     }
   };
 
@@ -3484,7 +3489,7 @@ function App() {
       setModal(null);
       setToast('Customer feedback recorded successfully');
     } catch (error) {
-      console.error('Supabase feedback insert failed:', error);
+      console.error('Cloudflare feedback insert failed:', error);
       setToast(error?.message || 'Unable to save feedback');
     }
   };
@@ -3496,7 +3501,7 @@ function App() {
       setData((d) => ({ ...d, feedbacks: (d.feedbacks || []).filter((item) => item.id !== feedback.id) }));
       setToast('Feedback deleted');
     } catch (error) {
-      console.error('Supabase feedback delete failed:', error);
+      console.error('Cloudflare feedback delete failed:', error);
       setToast(error?.message || 'Unable to delete feedback');
     }
   };
@@ -3521,7 +3526,7 @@ function App() {
     if (!enquiry || !window.confirm(`Delete enquiry from ${enquiry.memberName || 'this customer'}? This cannot be undone.`)) return;
     try {
       if (isAuthenticated) {
-        if (!enquiry.cloudId) throw new Error('This enquiry is not linked to a Supabase record, so it cannot be safely deleted. Refresh and try again.');
+        if (!enquiry.cloudId) throw new Error('This enquiry is not linked to a Cloudflare record, so it cannot be safely deleted. Refresh and try again.');
         await deleteRecord('feedbacks', enquiry.cloudId);
       }
       const deletedId = String(enquiry.cloudId || enquiry.id);
@@ -3560,7 +3565,7 @@ function App() {
       const randomBytes = new Uint32Array(1);
       window.crypto.getRandomValues(randomBytes);
       const newPin = String(randomBytes[0] % 1000000).padStart(6, '0');
-      const { error } = await supabase.rpc('set_member_portal_pin', {
+      const { error } = await backendClient.rpc('set_member_portal_pin', {
         p_member_id: member.cloudId,
         p_pin: newPin,
       });
@@ -3671,7 +3676,7 @@ function App() {
   };
 
   // Persist workout plans in the existing gym settings JSON so they survive
-  // reloads and sync across devices without requiring a new Supabase table.
+  // reloads and sync across devices without requiring a new Cloudflare table.
   const persistWorkoutPlans = async (nextPlans, successMessage) => {
     setData((current) => ({ ...current, workoutPlans: nextPlans }));
     try {
@@ -3772,7 +3777,7 @@ function App() {
       setModal(null);
       setToast('Diet plan created and synced');
     } catch (error) {
-      console.error('Supabase diet plan insert failed:', error);
+      console.error('Cloudflare diet plan insert failed:', error);
       setToast(error?.message || 'Unable to save diet plan to cloud');
     }
   };
@@ -3807,7 +3812,7 @@ function App() {
       setModal(null);
       setToast('Diet plan updated and synced');
     } catch (error) {
-      console.error('Supabase diet plan update failed:', error);
+      console.error('Cloudflare diet plan update failed:', error);
       setToast(error?.message || 'Unable to update diet plan in cloud');
     }
   };
@@ -3820,7 +3825,7 @@ function App() {
       setData((d) => ({ ...d, dietPlans: (d.dietPlans || []).filter((item) => item.id !== id) }));
       setToast('Diet plan deleted');
     } catch (error) {
-      console.error('Supabase diet plan delete failed:', error);
+      console.error('Cloudflare diet plan delete failed:', error);
       setToast(error?.message || 'Unable to delete diet plan from cloud');
     }
   };
@@ -3878,7 +3883,7 @@ function App() {
       setModal(null);
       setToast('Trainer added successfully');
     } catch (error) {
-      console.error('Supabase trainer insert failed:', error);
+      console.error('Cloudflare trainer insert failed:', error);
       setToast(error?.message || 'Unable to add trainer');
     }
   };
@@ -3886,7 +3891,7 @@ function App() {
   const updateTrainer = async (trainer) => {
     const existing = (data.trainers || []).find((item) => item.id === trainer.id);
     if (!existing?.cloudId) {
-      setToast('This trainer is not linked to Supabase yet');
+      setToast('This trainer is not linked to Cloudflare yet');
       return;
     }
 
@@ -3918,7 +3923,7 @@ function App() {
       setModal(null);
       setToast('Trainer updated successfully');
     } catch (error) {
-      console.error('Supabase trainer update failed:', error);
+      console.error('Cloudflare trainer update failed:', error);
       setToast(error?.message || 'Unable to update trainer');
     }
   };
@@ -3936,7 +3941,7 @@ function App() {
       }));
       setToast('Trainer deleted');
     } catch (error) {
-      console.error('Supabase trainer delete failed:', error);
+      console.error('Cloudflare trainer delete failed:', error);
       setToast(error?.message || 'Unable to delete trainer');
     }
   };
@@ -3944,7 +3949,7 @@ function App() {
   const addPTSession = async (session) => {
     const member = (data.members || []).find((item) => item.id === session.memberId);
     let trainer = (data.trainers || []).find((item) => item.id === session.trainerId);
-    if (!member?.cloudId) { setToast('Please select a Supabase-linked member'); return; }
+    if (!member?.cloudId) { setToast('Please select a Cloudflare-linked member'); return; }
     if (!trainer) { setToast('Please select a trainer'); return; }
     const planName = session.planName || 'Monthly';
     const plan = session.planConfig || {};
@@ -3965,12 +3970,12 @@ function App() {
       const saved = { ...clean, cloudId: row.id, trainer: trainer.name, member: member.name };
       setData((d) => ({ ...d, ptSessions: [saved, ...(d.ptSessions || [])] }));
       setModal(null); setToast('PT package assigned successfully');
-    } catch (error) { console.error('Supabase PT package insert failed:', error); setToast(error?.message || 'Unable to assign PT package'); }
+    } catch (error) { console.error('Cloudflare PT package insert failed:', error); setToast(error?.message || 'Unable to assign PT package'); }
   };
 
   const updatePTSessionStatus = async (id, status) => {
     const session = (data.ptSessions || []).find((item) => item.id === id);
-    if (!session?.cloudId) { setToast('This PT package is not linked to Supabase yet'); return; }
+    if (!session?.cloudId) { setToast('This PT package is not linked to Cloudflare yet'); return; }
     const nextCount = status === 'Completed' ? Math.min(Number(session.sessionsTotal || 1), Number(session.sessionsCompleted || 0) + 1) : Number(session.sessionsCompleted || 0);
     const nextStatus = status === 'Completed' && nextCount >= Number(session.sessionsTotal || 1) ? 'Completed' : status === 'Completed' ? 'Scheduled' : status;
     const priorHistory = getPTSessionHistory(session.notes);
@@ -3980,7 +3985,7 @@ function App() {
       await updateRecord('pt_sessions', session.cloudId, { status: nextStatus, sessions_completed: nextCount, notes: nextNotes });
       setData((d) => ({ ...d, ptSessions: (d.ptSessions || []).map((item) => item.id === id ? { ...item, status: nextStatus, sessionsCompleted: nextCount, notes: nextNotes } : item) }));
       setToast(status === 'Completed' ? `Session recorded · ${nextCount}/${session.sessionsTotal || 1} used` : `Package marked ${status.toLowerCase()}`);
-    } catch (error) { console.error('Supabase PT package update failed:', error); setToast(error?.message || 'Unable to update PT package'); }
+    } catch (error) { console.error('Cloudflare PT package update failed:', error); setToast(error?.message || 'Unable to update PT package'); }
   };
 
   const deletePTSession = async (id) => {
@@ -3995,7 +4000,7 @@ function App() {
       }));
       setToast('PT session deleted');
     } catch (error) {
-      console.error('Supabase PT delete failed:', error);
+      console.error('Cloudflare PT delete failed:', error);
       setToast(error?.message || 'Unable to delete PT session');
     }
   };
@@ -4189,7 +4194,7 @@ function App() {
     let importedPayments = [];
     let skipped = excelImportPreview.rows.length - rows.length;
     const reservedIds = new Set((data.members || []).map((m) => String(m.id || '').toLowerCase()));
-    // attendance_number has a UNIQUE constraint in Supabase. Never insert an empty
+    // attendance_number has a UNIQUE constraint in Cloudflare. Never insert an empty
     // string for every imported member; allocate a distinct numeric value per member.
     const reservedAttendanceNumbers = new Set(
       (data.members || [])
@@ -4329,7 +4334,7 @@ function App() {
         members: [...importedMembers, ...(current.members || [])],
         payments: [...importedPayments, ...(current.payments || [])],
       }));
-      setToast(`Import stopped after ${importedMembers.length} member(s): ${error?.message || 'Supabase error'}. Successfully saved rows were kept.`);
+      setToast(`Import stopped after ${importedMembers.length} member(s): ${error?.message || 'Cloudflare error'}. Successfully saved rows were kept.`);
     } finally {
       setExcelImportBusy(false);
     }
@@ -4421,7 +4426,7 @@ function App() {
     if (!member || !window.confirm(`Delete ${member.name}? This cannot be undone.`)) return;
 
     if (!member.cloudId) {
-      setToast('This member is not linked to Supabase yet');
+      setToast('This member is not linked to Cloudflare yet');
       return;
     }
 
@@ -4430,8 +4435,8 @@ function App() {
       setData((d) => ({ ...d, members: d.members.filter((m) => m.id !== id) }));
       setToast('Member deleted');
     } catch (error) {
-      console.error('Supabase member delete failed:', error);
-      setToast(error?.message || 'Could not delete member from Supabase');
+      console.error('Cloudflare member delete failed:', error);
+      setToast(error?.message || 'Could not delete member from Cloudflare');
     }
   };
 
@@ -4444,13 +4449,13 @@ function App() {
     }
     try {
       if (isAuthenticated) {
-        if (!lead.cloudId) throw new Error('This lead is not linked to Supabase. Please refresh the Leads page and try again.');
+        if (!lead.cloudId) throw new Error('This lead is not linked to Cloudflare. Please refresh the Leads page and try again.');
         await updateRecord('leads', lead.cloudId, { stage });
       }
       setData((current) => ({ ...current, leads: (current.leads || []).map((item) => item.id === id ? { ...item, stage } : item) }));
       setToast('Lead stage updated and saved');
     } catch (error) {
-      console.error('Supabase lead stage update failed:', error);
+      console.error('Cloudflare lead stage update failed:', error);
       setToast(error?.message || 'Unable to save lead stage');
     }
   };
@@ -4474,7 +4479,7 @@ function App() {
     }
     try {
       if (isAuthenticated) {
-        if (!clean.cloudId) throw new Error('This lead is not linked to Supabase. Please refresh the Leads page and try again.');
+        if (!clean.cloudId) throw new Error('This lead is not linked to Cloudflare. Please refresh the Leads page and try again.');
         await updateRecord('leads', clean.cloudId, {
           name: clean.name,
           phone: clean.phone,
@@ -4494,7 +4499,7 @@ function App() {
       setModal(null);
       setToast('Lead updated and saved successfully');
     } catch (error) {
-      console.error('Supabase lead update failed:', error);
+      console.error('Cloudflare lead update failed:', error);
       setToast(error?.message || 'Unable to save lead changes');
     }
   };
@@ -4503,8 +4508,8 @@ function App() {
     const lead = data.leads.find((item) => item.id === id);
     if (!lead || !window.confirm(`Delete ${lead.name}? This cannot be undone.`)) return;
 
-    // Leads loaded from Supabase carry cloudId. Delete the database row first;
-    // otherwise a page reload would load the same lead from Supabase again.
+    // Leads loaded from Cloudflare carry cloudId. Delete the database row first;
+    // otherwise a page reload would load the same lead from Cloudflare again.
     // Locally-created legacy leads without cloudId are removed from local state.
     try {
       if (lead.cloudId) {
@@ -4515,10 +4520,10 @@ function App() {
         ...current,
         leads: current.leads.filter((item) => item.id !== id),
       }));
-      setToast(lead.cloudId ? 'Lead permanently deleted from Supabase' : 'Local lead deleted');
+      setToast(lead.cloudId ? 'Lead permanently deleted from Cloudflare' : 'Local lead deleted');
     } catch (error) {
-      console.error('Supabase lead delete failed:', error);
-      setToast(error?.message || 'Could not delete lead. It is still saved in Supabase.');
+      console.error('Cloudflare lead delete failed:', error);
+      setToast(error?.message || 'Could not delete lead. It is still saved in Cloudflare.');
     }
   };
 
@@ -4573,7 +4578,7 @@ function App() {
     if (!payment) return;
 
     if (!payment.cloudId) {
-      setToast('This payment is not linked to Supabase');
+      setToast('This payment is not linked to Cloudflare');
       return;
     }
 
@@ -4610,10 +4615,10 @@ function App() {
         }));
       }
 
-      setToast('Payment deleted from Supabase');
+      setToast('Payment deleted from Cloudflare');
     } catch (error) {
-      console.error('Supabase payment delete failed:', error);
-      setToast(error?.message || 'Unable to delete payment from Supabase');
+      console.error('Cloudflare payment delete failed:', error);
+      setToast(error?.message || 'Unable to delete payment from Cloudflare');
     }
   };
 
@@ -4661,7 +4666,7 @@ function App() {
     // Establish a baseline first so old enquiries do not trigger a notification.
     refreshWebsiteEnquiries(false);
     const pollId = window.setInterval(() => refreshWebsiteEnquiries(true), 30000);
-    const channel = supabase
+    const channel = backendClient
       .channel(`preface-website-enquiries-${access.gymId}`)
       .on('postgres_changes', {
         event: 'INSERT',
@@ -4674,7 +4679,7 @@ function App() {
     return () => {
       stopped = true;
       window.clearInterval(pollId);
-      supabase.removeChannel(channel);
+      backendClient.removeChannel(channel);
     };
   }, [isAuthenticated, access.gymId, cloudStatus]);
 
@@ -4773,7 +4778,7 @@ function App() {
     try {
       await signOutOwner();
     } catch (error) {
-      console.error('Supabase logout failed:', error);
+      console.error('Cloudflare logout failed:', error);
       setToast(error?.message || 'Unable to sign out');
     }
 
@@ -5140,7 +5145,7 @@ function cachePublicGymProfile(gymId, profile) {
 
 function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
   // Paint the last known public settings immediately from browser cache while
-  // the fresh Supabase profile loads in the background.
+  // the fresh Cloudflare profile loads in the background.
   const [remoteSettings, setRemoteSettings] = useState(() => readCachedPublicGymSettings(gymId, settings || {}));
   const [remotePlans, setRemotePlans] = useState(() => {
     try {
@@ -12049,7 +12054,7 @@ function StaffAccessPage() {
           <div className="card-header">
             <div>
               <h3>No staff accounts found</h3>
-              <p>Create a new user in Supabase Authentication and add it to <strong>gym_users</strong> with role <strong>staff</strong>.</p>
+              <p>Create a new user in Cloudflare Authentication and add it to <strong>gym_users</strong> with role <strong>staff</strong>.</p>
             </div>
           </div>
         </section>
@@ -12236,7 +12241,7 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
       setAuthMessage('Gym location saved to the cloud.');
       showActionFeedback('Gym location saved successfully.');
     } catch (error) {
-      console.error('Supabase gym location save failed:', error);
+      console.error('Cloudflare gym location save failed:', error);
       setAuthMessage(error?.message || 'Gym location saved locally, but cloud save failed.');
     }
   };
@@ -12298,7 +12303,7 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
       setAuthMessage('Gym settings saved successfully to the cloud.');
       showActionFeedback('Gym details saved successfully.');
     } catch (error) {
-      console.error('Supabase settings save failed:', error);
+      console.error('Cloudflare settings save failed:', error);
       setAuthMessage(error?.message || 'Settings saved locally, but cloud save failed.');
     }
   };
@@ -12342,7 +12347,7 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
       setAuthMessage('Notice published and added to the last 10 notices history.');
       showActionFeedback('Notice published successfully.');
     } catch (error) {
-      console.error('Supabase notice save failed:', error);
+      console.error('Cloudflare notice save failed:', error);
       setAuthMessage(error?.message || 'Notice saved locally, but cloud save failed.');
     }
   };
@@ -12357,7 +12362,7 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
       setAuthMessage('Current notice removed from the public page and dashboard. It remains in history.');
       showActionFeedback('Current notice hidden from the public page.');
     } catch (error) {
-      console.error('Supabase notice hide failed:', error);
+      console.error('Cloudflare notice hide failed:', error);
       setAuthMessage(error?.message || 'Notice was hidden locally, but cloud save failed.');
     }
   };
@@ -12387,7 +12392,7 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
       setAuthMessage('Notice removed from history and public display.');
       showActionFeedback('Notice removed successfully.');
     } catch (error) {
-      console.error('Supabase notice history delete failed:', error);
+      console.error('Cloudflare notice history delete failed:', error);
       setAuthMessage(error?.message || 'Notice was removed locally, but cloud delete failed.');
     }
   };
@@ -12921,7 +12926,7 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
             <button className="btn btn-secondary" onClick={() => window.print()}><FileDown size={17}/> Print QR</button>
           </div>
           <p style={{margin:'12px 0 0',fontSize:'12px',color:'#7b8794',lineHeight:1.5}}>Print the QR and place it at the gym entrance. Members scan it with their phone camera; no owner password is required.</p>
-          <div style={{marginTop:'12px',padding:'12px 14px',borderRadius:'12px',background:'#eef9f7',border:'1px solid #d3ece7',fontSize:'12px',color:'#3d6b66',lineHeight:1.5}}><strong>Cloud attendance:</strong> member check-ins are written to the shared Supabase database, so the permanent QR can be used from members' phones without requiring the owner's browser to be open.</div>
+          <div style={{marginTop:'12px',padding:'12px 14px',borderRadius:'12px',background:'#eef9f7',border:'1px solid #d3ece7',fontSize:'12px',color:'#3d6b66',lineHeight:1.5}}><strong>Cloud attendance:</strong> member check-ins are written to the shared Cloudflare database, so the permanent QR can be used from members' phones without requiring the owner's browser to be open.</div>
         </section>
 
 <section className="card">
@@ -12943,7 +12948,7 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
         {activeSettingsTab === 'data' && (
           <div className="settings-tab-panel">
             <section className="card">
-              <div className="card-header"><div><h3>Cloud database</h3><p>Business data is connected to the shared Supabase database.</p></div></div>
+              <div className="card-header"><div><h3>Cloud database</h3><p>Business data is connected to the shared Cloudflare database.</p></div></div>
               <div className="report-list">
                 <div><span>Database status</span><strong>{dbReady ? 'Ready' : 'Loading'}</strong></div>
                 <div><span>Members</span><strong>{(data.members || []).length}</strong></div>
@@ -12988,7 +12993,7 @@ function MemberPortalPage() {
     if (!identifier.trim() || !/^\d{6}$/.test(pin)) { setError('Enter your registered mobile/member ID and the 6-digit PIN provided by the gym.'); return; }
     setBusy(true);
     try {
-      const { data, error: rpcError } = await supabase.rpc('member_portal_login', {
+      const { data, error: rpcError } = await backendClient.rpc('member_portal_login', {
         p_gym_id: gymId,
         p_identifier: identifier.trim(),
         p_pin: pin,

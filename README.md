@@ -1,47 +1,24 @@
-# Preface Fitness — Phase 1
+# Preface Fitness — Cloudflare-only local project
 
-A React + Vite gym management web app branded for **Preface Fitness**.
+This package removes the Supabase SDK and Supabase runtime configuration from the frontend. The existing React application uses the Cloudflare Worker API and a local Cloudflare D1 database through Wrangler.
 
-## Phase 1 deployment model
+## Fast start on Windows
 
-This build is intentionally **serverless** so it can be deployed directly to GitHub Pages and still be usable:
+1. Extract this ZIP.
+2. Open the extracted folder in VS Code.
+3. Double-click `START_PREFACE.bat`.
+4. The script installs npm dependencies, applies local D1 migrations, imports the included browser backup, creates a local owner account, starts the Worker and Vite, and opens `http://localhost:5173`.
 
-- Member database (CRUD-lite: add, search, check-in, delete)
-- Leads / enquiries with stage updates
-- Membership tracking
-- Attendance
-- Payments with local records and deletion
-- Communication composer and message previews
-- Reports
-- Settings
-- JSON backup / restore
-- Local IndexedDB persistence
+Local login:
+- Email: `prefacefitness@gmail.com`
+- Password: `Preface@2026`
 
-### Important limitation
+Change the temporary password after first login.
 
-GitHub Pages is static hosting. IndexedDB gives each browser/device its own local database. It is **not a shared cloud database** between computers or staff members. The backup/restore feature is included so the gym can move data manually during Phase 1.
+## Data snapshot included
 
-WhatsApp/SMS/email bulk sending requires a backend/provider integration. The UI is ready for that integration; do not put provider API secrets in this React app.
+The included backup is from 2026-11-14, not a live 2026-11-22 database export. The import includes 129 members, 123 payments, 4 membership plans, 5 trainers, 1 PT session, 7 workout plans, 4 diet plans, 22 settings, and 10 website enquiries. It does not include Supabase auth identities, member portal PIN hashes, feedback rows absent from the browser backup, or the 22-Nov live changes.
 
-## Run locally
+## Important deployment note
 
-```bash
-npm install
-npm run dev
-```
-
-## Build
-
-```bash
-npm run build
-```
-
-The exact Preface Fitness logo supplied for the project is stored at `public/preface-logo.png` and is not AI-generated.
-
-## Production upgrade path
-
-Keep the React UI and replace the local data layer with:
-
-`React → authenticated API → PostgreSQL/Supabase`
-
-Then add WhatsApp/SMS/email provider integrations, multi-user roles, scheduled automations, and shared cloud data.
+This is a local development handover. It does not delete or alter the old hosted database. Public production deployment still needs a Cloudflare account, a remote D1 database, a deployed Worker URL, and production CORS configuration. Keep the old service intact until the local app is verified and the final live data snapshot is imported.

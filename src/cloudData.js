@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { backendClient } from './backend';
 
 
 
@@ -50,17 +50,17 @@ async function getAuthenticatedUser() {
 
     error,
 
-  } = await supabase.auth.getUser();
+  } = await backendClient.auth.getUser();
 
 
 
-  throwIfError(error, 'Unable to read Supabase user');
+  throwIfError(error, 'Unable to read Cloudflare user');
 
 
 
   if (!user) {
 
-    throw new Error('No authenticated Supabase user');
+    throw new Error('No authenticated Cloudflare user');
 
   }
 
@@ -92,7 +92,7 @@ export async function getCurrentGym() {
 
     error: membershipError,
 
-  } = await supabase
+  } = await backendClient
 
     .from('gym_users')
 
@@ -128,7 +128,7 @@ export async function getCurrentGym() {
 
     error: gymError,
 
-  } = await supabase
+  } = await backendClient
 
     .from('gyms')
 
@@ -168,7 +168,7 @@ async function selectTable(tableName, gymId) {
 
     error,
 
-  } = await supabase
+  } = await backendClient
 
     .from(tableName)
 
@@ -1578,7 +1578,7 @@ export async function insertRecord(
 
     error,
 
-  } = await supabase
+  } = await backendClient
 
     .from(tableName)
 
@@ -1634,7 +1634,7 @@ export async function updateRecord(
 
     error,
 
-  } = await supabase
+  } = await backendClient
 
     .from(tableName)
 
@@ -1684,7 +1684,7 @@ export async function deleteRecord(
 
     error,
 
-  } = await supabase
+  } = await backendClient
 
     .from(tableName)
 
@@ -1796,7 +1796,7 @@ export async function saveSettings(
 
          * Do NOT JSON.stringify here.
 
-         * Supabase column is JSONB.
+         * Cloudflare column is JSONB.
 
          */
 
@@ -1814,7 +1814,7 @@ export async function saveSettings(
 
     error,
 
-  } = await supabase
+  } = await backendClient
 
     .from(TABLES.appSettings)
 
@@ -1872,7 +1872,7 @@ export async function publicCheckIn({
 
     error,
 
-  } = await supabase.rpc(
+  } = await backendClient.rpc(
 
     'public_check_in',
 
@@ -1970,7 +1970,7 @@ export async function publicSubmitFeedback({
 
     error,
 
-  } = await supabase.rpc(
+  } = await backendClient.rpc(
 
     'public_submit_feedback',
 
@@ -2074,7 +2074,7 @@ export async function publicSubmitEnquiry({ gymId, name, phone, email, intereste
     `Message: ${cleanMessage || 'No additional message provided.'}`,
   ].join('\n');
 
-  const { data, error } = await supabase.rpc('public_submit_feedback', {
+  const { data, error } = await backendClient.rpc('public_submit_feedback', {
     p_gym_id: String(gymId || '').trim(),
     p_member_name: cleanName,
     p_category: 'Website Enquiry',
@@ -2093,7 +2093,7 @@ export async function getMyAccess() {
 
     error,
 
-  } = await supabase.rpc(
+  } = await backendClient.rpc(
 
     'get_my_access'
 
@@ -2127,6 +2127,18 @@ export async function getMyAccess() {
 
 
 
+export async function provisionStaffLogin({ email, password, displayName = '', permissions = {} }) {
+  const { data, error } = await backendClient.rpc('provision_staff_login', {
+    p_email: email,
+    p_password: password,
+    p_display_name: displayName,
+    p_permissions: permissions,
+  });
+  throwIfError(error, 'Unable to provision staff login');
+  return data;
+}
+
+
 export async function getGymStaff() {
 
   const {
@@ -2135,7 +2147,7 @@ export async function getGymStaff() {
 
     error,
 
-  } = await supabase.rpc(
+  } = await backendClient.rpc(
 
     'get_gym_staff'
 
@@ -2173,7 +2185,7 @@ export async function updateStaffPermissions(
 
     error,
 
-  } = await supabase.rpc(
+  } = await backendClient.rpc(
 
     'update_staff_permissions',
 
@@ -2225,7 +2237,7 @@ export async function setStaffActive(
 
     error,
 
-  } = await supabase.rpc(
+  } = await backendClient.rpc(
 
     'set_staff_active',
 

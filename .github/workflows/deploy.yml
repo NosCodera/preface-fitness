@@ -33,8 +33,8 @@ jobs:
 
       - name: Build
         env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_CLOUDFLARE_API_URL: ${{ secrets.VITE_CLOUDFLARE_API_URL }}
+          VITE_CLOUDFLARE_GYM_ID: ${{ secrets.VITE_CLOUDFLARE_GYM_ID }}
         run: npm run build
 
       - name: Setup Pages
