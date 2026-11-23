@@ -91,10 +91,12 @@ export default {
    if(path==='/api/public/registration-info' && req.method==='GET'){
     const gymId=String(url.searchParams.get('gymId')||''); if(!gymId) return response({error:'gymId is required'},400,headers);
     const gym=await env.DB.prepare('SELECT id,name FROM gyms WHERE id=?').bind(gymId).first(); if(!gym) return response({error:'Gym not found'},404,headers);
-    const setting=await env.DB.prepare("SELECT setting_value_json FROM app_settings WHERE gym_id=? AND setting_key='customerRegistrationEnabled'").bind(gymId).first();
-    let enabled=false; try{enabled=JSON.parse(setting?.setting_value_json||'false')===true}catch{}
+    const settings=await env.DB.prepare("SELECT setting_key,setting_value_json FROM app_settings WHERE gym_id=? AND setting_key IN ('customerRegistrationEnabled','paymentUpiId')").bind(gymId).all();
+    const publicSettings={}; for(const row of (settings.results||[])){try{publicSettings[row.setting_key]=JSON.parse(row.setting_value_json)}catch{publicSettings[row.setting_key]=row.setting_value_json}}
+    const enabled=publicSettings.customerRegistrationEnabled===true;
+    const paymentUpiId=String(publicSettings.paymentUpiId||'').trim().slice(0,100);
     const plans=await env.DB.prepare('SELECT name,months,price FROM membership_plans WHERE gym_id=? ORDER BY months ASC').bind(gymId).all();
-    return response({gym,enabled,plans:plans.results||[]},200,headers);
+    return response({gym,enabled,paymentUpiId,plans:plans.results||[]},200,headers);
    }
    if(path==='/api/public/register' && req.method==='POST'){
     const b=await req.json(); const gymId=String(b.gymId||''); if(!gymId) return response({error:'Invalid gym reference.'},400,headers);
@@ -108,7 +110,9 @@ export default {
     const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date()); let expiry=null;
     if(plan?.months){const d=new Date(`${today}T12:00:00Z`);d.setUTCMonth(d.getUTCMonth()+Number(plan.months));expiry=d.toISOString().slice(0,10);}
     const pin=String(b.pin||'').trim(); if(pin&&!/^\d{6}$/.test(pin))return response({error:'PIN must contain exactly six digits.'},400,headers);
-    const amountRaw=String(b.paymentAmount??'').trim(); const paid=amountRaw!==''&&Number.isFinite(Number(amountRaw))?Math.max(0,Math.min(10000000,Number(amountRaw))):0;
+    // A client-side UPI intent cannot prove that a transfer succeeded.
+    // Never trust paymentAmount from public registration as a completed payment.
+    const paid=0;
     const bodyMeasurements=b.bodyMeasurements&&typeof b.bodyMeasurements==='object'?b.bodyMeasurements:{};
     const medical=String(b.medicalConditions||'').trim().slice(0,2000);
     const aadhaarDigits=String(b.aadhaarNumber||'').replace(/\D/g,''); const maskedAadhaar=aadhaarDigits.length===12?`XXXX-XXXX-${aadhaarDigits.slice(-4)}`:null;
@@ -123,9 +127,8 @@ export default {
     const vals=[id,gymId,memberCode,attendanceNumber,name,phone,String(b.dob||'').slice(0,10)||null,String(b.gender||'').slice(0,30)||null,String(b.address||'').slice(0,500)||null,String(b.dietPreference||'').slice(0,40)||null,plan?.name||planName||null,plan?.id||null,today,expiry,'Active',0,Number(plan?.price||0),paid,Math.max(0,Number(plan?.price||0)-paid),JSON.stringify(metadata),memberNotes,new Date().toISOString(),new Date().toISOString(),String(b.height||'').slice(0,20)||null,String(b.weight||'').slice(0,20)||null];
     await env.DB.prepare(`INSERT INTO members(${columns.join(',')}) VALUES(${columns.map(()=>'?').join(',')})`).bind(...vals).run();
     if(pin) {const bcrypt=await import('bcryptjs');const hash=await bcrypt.hash(pin,10);await env.DB.prepare('INSERT INTO member_portal_credentials(member_id,gym_id,pin_hash,created_at,updated_at) VALUES(?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)').bind(id,gymId,hash).run();}
-    let paymentId=null; if(paid>0){paymentId=uid();await env.DB.prepare("INSERT INTO payments(id,gym_id,member_id,member_name,amount,type,mode,payment_date,notes,created_at,payment_mode,payment_type) VALUES(?,?,?,?,?,'Membership','Cash',?,'Customer self-registration',CURRENT_TIMESTAMP,'Cash','Membership')").bind(paymentId,gymId,id,name,paid,today).run();await env.DB.prepare("INSERT INTO change_events(gym_id,table_name,record_id,operation) VALUES(?,?,?,'upsert')").bind(gymId,'payments',paymentId).run();}
     await env.DB.prepare("INSERT INTO change_events(gym_id,table_name,record_id,operation) VALUES(?,?,?,'upsert')").bind(gymId,'members',id).run();
-    await publish(env,gymId,{type:'data_changed',gymId,table:'members',ids:[id],at:Date.now()}); if(paymentId)await publish(env,gymId,{type:'data_changed',gymId,table:'payments',ids:[paymentId],at:Date.now()});
+    await publish(env,gymId,{type:'data_changed',gymId,table:'members',ids:[id],at:Date.now()});
     return response({success:true,memberId:id,memberCode,attendanceNumber},201,headers);
    }
    if(path==='/api/public/feedback' && req.method==='POST'){

@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import prefaceFitnessLogo from './assets/preface-logo.jpg';
 import {
   Activity,
   BarChart3,
@@ -7682,6 +7681,7 @@ function PublicMemberRegistrationPage({ gymId }) {
   const [form,setForm]=useState({name:'',phone:'',gender:'',dob:'',dietPreference:'',address:'',attendanceNumber:'',pin:'',planName:'',paymentAmount:'',height:'',weight:'',aadhaarNumber:'',medicalConditions:'',bodyMeasurements:{chest:'',waist:'',hips:'',arms:'',thighs:'',bodyFat:''}});
   useEffect(()=>{let alive=true;fetch(`${apiBase}/api/public/registration-info?gymId=${encodeURIComponent(gymId)}`).then(r=>r.json().then(j=>({ok:r.ok,j}))).then(({ok,j})=>{if(alive){if(!ok)throw new Error(j.error||'Unable to load registration form');setInfo(j);}}).catch(e=>alive&&setError(e.message));return()=>{alive=false};},[apiBase,gymId]);
   const update=(k,v)=>setForm(f=>({...f,[k]:v}));
+  const payNow=()=>{const upiId=String(info?.paymentUpiId||'').trim();const amount=Number(form.paymentAmount||0);if(!upiId){setError('Gym payment UPI ID is not configured. Please contact the gym.');return;}if(!Number.isFinite(amount)||amount<=0){setError('Please enter a valid payment amount before paying.');return;}const params=new URLSearchParams({pa:upiId,pn:String(info?.gym?.name||'Gym'),am:amount.toFixed(2),cu:'INR',tn:`Membership payment - ${form.name||'New member'}`});window.location.href=`upi://pay?${params.toString()}`;};
   const submit=async(e)=>{e.preventDefault();setBusy(true);setError('');try{const res=await fetch(`${apiBase}/api/public/register`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({gymId,...form})});const payload=await res.json();if(!res.ok)throw new Error(payload.error||'Registration could not be submitted');setDone(payload);}catch(err){setError(err.message||'Registration failed');}finally{setBusy(false)}};
   const inputStyle={width:'100%',minWidth:0,padding:'13px 14px',border:'1px solid #dbe4f0',borderRadius:12,fontSize:15,color:'#172b4d',background:'#fff',outline:'none',boxShadow:'0 2px 8px rgba(22,44,88,.035)'};
   const labelStyle={display:'grid',gap:7,fontSize:13,fontWeight:800,color:'#263957'};
@@ -7753,10 +7753,10 @@ function PublicMemberRegistrationPage({ gymId }) {
       .selfreg-page .selfreg-logo{width:60px!important;height:60px!important;flex-basis:60px!important}
     }
   `}</style>
-    <div className="selfreg-shell"><header className="selfreg-hero"><div className="selfreg-brand"><img className="selfreg-logo" src={prefaceFitnessLogo} alt="Preface Fitness logo"/><div className="selfreg-brand-copy"><div className="selfreg-brand-name">Preface Fitness</div><div className="selfreg-kicker">Welcome • Start your fitness journey</div></div></div><h1>{info?.gym?.name||'Gym'} – Member Registration</h1><p>Share only the details you are comfortable providing. Every field is optional and you can leave any section blank.</p></header>
+    <div className="selfreg-shell"><header className="selfreg-hero"><div className="selfreg-brand"><img className="selfreg-logo" src={LOGO_URL} alt="Preface Fitness logo"/><div className="selfreg-brand-copy"><div className="selfreg-brand-name">Preface Fitness</div><div className="selfreg-kicker">Welcome • Start your fitness journey</div></div></div><h1>{info?.gym?.name||'Gym'} – Member Registration</h1><p>Share only the details you are comfortable providing. Every field is optional and you can leave any section blank.</p></header>
       <form className="selfreg-form" onSubmit={submit}>
         <section className="selfreg-section"><div className="selfreg-section-head"><span className="selfreg-section-icon">♙</span><h3>Personal details</h3></div><div className="selfreg-grid">{field('Full name','name')}{field('Mobile number','phone','tel')}{field('Date of birth','dob','date')}{selectField('Gender','gender',['Male','Female','Other'])}{selectField('Diet preference','dietPreference',['Veg','Non-Veg','Eggetarian','Vegan'])}{field('Address','address')}</div></section>
-        <section className="selfreg-section"><div className="selfreg-section-head"><span className="selfreg-section-icon">✦</span><h3>Membership & payment</h3></div><div className="selfreg-grid">{selectField('Membership plan','planName',(info?.plans||[]).map(p=>p.name))}{field('Attendance number (optional)','attendanceNumber')}{field('Set 6-digit Member Portal PIN','pin','password','Leave blank to set later')}{field('Payment amount (optional)','paymentAmount','number','0')}</div></section>
+        <section className="selfreg-section"><div className="selfreg-section-head"><span className="selfreg-section-icon">✦</span><h3>Membership & payment</h3></div><div className="selfreg-grid">{selectField('Membership plan','planName',(info?.plans||[]).map(p=>p.name))}{field('Attendance number (optional)','attendanceNumber')}{field('Set 6-digit Member Portal PIN','pin','password','Leave blank to set later')}{field('Payment amount (₹)','paymentAmount','number','Enter amount')}</div>{info?.paymentUpiId&&<div style={{marginTop:15,padding:16,borderRadius:15,background:'linear-gradient(135deg,#effaf7,#eef5ff)',border:'1px solid #cce9e2',display:'grid',gap:10}}><div style={{fontWeight:850,color:'#17445b'}}>Pay membership fee using UPI</div><div style={{fontSize:13,color:'#52677d'}}>UPI ID: <strong>{info.paymentUpiId}</strong></div><button type="button" className="selfreg-submit" onClick={payNow} disabled={!Number(form.paymentAmount||0)||Number(form.paymentAmount)<=0}>Pay ₹{Number(form.paymentAmount||0).toLocaleString('en-IN')} Now</button><div style={{fontSize:11,color:'#71819a',lineHeight:1.5}}>Opens a UPI app installed on your phone. After payment, return here and submit your registration. Payment confirmation is subject to gym verification.</div></div>}</section>
         <section className="selfreg-section"><div className="selfreg-section-head"><span className="selfreg-section-icon">↗</span><h3>Fitness & health</h3></div><div className="selfreg-grid three">{field('Height (cm)','height','number')}{field('Weight (kg)','weight','number')}{field('Aadhaar number (optional)','aadhaarNumber')}</div><div style={{marginTop:15}}>{field('Medical conditions','medicalConditions')}</div></section>
         <section className="selfreg-section"><div className="selfreg-section-head"><span className="selfreg-section-icon">⌁</span><h3>Body measurements</h3></div><div className="selfreg-grid four">{['chest','waist','hips','arms','thighs','bodyFat'].map(k=><label key={k} style={labelStyle}>{k==='bodyFat'?'Body fat (%)':k[0].toUpperCase()+k.slice(1)}<input type="number" value={form.bodyMeasurements[k]} onChange={e=>setForm(f=>({...f,bodyMeasurements:{...f.bodyMeasurements,[k]:e.target.value}}))} style={inputStyle}/></label>)}</div></section>
         {error&&<div className="selfreg-error">{error}</div>}<button className="selfreg-submit" disabled={busy||info?.enabled!==true}>{busy?'Submitting registration…':'Submit registration'}</button><p className="selfreg-note">All fields are optional. Please share only information you are comfortable providing.</p><section className="selfreg-terms"><h3>NOTES &amp; TERMS</h3><ol><li>This document records the membership / fitness service billed by Preface Fitness.</li><li>Amounts paid are non-refundable.</li><li>Once your package has expired, it must be renewed. Expired packages will not be extended unless authorised by management.</li><li>Please retain this invoice for your records.</li><li>GST details should match the billing details configured by the gym.</li></ol></section>
@@ -12368,6 +12368,7 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
     gymPhone: current.gymPhone || '',
     gymEmail: current.gymEmail || '',
     gstin: current.gstin || '',
+    paymentUpiId: current.paymentUpiId || '',
     defaultGstRate: Number(current.defaultGstRate ?? 5),
     invoicePrefix: current.invoicePrefix || 'PO',
     invoiceSeriesA: getInvoiceSeriesSettings(current, 'invoiceSeriesA'),
@@ -12411,6 +12412,7 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
       gymPhone: current.gymPhone || '',
       gymEmail: current.gymEmail || '',
       gstin: current.gstin || '',
+      paymentUpiId: current.paymentUpiId || '',
       defaultGstRate: Number(current.defaultGstRate ?? 5),
       invoicePrefix: current.invoicePrefix || 'PO',
       invoiceSeriesA: getInvoiceSeriesSettings(current, 'invoiceSeriesA'),
@@ -12439,7 +12441,7 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
     }));
     setAuthMessage('');
     setNoticeForm({ enabled: Boolean(current.notice?.enabled), dashboardEnabled: current.notice?.dashboardEnabled !== false, text: current.notice?.text || '', priority: current.notice?.priority || 'medium' });
-  }, [current.gymName, current.gymAddress, current.gymPhone, current.gymEmail, current.gstin, current.defaultGstRate, current.invoicePrefix, current.invoiceSeriesA, current.invoiceSeriesB, current.referralPointsPerReferral, current.memberIdFormat, current.gymLatitude, current.gymLongitude, current.publicPage, current.notice?.id, current.notice?.enabled, current.notice?.dashboardEnabled, current.notice?.text, current.notice?.priority, current.noticeHistory, current.auth?.username, current.auth?.passwordHash]);
+  }, [current.gymName, current.gymAddress, current.gymPhone, current.gymEmail, current.gstin, current.paymentUpiId, current.defaultGstRate, current.invoicePrefix, current.invoiceSeriesA, current.invoiceSeriesB, current.referralPointsPerReferral, current.memberIdFormat, current.gymLatitude, current.gymLongitude, current.publicPage, current.notice?.id, current.notice?.enabled, current.notice?.dashboardEnabled, current.notice?.text, current.notice?.priority, current.noticeHistory, current.auth?.username, current.auth?.passwordHash]);
 
   const useCurrentLocation = () => {
     if (!navigator.geolocation) { showActionFeedback('This browser does not support location detection.', 'error'); return setAuthMessage('This browser does not support location detection.'); }
@@ -13012,6 +13014,12 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
             Example: if this is <strong>{Number(form.referralPointsPerReferral || 0)} points</strong>, a member who successfully refers 5 clients earns <strong>{Number(form.referralPointsPerReferral || 0) * 5} points</strong>.
           </div>
           <button className="btn btn-primary" style={{marginTop:'12px'}} onClick={saveSettings}><Save size={17}/> Save referral settings</button>
+        </section>
+        <section className="card">
+          <div className="card-header"><div><h3>Payment UPI ID</h3><p>Members can use this UPI address to pay directly from the self-registration page.</p></div></div>
+          <FormField label="Gym UPI ID"><input value={form.paymentUpiId} onChange={(e) => setForm((f) => ({...f, paymentUpiId:e.target.value.trim()}))} placeholder="yourgym@okaxis / yourgym@paytm" autoComplete="off" /></FormField>
+          <p style={{fontSize:12,color:'#718096',lineHeight:1.55}}>Enter the UPI ID that should receive membership payments. The Pay button opens a UPI app; it does not independently verify whether the transfer succeeded.</p>
+          <button className="btn btn-primary" style={{marginTop:8}} onClick={saveSettings}><Save size={17}/> Save UPI ID</button>
         </section>
           </div>
         )}
