@@ -91,12 +91,10 @@ export default {
    if(path==='/api/public/registration-info' && req.method==='GET'){
     const gymId=String(url.searchParams.get('gymId')||''); if(!gymId) return response({error:'gymId is required'},400,headers);
     const gym=await env.DB.prepare('SELECT id,name FROM gyms WHERE id=?').bind(gymId).first(); if(!gym) return response({error:'Gym not found'},404,headers);
-    const settings=await env.DB.prepare("SELECT setting_key,setting_value_json FROM app_settings WHERE gym_id=? AND setting_key IN ('customerRegistrationEnabled','paymentUpiId','payment_upi_id','upiId')").bind(gymId).all();
-    const publicSettings={}; for(const row of (settings.results||[])){try{publicSettings[row.setting_key]=JSON.parse(row.setting_value_json)}catch{publicSettings[row.setting_key]=row.setting_value_json}}
-    const enabled=publicSettings.customerRegistrationEnabled===true;
-    const paymentUpiId=String(publicSettings.paymentUpiId||publicSettings.payment_upi_id||publicSettings.upiId||'').trim().slice(0,100);
+    const setting=await env.DB.prepare("SELECT setting_value_json FROM app_settings WHERE gym_id=? AND setting_key='customerRegistrationEnabled'").bind(gymId).first();
+    let enabled=false; try{enabled=JSON.parse(setting?.setting_value_json||'false')===true}catch{}
     const plans=await env.DB.prepare('SELECT name,months,price FROM membership_plans WHERE gym_id=? ORDER BY months ASC').bind(gymId).all();
-    return response({gym,enabled,paymentUpiId,plans:plans.results||[]},200,headers);
+    return response({gym,enabled,plans:plans.results||[]},200,headers);
    }
    if(path==='/api/public/register' && req.method==='POST'){
     const b=await req.json(); const gymId=String(b.gymId||''); if(!gymId) return response({error:'Invalid gym reference.'},400,headers);
