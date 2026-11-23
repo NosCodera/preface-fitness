@@ -13081,7 +13081,7 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
           </div>
 
           <div className="form-section-title" style={{marginTop:24}}>Facilities & training section images</div>
-          <p style={{fontSize:13,color:'#718096',lineHeight:1.55,marginTop:-4}}>Yahan se screenshot wale “Everything you need to train with purpose” section ki har card image alag change kar sakte ho. Select image, preview check karo, phir Save public page dabao.</p>
+          <p style={{fontSize:13,color:'#718096',lineHeight:1.55,marginTop:-4}}>Change the images for each facility and training section shown on your public gym page.</p>
           <div className="form-grid three">
             {defaultFacilityImageSettings.map((item) => {
               const chosen = form.publicPage?.facilityImages?.[publicFacilityImageKey(item.name)] || item.image;
@@ -13309,7 +13309,7 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
             <section className="card">
               <div className="card-header"><div><h3>Customer Self Registration control</h3><p>Turn registration ON only when reception is ready to accept new member submissions.</p></div><QrCode size={21}/></div>
               <label style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:14,padding:16,borderRadius:14,background:form.customerRegistrationEnabled?'#e9fbf5':'#fff7ed',border:`1px solid ${form.customerRegistrationEnabled?'#9de6c8':'#fed7aa'}`,fontWeight:850,color:'#25364b'}}><span>Allow customer registration</span><span style={{display:'flex',alignItems:'center',gap:10}}><span style={{fontSize:12,color:form.customerRegistrationEnabled?'#07856f':'#b45309'}}>{form.customerRegistrationEnabled?'ON':'OFF'}</span><input type="checkbox" checked={Boolean(form.customerRegistrationEnabled)} onChange={async(e)=>{const enabled=e.target.checked;setForm(f=>({...f,customerRegistrationEnabled:enabled}));setData(d=>({...d,settings:{...(d.settings||{}),customerRegistrationEnabled:enabled}}));try{await saveCloudSettings({customerRegistrationEnabled:enabled});showActionFeedback(enabled?'Customer registration enabled.':'Customer registration disabled.');}catch(err){setForm(f=>({...f,customerRegistrationEnabled:!enabled}));setData(d=>({...d,settings:{...(d.settings||{}),customerRegistrationEnabled:!enabled}}));showActionFeedback(err.message||'Could not update registration setting.','error');}}}/></span></label>
-              <p style={{fontSize:13,lineHeight:1.6,color:'#687789',margin:'12px 0 0'}}>OFF hone par public form submit nahi ho sakta. Ye setting Worker par bhi enforce hoti hai. QR aur link visible rahenge, taaki aap unhe print/share kar sako.</p>
+              <p style={{fontSize:13,lineHeight:1.6,color:'#687789',margin:'12px 0 0'}}>Turning this off will prevent customers from registering themselves unneccessarily.</p>
             </section>
           </div>
         )}
