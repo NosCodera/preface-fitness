@@ -4874,9 +4874,14 @@ function App() {
   const publicHash = window.location.hash;
   const isPublicCheckInRoute = publicHash === '#check-in';
   const isPublicGymRoute = publicHash === '#gym';
+  const isPublicRegistrationRoute = publicHash === '#register';
 
   if (isPublicCheckInRoute) {
     return <PublicAttendancePage data={data} setData={setData} />;
+  }
+  if (isPublicRegistrationRoute) {
+    const publicGymId = new URLSearchParams(window.location.search).get('gym') || data.gym?.id || PRODUCTION_GYM_ID;
+    return <PublicMemberRegistrationPage gymId={publicGymId} />;
   }
 
   if (isPublicGymRoute) {
@@ -7665,6 +7670,26 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
       </tbody></table></div>
     </div>
   </>;
+}
+
+function PublicMemberRegistrationPage({ gymId }) {
+  const apiBase = String(import.meta.env.VITE_CLOUDFLARE_API_URL || '').replace(/\/+$/, '');
+  const [info,setInfo]=useState(null); const [busy,setBusy]=useState(false); const [done,setDone]=useState(null); const [error,setError]=useState('');
+  const [form,setForm]=useState({name:'',phone:'',gender:'',dob:'',dietPreference:'',address:'',attendanceNumber:'',pin:'',planName:'',paymentAmount:'',height:'',weight:'',aadhaarNumber:'',medicalConditions:'',bodyMeasurements:{chest:'',waist:'',hips:'',arms:'',thighs:'',bodyFat:''}});
+  useEffect(()=>{let alive=true;fetch(`${apiBase}/api/public/registration-info?gymId=${encodeURIComponent(gymId)}`).then(r=>r.json().then(j=>({ok:r.ok,j}))).then(({ok,j})=>{if(alive){if(!ok)throw new Error(j.error||'Unable to load registration form');setInfo(j);}}).catch(e=>alive&&setError(e.message));return()=>{alive=false};},[apiBase,gymId]);
+  const update=(k,v)=>setForm(f=>({...f,[k]:v}));
+  const submit=async(e)=>{e.preventDefault();setBusy(true);setError('');try{const res=await fetch(`${apiBase}/api/public/register`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({gymId,...form})});const payload=await res.json();if(!res.ok)throw new Error(payload.error||'Registration could not be submitted');setDone(payload); }catch(err){setError(err.message||'Registration failed');}finally{setBusy(false)}};
+  const field=(label,key,type='text',placeholder='')=><label style={{display:'grid',gap:6,fontSize:13,fontWeight:700,color:'#334155'}}>{label}<input type={type} value={form[key]} onChange={e=>update(key,e.target.value)} placeholder={placeholder} style={{width:'100%',padding:'12px',border:'1px solid #dbe3ec',borderRadius:10,fontSize:15}}/></label>;
+  if(!apiBase)return <div style={{padding:30}}>Registration service is not configured. Please contact the gym.</div>;
+  if(done)return <div style={{maxWidth:560,margin:'8vh auto',padding:28,fontFamily:'Arial',textAlign:'center',border:'1px solid #dce7ee',borderRadius:18}}><h2>Registration submitted</h2><p>Your details have been sent to the gym.</p><strong>Registration reference: {done.memberCode||done.memberId}</strong><p>The gym team will confirm your membership and payment.</p></div>;
+  if(error&&!info)return <div style={{maxWidth:560,margin:'8vh auto',padding:24,fontFamily:'Arial'}}>{error}</div>;
+  if(info?.enabled===false)return <div style={{maxWidth:560,margin:'8vh auto',padding:28,fontFamily:'Arial',textAlign:'center',border:'1px solid #dce7ee',borderRadius:18}}><h2>Registration currently unavailable</h2><p>The gym is not accepting online registrations right now. Please contact the reception.</p></div>;
+  return <div style={{maxWidth:760,margin:'24px auto',padding:20,fontFamily:'Arial',color:'#1e293b'}}><div style={{background:'#087f73',color:'#fff',padding:22,borderRadius:'18px 18px 0 0'}}><h1 style={{margin:0,fontSize:25}}>{info?.gym?.name||'Gym'} – Member Registration</h1><p style={{margin:'8px 0 0',opacity:.9}}>Fill any details you wish to share. Every field is optional.</p></div><form onSubmit={submit} style={{padding:20,border:'1px solid #e2e8f0',borderTop:0,borderRadius:'0 0 18px 18px',display:'grid',gap:18}}>
+    <h3 style={{margin:0}}>Personal details</h3><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:14}}>{field('Full name','name')}{field('Mobile number','phone','tel')}{field('Date of birth','dob','date')}{<label style={{display:'grid',gap:6,fontSize:13,fontWeight:700}}>Gender<select value={form.gender} onChange={e=>update('gender',e.target.value)} style={{padding:12,border:'1px solid #dbe3ec',borderRadius:10}}><option value="">Prefer not to say</option><option>Male</option><option>Female</option><option>Other</option></select></label>}{<label style={{display:'grid',gap:6,fontSize:13,fontWeight:700}}>Diet preference<select value={form.dietPreference} onChange={e=>update('dietPreference',e.target.value)} style={{padding:12,border:'1px solid #dbe3ec',borderRadius:10}}><option value="">Not specified</option><option>Veg</option><option>Non-Veg</option><option>Eggetarian</option><option>Vegan</option></select></label>}{field('Address','address')}</div>
+    <h3 style={{margin:0}}>Membership</h3><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:14}}>{<label style={{display:'grid',gap:6,fontSize:13,fontWeight:700}}>Membership plan<select value={form.planName} onChange={e=>update('planName',e.target.value)} style={{padding:12,border:'1px solid #dbe3ec',borderRadius:10}}><option value="">Not selected</option>{(info?.plans||[]).map(p=><option key={p.name} value={p.name}>{p.name} {p.price!=null?`— ₹${p.price}`:''}</option>)}</select></label>}{field('Attendance number (optional)','attendanceNumber')}{field('Set 6-digit Member Portal PIN','pin','password','Leave blank to set later')}{field('Payment amount (optional)','paymentAmount','number','0')}</div>
+    <h3 style={{margin:0}}>Fitness & health (optional)</h3><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:14}}>{field('Height (cm)','height')}{field('Weight (kg)','weight')}{field('Aadhaar number (optional)','aadhaarNumber')}{field('Medical conditions','medicalConditions')}</div><h4 style={{margin:'0'}}>Body measurements</h4><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:14}}>{['chest','waist','hips','arms','thighs','bodyFat'].map(k=><label key={k} style={{display:'grid',gap:6,fontSize:13,fontWeight:700}}>{k[0].toUpperCase()+k.slice(1)}<input value={form.bodyMeasurements[k]} onChange={e=>setForm(f=>({...f,bodyMeasurements:{...f.bodyMeasurements,[k]:e.target.value}}))} style={{padding:12,border:'1px solid #dbe3ec',borderRadius:10}}/></label>)}</div>
+    {error&&<div style={{color:'#b91c1c',fontSize:13}}>{error}</div>}<button disabled={busy||info?.enabled!==true} style={{padding:14,border:0,borderRadius:11,background:'#087f73',color:'#fff',fontSize:16,fontWeight:800,cursor:'pointer'}}>{busy?'Submitting…':'Submit registration'}</button><small style={{color:'#64748b'}}>All fields are optional. Please share only information you are comfortable providing.</small>
+  </form></div>;
 }
 
 function PublicAttendancePage({ data, setData }) {
@@ -10768,10 +10793,6 @@ async function shareBillWhatsApp(member, settings, payment = null) {
 }
 
 function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = [], members = [], trainers = [], isOwner = false }) {
-  const [aadhaarFront, setAadhaarFront] = useState(null);
-  const [aadhaarBack, setAadhaarBack] = useState(null);
-  const [aadhaarBusy, setAadhaarBusy] = useState(false);
-  const [aadhaarStatus, setAadhaarStatus] = useState('');
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState('');
   const videoRef = useRef(null);
@@ -10862,183 +10883,6 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
     emergencyContact: '', dietPreference: 'Veg', gstinAadhaar: '', billingState: 'UTTAR PRADESH', billingStateCode: '09', referredBy: '', plan: 'Monthly', start: today, expiry: addMonthsToDate(today, MEMBERSHIP_PLANS.find((item) => item.name === 'Monthly')?.months || 1), amount: Number(planPrices?.Monthly || 0), paid: 0,
     due: 0, paymentMode: 'Cash', gstMode: 'without', gstRate: 5, height: '', weight: '', bodyFat: '', chest: '', shoulder: '', biceps: '', forearms: '', waist: '', hips: '', thighs: '', calves: '', neck: '', trainer: '', referral: 'None / Walk-In', referralOther: '', medicalConditions: [], medicalOther: '', surgeryDetails: '', additionalMedicalNotes: '', notes: '',
   });
-
-  const readAadhaarImages = async () => {
-    if (!aadhaarFront || !aadhaarBack) {
-      setAadhaarStatus('Please select both the front and back images first.');
-      return;
-    }
-
-    const prepareAadhaarImage = async (file, crop = 'full') => {
-      const bitmap = await createImageBitmap(file);
-      const maxSide = 3000;
-      const scale = Math.min(2.5, maxSide / Math.max(bitmap.width, bitmap.height));
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-      bitmap.close?.();
-
-      // Crop the Aadhaar number strip separately; this prevents DOB/PIN/other
-      // numbers elsewhere on the card from being mistaken for the Aadhaar number.
-      if (crop === 'number') {
-        const y = Math.floor(canvas.height * 0.72);
-        const h = Math.max(1, canvas.height - y);
-        const cropped = document.createElement('canvas');
-        cropped.width = canvas.width;
-        cropped.height = h;
-        cropped.getContext('2d').drawImage(canvas, 0, y, canvas.width, h, 0, 0, canvas.width, h);
-        return cropped;
-      }
-      return canvas;
-    };
-
-    const cleanLines = (text) => String(text || '')
-      .replace(/\r/g, '\n')
-      .split('\n')
-      .map((line) => line.replace(/[|¦]/g, ' ').replace(/\s{2,}/g, ' ').trim())
-      // Keep English-script lines only. Aadhaar cards may show Hindi, Tamil,
-      // Telugu, etc. above the English line; those lines are intentionally ignored.
-      .filter((line) => line && /[A-Za-z]/.test(line))
-      .filter((line) => !/^(government of india|unique identification authority|uidai|aadhaar|my aadhaar)$/i.test(line));
-
-    const readText = async (worker, image, pageMode, whitelist) => {
-      // Always reset the whitelist. Tesseract retains previous parameters;
-      // otherwise the digit-only Aadhaar pass can corrupt name/address OCR.
-      await worker.setParameters({
-        tessedit_pageseg_mode: String(pageMode),
-        preserve_interword_spaces: '1',
-        tessedit_char_whitelist: whitelist || '',
-      });
-      const result = await worker.recognize(image);
-      return { text: String(result?.data?.text || ''), confidence: Number(result?.data?.confidence || 0) };
-    };
-
-    try {
-      setAadhaarBusy(true);
-      setAadhaarStatus('Reading front and back separately (English text)…');
-      const { createWorker } = await import('tesseract.js');
-      // English-only OCR is deliberate: ignore the first Hindi/regional-language
-      // name/address lines and extract the English versions requested.
-      const worker = await createWorker('eng');
-      try {
-        const frontImage = await prepareAadhaarImage(aadhaarFront);
-        const frontNumberImage = await prepareAadhaarImage(aadhaarFront, 'number');
-        const backImage = await prepareAadhaarImage(aadhaarBack);
-        // Tesseract workers are stateful and must not run multiple recognize()
-        // jobs concurrently: page-segmentation and character-whitelist settings
-        // can otherwise race between jobs and contaminate the other side's OCR.
-        const frontRead = await readText(worker, frontImage, 6);
-        const numberRead = await readText(worker, frontNumberImage, 6, '0123456789 ');
-        const backRead = await readText(worker, backImage, 6);
-
-        const frontLines = cleanLines(frontRead.text);
-        const backLines = cleanLines(backRead.text);
-
-        // DOB is taken only from a front-side line explicitly labelled DOB /
-        // Date of Birth. Do not confuse the issue date or a standalone year
-        // of birth with a complete date. The member form expects YYYY-MM-DD.
-        const normalizeAadhaarDob = (raw) => {
-          const match = String(raw || '').match(/\b(\d{1,2})[\/.\- ](\d{1,2})[\/.\- ](\d{4})\b/);
-          if (!match) return '';
-          const day = Number(match[1]);
-          const month = Number(match[2]);
-          const year = Number(match[3]);
-          const date = new Date(Date.UTC(year, month - 1, day));
-          if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return '';
-          return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        };
-        let dob = '';
-        const dobLabelIndex = frontLines.findIndex((line) => /\b(dob|date\s+of\s+birth)\b/i.test(line));
-        if (dobLabelIndex >= 0) {
-          const dobLine = frontLines[dobLabelIndex];
-          dob = normalizeAadhaarDob(dobLine);
-          if (!dob && frontLines[dobLabelIndex + 1]) dob = normalizeAadhaarDob(frontLines[dobLabelIndex + 1]);
-        }
-
-        // The Aadhaar number is read only from the bottom strip of the FRONT.
-        const numberDigits = String(numberRead.text || '').replace(/\D/g, '');
-        const numberCandidates = numberDigits.match(/\d{12}/g) || [];
-        const aadhaarNumber = numberCandidates.sort((a, b) => b.length - a.length)[0] || '';
-
-        const isFrontLabel = (line) =>
-          /(government|unique|identification|authority|uidai|aadhaar|male|female|dob|date of birth|year of birth|birth|enrolment|enrollment|issue date|download|www\.|help@|toll free|my aadhaar)/i.test(line)
-          || /\b\d{2}[/-]\d{2}[/-]\d{4}\b/.test(line)
-          || /\b(male|female)\b/i.test(line);
-
-        // Name: prefer a short English-script line in the identity area, before
-        // DOB/gender labels. Do not select labels, dates, or the address.
-        const nameCandidates = frontLines
-          .map((line) => line.replace(/^(?:name)\s*[:：-]\s*/i, '').trim())
-          .filter((line) => {
-            const words = line.split(/\s+/).filter(Boolean);
-            return words.length >= 2 && words.length <= 5
-              && /^[A-Za-z][A-Za-z .'-]*$/.test(line)
-              && line.length >= 4 && line.length <= 60
-              && !isFrontLabel(line)
-              && !/\d/.test(line)
-              && !/\b(address|s\/o|d\/o|w\/o|c\/o|dob|date|male|female)\b/i.test(line);
-          });
-        // Aadhaar front English name is generally the first plausible person-name
-        // line after the Government of India header. Avoid selecting "Government..."
-        // and prefer candidates nearest the DOB line.
-        let name = nameCandidates[0] || '';
-        const dobIndex = frontLines.findIndex((line) => /\b(dob|date of birth|year of birth)\b/i.test(line));
-        if (dobIndex > 0) {
-          const beforeDob = nameCandidates.filter((candidate) => {
-            const idx = frontLines.indexOf(candidate);
-            return idx >= 0 && idx < dobIndex;
-          });
-          if (beforeDob.length) name = beforeDob[beforeDob.length - 1];
-        }
-        name = name.replace(/\s{2,}/g, ' ').trim();
-
-        // Address: use English-only text from the BACK, beginning at the explicit
-        // "Address" label. Stop after the 6-digit PIN code; discard regional script.
-        const addressStart = backLines.findIndex((line) => /\baddress\b/i.test(line));
-        let addressLines = [];
-        if (addressStart >= 0) {
-          const first = backLines[addressStart].replace(/^.*?\baddress\b\s*[:：-]?\s*/i, '').trim();
-          if (first && /[A-Za-z]/.test(first)) addressLines.push(first);
-          for (const line of backLines.slice(addressStart + 1)) {
-            if (/^(mobile|phone|help|www\.|uidai|unique identification|government of india)/i.test(line)) break;
-            if (!/[A-Za-z]/.test(line)) continue;
-            addressLines.push(line);
-            if (/\b\d{6}\b/.test(line)) break;
-            if (addressLines.length >= 7) break;
-          }
-        }
-        const address = addressLines.join(', ')
-          .replace(/\s{2,}/g, ' ')
-          .replace(/,\s*,/g, ',')
-          .replace(/\s+,/g, ',')
-          .trim();
-
-        setForm((current) => ({
-          ...current,
-          ...(name ? { name } : {}),
-          ...(dob ? { dob } : {}),
-          ...(aadhaarNumber.length === 12 ? { gstinAadhaar: aadhaarNumber } : {}),
-          ...(address ? { address } : {}),
-        }));
-
-        const found = [name && 'English name', dob && 'Date of birth', aadhaarNumber.length === 12 && '12-digit Aadhaar number', address && 'English address'].filter(Boolean);
-        setAadhaarStatus(found.length
-          ? `Extracted: ${found.join(', ')}. Please verify every field against the original card before saving.`
-          : 'Could not reliably identify the fields. Use clear, straight photos and enter any missing details manually.');
-      } finally {
-        await worker.terminate();
-      }
-    } catch (error) {
-      console.error('Aadhaar OCR failed:', error);
-      setAadhaarStatus('OCR could not run. Check internet access for the English language data, or enter the details manually.');
-    } finally {
-      setAadhaarBusy(false);
-    }
-  };
 
   const update = (key, value) => {
     setForm((current) => {
@@ -11131,27 +10975,6 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
         </div>
       </div>
     )}
-    <div className="form-section-title">Fetch details from Aadhaar</div>
-    <div style={{ border: '1px solid #dbe5ef', borderRadius: '14px', padding: '14px', marginBottom: '16px', background: '#f8fbff' }}>
-      <div style={{ fontWeight: 750, color: '#243447', marginBottom: '6px' }}>Upload Aadhaar front and back</div>
-      <div style={{ color: '#64748b', fontSize: '12px', lineHeight: 1.55, marginBottom: '12px' }}>
-        Select clear images of both sides. OCR runs in this browser; the images are not uploaded to the gym server or saved in the member profile. Extracted details are suggestions—verify them against the original card before saving.
-      </div>
-      <div className="form-grid two">
-        <FormField label="Aadhaar front photo">
-          <input type="file" accept="image/*" onChange={(e) => { setAadhaarFront(e.target.files?.[0] || null); setAadhaarStatus(''); }} />
-        </FormField>
-        <FormField label="Aadhaar back photo">
-          <input type="file" accept="image/*" onChange={(e) => { setAadhaarBack(e.target.files?.[0] || null); setAadhaarStatus(''); }} />
-        </FormField>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginTop: '10px' }}>
-        <button type="button" className="btn btn-primary btn-sm" disabled={!aadhaarFront || !aadhaarBack || aadhaarBusy} onClick={readAadhaarImages}>{aadhaarBusy ? 'Reading Aadhaar…' : 'Fetch details from Aadhaar'}</button>
-        {(aadhaarFront || aadhaarBack) && <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setAadhaarFront(null); setAadhaarBack(null); setAadhaarStatus(''); }}>Clear images</button>}
-      </div>
-      {aadhaarStatus && <div role="status" style={{ marginTop: '10px', color: '#31506d', fontSize: '12px', lineHeight: 1.5 }}>{aadhaarStatus}</div>}
-      <div style={{ marginTop: '9px', color: '#8a5b16', fontSize: '11px', lineHeight: 1.5 }}>Privacy: Use only with the member’s informed consent. Do not retain Aadhaar photos. Review applicable UIDAI requirements and your organisation’s data-protection obligations.</div>
-    </div>
     <div className="form-section-title">Personal details</div>
 
     <div
@@ -12480,6 +12303,7 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
     memberIdFormat: { prefix: current.memberIdFormat?.prefix || 'PF', numberLength: Number(current.memberIdFormat?.numberLength || 4) },
     gymLatitude: current.gymLatitude || '',
     gymLongitude: current.gymLongitude || '',
+    customerRegistrationEnabled: Boolean(current.customerRegistrationEnabled),
     publicPage: {
       whatsappNumber: current.publicPage?.whatsappNumber || '', instagramUrl: current.publicPage?.instagramUrl || '', facebookUrl: current.publicPage?.facebookUrl || '', websiteUrl: current.publicPage?.websiteUrl || '',
       googleRating: current.publicPage?.googleRating || '5.0', googleReviewCount: (current.publicPage?.googleReviewCount && String(current.publicPage.googleReviewCount) !== '2') ? current.publicPage.googleReviewCount : '94', googleMapsUrl: current.publicPage?.googleMapsUrl || '', googleSearchUrl: current.publicPage?.googleSearchUrl || 'https://www.google.com/search?q=preface+fitness', googlePlaceName: current.publicPage?.googlePlaceName || current.gymName || 'Preface Fitness', googlePhone: current.publicPage?.googlePhone || '093692 79056', googleAddress: current.publicPage?.googleAddress || current.gymAddress || 'Preface Fitness, Nadan Mahal Rd. above Hdfc Bank, Yahiyaganj, Lucknow, Uttar Pradesh 226003', hoursText: current.publicPage?.hoursText || '6 AM - 11 PM', openingDays: Array.isArray(current.publicPage?.openingDays) ? current.publicPage.openingDays : ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
@@ -12520,6 +12344,7 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
       memberIdFormat: { prefix: current.memberIdFormat?.prefix || 'PF', numberLength: Number(current.memberIdFormat?.numberLength || 4) },
       gymLatitude: current.gymLatitude || '',
       gymLongitude: current.gymLongitude || '',
+      customerRegistrationEnabled: Boolean(current.customerRegistrationEnabled),
       publicPage: {
         whatsappNumber: current.publicPage?.whatsappNumber || '', instagramUrl: current.publicPage?.instagramUrl || '', facebookUrl: current.publicPage?.facebookUrl || '', websiteUrl: current.publicPage?.websiteUrl || '',
         googleRating: current.publicPage?.googleRating || '5.0', googleReviewCount: (current.publicPage?.googleReviewCount && String(current.publicPage.googleReviewCount) !== '2') ? current.publicPage.googleReviewCount : '94', googleMapsUrl: current.publicPage?.googleMapsUrl || '', googleSearchUrl: current.publicPage?.googleSearchUrl || 'https://www.google.com/search?q=preface+fitness', googlePlaceName: current.publicPage?.googlePlaceName || current.gymName || 'Preface Fitness', googlePhone: current.publicPage?.googlePhone || '093692 79056', googleAddress: current.publicPage?.googleAddress || current.gymAddress || 'Preface Fitness, Nadan Mahal Rd. above Hdfc Bank, Yahiyaganj, Lucknow, Uttar Pradesh 226003', hoursText: current.publicPage?.hoursText || '6 AM - 11 PM', openingDays: Array.isArray(current.publicPage?.openingDays) ? current.publicPage.openingDays : ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
@@ -12587,6 +12412,8 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
   const feedbackQrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&data=${encodeURIComponent(feedbackQrUrl)}`;
   const memberPortalUrl = `${PRODUCTION_APP_URL}?gym=${encodeURIComponent(data.gym?.id || PRODUCTION_GYM_ID)}#member-portal`;
   const memberPortalQrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&data=${encodeURIComponent(memberPortalUrl)}`;
+  const registrationUrl = `${PRODUCTION_APP_URL}?gym=${encodeURIComponent(data.gym?.id || PRODUCTION_GYM_ID)}#register`;
+  const registrationQrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&data=${encodeURIComponent(registrationUrl)}`;
   const openMemberPortalQr = () => { window.open(memberPortalQrImageUrl, '_blank', 'noopener,noreferrer'); showActionFeedback('Member Portal QR opened in a new tab.'); };
   const printMemberPortalQr = () => { const w = window.open('', '_blank', 'width=700,height=900'); if (!w) { showActionFeedback('Popup was blocked. Allow popups to print the Member Portal QR.', 'error'); return; } w.document.write(`<!doctype html><html><head><title>Member Portal QR</title><style>body{font-family:Arial,sans-serif;text-align:center;padding:40px;color:#17263b}img{width:360px;max-width:90vw}h1{font-size:28px}p{font-size:16px;color:#64748b}</style></head><body><h1>${String(form.gymName || 'Preface Fitness')}</h1><p>Scan to log in to your Member Portal</p><img src="${memberPortalQrImageUrl}" alt="Member Portal QR"/><p>Use your registered mobile/member ID and 6-digit PIN</p></body></html>`); w.document.close(); w.focus(); setTimeout(()=>w.print(),250); };
 
@@ -13308,6 +13135,22 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
           <div style={{marginTop:'12px',padding:'12px 14px',borderRadius:'12px',background:'#eef9f7',border:'1px solid #d3ece7',fontSize:'12px',color:'#3d6b66',lineHeight:1.5}}><strong>Cloud attendance:</strong> member check-ins are written to the shared Cloudflare database, so the permanent QR can be used from members' phones without requiring the owner's browser to be open.</div>
         </section>
 
+<section className="card">
+          <div className="card-header"><div><h3>Customer Self Registration QR</h3><p>Customers can fill their own registration form. Submission is controlled by the switch below.</p></div><QrCode size={21}/></div>
+          <div style={{display:'grid',gridTemplateColumns:'180px 1fr',gap:'22px',alignItems:'center'}}>
+            <div style={{border:'1px solid #dce5eb',borderRadius:'16px',padding:'12px',background:'#fff',textAlign:'center'}}><img src={registrationQrImageUrl} alt="Customer Registration QR" style={{width:'100%',maxWidth:'180px',display:'block',margin:'0 auto'}} /></div>
+            <div>
+              <label style={{display:'flex',alignItems:'center',gap:12,fontWeight:800,color:'#25364b',marginBottom:10}}>
+                <input type="checkbox" checked={Boolean(form.customerRegistrationEnabled)} onChange={async (e)=>{const enabled=e.target.checked;setForm(f=>({...f,customerRegistrationEnabled:enabled}));setData(d=>({...d,settings:{...(d.settings||{}),customerRegistrationEnabled:enabled}}));try{await saveCloudSettings({customerRegistrationEnabled:enabled});showActionFeedback(enabled?'Customer registration enabled.':'Customer registration disabled.');}catch(err){setForm(f=>({...f,customerRegistrationEnabled:!enabled}));setData(d=>({...d,settings:{...(d.settings||{}),customerRegistrationEnabled:!enabled}}));showActionFeedback(err.message||'Could not update registration setting.','error');}}}/>
+                Allow customer registration
+                <span style={{fontSize:12,fontWeight:800,color:form.customerRegistrationEnabled?'#07856f':'#b45309'}}>{form.customerRegistrationEnabled?'ON':'OFF'}</span>
+              </label>
+              <p style={{fontSize:13,lineHeight:1.6,color:'#687789',margin:'0 0 10px'}}>When toggled off, customer cannot submit a registration form.</p>
+              <div style={{fontSize:12,color:'#64748b',wordBreak:'break-all',padding:10,borderRadius:9,background:'#f7fafc'}}>{registrationUrl}</div>
+              <div style={{display:'flex',gap:10,flexWrap:'wrap',marginTop:12}}><button className="btn btn-primary" onClick={()=>window.open(registrationQrImageUrl,'_blank','noopener,noreferrer')}><QrCode size={17}/> Open Registration QR</button><button className="btn btn-secondary" onClick={()=>{const w=window.open('','_blank','width=700,height=900');if(!w)return;w.document.write(`<html><body style="font-family:Arial;text-align:center;padding:35px"><h1>${String(form.gymName||'Gym')}</h1><p>Scan to register as a member</p><img style="width:360px" src="${registrationQrImageUrl}"/><p>Customer Self Registration</p></body></html>`);w.document.close();w.print();}}><Printer size={17}/> Print QR</button></div>
+            </div>
+          </div>
+        </section>
 <section className="card">
           <div className="card-header"><div><h3>Customer Feedback QR</h3><p>Place this QR at the gate, reception or workout floor so any customer can submit feedback or a complaint without logging in.</p></div><QrCode size={21} /></div>
           <div style={{display:'grid',gridTemplateColumns:'180px 1fr',gap:'22px',alignItems:'center'}}>

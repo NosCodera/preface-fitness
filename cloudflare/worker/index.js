@@ -88,6 +88,46 @@ export default {
     delete gym.public_config_json;
     return response({gym,settings:safeSettings,membershipPlans:plans.results||[]},200,headers);
    }
+   if(path==='/api/public/registration-info' && req.method==='GET'){
+    const gymId=String(url.searchParams.get('gymId')||''); if(!gymId) return response({error:'gymId is required'},400,headers);
+    const gym=await env.DB.prepare('SELECT id,name FROM gyms WHERE id=?').bind(gymId).first(); if(!gym) return response({error:'Gym not found'},404,headers);
+    const setting=await env.DB.prepare("SELECT setting_value_json FROM app_settings WHERE gym_id=? AND setting_key='customerRegistrationEnabled'").bind(gymId).first();
+    let enabled=false; try{enabled=JSON.parse(setting?.setting_value_json||'false')===true}catch{}
+    const plans=await env.DB.prepare('SELECT name,months,price FROM membership_plans WHERE gym_id=? ORDER BY months ASC').bind(gymId).all();
+    return response({gym,enabled,plans:plans.results||[]},200,headers);
+   }
+   if(path==='/api/public/register' && req.method==='POST'){
+    const b=await req.json(); const gymId=String(b.gymId||''); if(!gymId) return response({error:'Invalid gym reference.'},400,headers);
+    const gym=await env.DB.prepare('SELECT id FROM gyms WHERE id=?').bind(gymId).first(); if(!gym) return response({error:'Invalid gym reference.'},404,headers);
+    const setting=await env.DB.prepare("SELECT setting_value_json FROM app_settings WHERE gym_id=? AND setting_key='customerRegistrationEnabled'").bind(gymId).first(); let enabled=false; try{enabled=JSON.parse(setting?.setting_value_json||'false')===true}catch{}
+    if(!enabled) return response({error:'Online registration is currently disabled by the gym.'},403,headers);
+    const name=String(b.name||'').trim().slice(0,120)||'Unnamed Member'; const phone=String(b.phone||'').replace(/[^0-9+]/g,'').slice(0,20)||null;
+    const attendanceInput=String(b.attendanceNumber||'').trim().slice(0,40); const id=uid();
+    if(attendanceInput){const exists=await env.DB.prepare('SELECT id FROM members WHERE gym_id=? AND attendance_number=? LIMIT 1').bind(gymId,attendanceInput).first();if(exists)return response({error:'This attendance number is already in use. Leave it blank or choose another.'},409,headers);}
+    let plan=null; const planName=String(b.planName||'').trim(); if(planName) plan=await env.DB.prepare('SELECT id,name,months,price FROM membership_plans WHERE gym_id=? AND name=? COLLATE NOCASE LIMIT 1').bind(gymId,planName).first();
+    const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date()); let expiry=null;
+    if(plan?.months){const d=new Date(`${today}T12:00:00Z`);d.setUTCMonth(d.getUTCMonth()+Number(plan.months));expiry=d.toISOString().slice(0,10);}
+    const pin=String(b.pin||'').trim(); if(pin&&!/^\d{6}$/.test(pin))return response({error:'PIN must contain exactly six digits.'},400,headers);
+    const amountRaw=String(b.paymentAmount??'').trim(); const paid=amountRaw!==''&&Number.isFinite(Number(amountRaw))?Math.max(0,Math.min(10000000,Number(amountRaw))):0;
+    const bodyMeasurements=b.bodyMeasurements&&typeof b.bodyMeasurements==='object'?b.bodyMeasurements:{};
+    const medical=String(b.medicalConditions||'').trim().slice(0,2000);
+    const aadhaarDigits=String(b.aadhaarNumber||'').replace(/\D/g,''); const maskedAadhaar=aadhaarDigits.length===12?`XXXX-XXXX-${aadhaarDigits.slice(-4)}`:null;
+    const metadata={bodyMeasurements,medicalConditions:medical, ...(maskedAadhaar?{aadhaarNumberMasked:maskedAadhaar}:{})};
+    const memberMeta={medicalConditions:medical?[medical]:[],medicalOther:'',surgeryDetails:'',additionalMedicalNotes:'',referralOther:'',chest:String(bodyMeasurements.chest||''),shoulder:'',biceps:String(bodyMeasurements.arms||''),forearms:'',waist:String(bodyMeasurements.waist||''),hips:String(bodyMeasurements.hips||''),thighs:String(bodyMeasurements.thighs||''),calves:'',neck:'',gstinAadhaar:'',billingState:'',billingStateCode:'',memberInvoiceNumber:''};
+    const memberNotes=`<!--PREFACE_MEMBER_META:${JSON.stringify(memberMeta)}-->`;
+    const memberFormatRow=await env.DB.prepare("SELECT setting_value_json FROM app_settings WHERE gym_id=? AND setting_key='memberIdFormat'").bind(gymId).first(); let memberFormat={prefix:'PF',numberLength:4};try{memberFormat={...memberFormat,...JSON.parse(memberFormatRow?.setting_value_json||'{}')}}catch{}
+    const existingCodes=await env.DB.prepare("SELECT member_code FROM members WHERE gym_id=? AND member_code LIKE ?").bind(gymId,`${String(memberFormat.prefix||'PF')}-%`).all(); let maxCode=0; for(const r of existingCodes.results||[]){const m=String(r.member_code||'').match(/(\d+)$/);if(m)maxCode=Math.max(maxCode,Number(m[1]));}
+    const memberCode=`${String(memberFormat.prefix||'PF')}-${String(maxCode+1).padStart(Math.min(8,Math.max(1,Number(memberFormat.numberLength)||4)),'0')}`;
+    let attendanceNumber=attendanceInput; if(!attendanceNumber){const maxRow=await env.DB.prepare("SELECT MAX(CAST(attendance_number AS INTEGER)) AS n FROM members WHERE gym_id=? AND attendance_number GLOB '[0-9]*'").bind(gymId).first();attendanceNumber=String(Number(maxRow?.n||0)+1);}
+    const columns=['id','gym_id','member_code','attendance_number','name','phone','date_of_birth','gender','address','diet_preference','plan_name','membership_plan_id','start_date','expiry_date','status','visits','amount','paid','due','metadata_json','notes','created_at','updated_at','height','weight'];
+    const vals=[id,gymId,memberCode,attendanceNumber,name,phone,String(b.dob||'').slice(0,10)||null,String(b.gender||'').slice(0,30)||null,String(b.address||'').slice(0,500)||null,String(b.dietPreference||'').slice(0,40)||null,plan?.name||planName||null,plan?.id||null,today,expiry,'Active',0,Number(plan?.price||0),paid,Math.max(0,Number(plan?.price||0)-paid),JSON.stringify(metadata),memberNotes,new Date().toISOString(),new Date().toISOString(),String(b.height||'').slice(0,20)||null,String(b.weight||'').slice(0,20)||null];
+    await env.DB.prepare(`INSERT INTO members(${columns.join(',')}) VALUES(${columns.map(()=>'?').join(',')})`).bind(...vals).run();
+    if(pin) {const bcrypt=await import('bcryptjs');const hash=await bcrypt.hash(pin,10);await env.DB.prepare('INSERT INTO member_portal_credentials(member_id,gym_id,pin_hash,created_at,updated_at) VALUES(?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)').bind(id,gymId,hash).run();}
+    let paymentId=null; if(paid>0){paymentId=uid();await env.DB.prepare("INSERT INTO payments(id,gym_id,member_id,member_name,amount,type,mode,payment_date,notes,created_at,payment_mode,payment_type) VALUES(?,?,?,?,?,'Membership','Cash',?,'Customer self-registration',CURRENT_TIMESTAMP,'Cash','Membership')").bind(paymentId,gymId,id,name,paid,today).run();await env.DB.prepare("INSERT INTO change_events(gym_id,table_name,record_id,operation) VALUES(?,?,?,'upsert')").bind(gymId,'payments',paymentId).run();}
+    await env.DB.prepare("INSERT INTO change_events(gym_id,table_name,record_id,operation) VALUES(?,?,?,'upsert')").bind(gymId,'members',id).run();
+    await publish(env,gymId,{type:'data_changed',gymId,table:'members',ids:[id],at:Date.now()}); if(paymentId)await publish(env,gymId,{type:'data_changed',gymId,table:'payments',ids:[paymentId],at:Date.now()});
+    return response({success:true,memberId:id,memberCode,attendanceNumber},201,headers);
+   }
    if(path==='/api/public/feedback' && req.method==='POST'){
     const b=await req.json(); const gymId=String(b.gymId||''); const feedback=String(b.feedback||b.message||'').trim(); const memberName=String(b.memberName||'').trim(); const category=String(b.category||'General').trim(); const priority=String(b.priority||'medium').trim().toLowerCase();
     if(!gymId||!feedback) return response({error:'Gym reference and feedback are required.'},400,headers);
