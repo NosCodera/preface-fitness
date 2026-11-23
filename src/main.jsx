@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import prefaceFitnessLogo from './assets/preface-logo.jpg';
 import {
   Activity,
   BarChart3,
@@ -5341,6 +5342,8 @@ function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
     { name: 'Shower', description: 'Clean, convenient shower facilities to freshen up before heading back to your day.', image: 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=1000&q=85' },
   ];
 
+  const publicFacilityImages = publicSettings.publicPage?.facilityImages || {};
+  const facilityImageKey = (name) => String(name || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const facilityNames = new Set(baseFacilities.map((item) => String(item || '').trim().toLowerCase()));
   const usedFacilityImages = new Set();
   const facilities = [
@@ -5352,10 +5355,10 @@ function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
       return {
         name: cleanName,
         description: 'Designed to make every training session simple, focused and effective.',
-        image: mappedImage,
+        image: publicFacilityImages[facilityImageKey(cleanName)] || mappedImage,
       };
     }),
-    ...additionalFacilities.filter((item) => !facilityNames.has(item.name.toLowerCase())),
+    ...additionalFacilities.filter((item) => !facilityNames.has(item.name.toLowerCase())).map((item) => ({ ...item, image: publicFacilityImages[facilityImageKey(item.name)] || item.image })),
   ];
   const publicPage = publicSettings.publicPage || {};
   const publicNotice = publicSettings.notice || {};
@@ -5402,12 +5405,13 @@ function PublicGymIntroPage({ settings = {}, gymId = PRODUCTION_GYM_ID }) {
   const openingDays = Array.isArray(publicPage.openingDays) ? publicPage.openingDays : ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   const openingDaysText = openingDays.length === 7 ? 'Every day' : openingDays.length ? openingDays.join(', ') : 'Closed all week';
   const googleSearchUrl = publicPage.googleSearchUrl || 'https://www.google.com/search?q=preface+fitness';
-  const gallery = [
+  const defaultGallery = [
     'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=1200&q=85',
     'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?auto=format&fit=crop&w=1200&q=85',
     'https://images.unsplash.com/photo-1571902943202-507ec2618e8f?auto=format&fit=crop&w=1200&q=85',
     'https://images.unsplash.com/photo-1540497077202-7c8a3999166f?auto=format&fit=crop&w=1200&q=85',
   ];
+  const gallery = defaultGallery.map((fallback, index) => String(publicPage.galleryImages?.[index] || fallback));
 
   return (
     <div className="gym-public-page gym-public-dark-v2" style={{ background: '#080b12', color: '#eef2ff', minHeight: '100vh', width: '100%', overflowX: 'hidden' }}>
@@ -7678,18 +7682,87 @@ function PublicMemberRegistrationPage({ gymId }) {
   const [form,setForm]=useState({name:'',phone:'',gender:'',dob:'',dietPreference:'',address:'',attendanceNumber:'',pin:'',planName:'',paymentAmount:'',height:'',weight:'',aadhaarNumber:'',medicalConditions:'',bodyMeasurements:{chest:'',waist:'',hips:'',arms:'',thighs:'',bodyFat:''}});
   useEffect(()=>{let alive=true;fetch(`${apiBase}/api/public/registration-info?gymId=${encodeURIComponent(gymId)}`).then(r=>r.json().then(j=>({ok:r.ok,j}))).then(({ok,j})=>{if(alive){if(!ok)throw new Error(j.error||'Unable to load registration form');setInfo(j);}}).catch(e=>alive&&setError(e.message));return()=>{alive=false};},[apiBase,gymId]);
   const update=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const submit=async(e)=>{e.preventDefault();setBusy(true);setError('');try{const res=await fetch(`${apiBase}/api/public/register`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({gymId,...form})});const payload=await res.json();if(!res.ok)throw new Error(payload.error||'Registration could not be submitted');setDone(payload); }catch(err){setError(err.message||'Registration failed');}finally{setBusy(false)}};
-  const field=(label,key,type='text',placeholder='')=><label style={{display:'grid',gap:6,fontSize:13,fontWeight:700,color:'#334155'}}>{label}<input type={type} value={form[key]} onChange={e=>update(key,e.target.value)} placeholder={placeholder} style={{width:'100%',padding:'12px',border:'1px solid #dbe3ec',borderRadius:10,fontSize:15}}/></label>;
+  const submit=async(e)=>{e.preventDefault();setBusy(true);setError('');try{const res=await fetch(`${apiBase}/api/public/register`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({gymId,...form})});const payload=await res.json();if(!res.ok)throw new Error(payload.error||'Registration could not be submitted');setDone(payload);}catch(err){setError(err.message||'Registration failed');}finally{setBusy(false)}};
+  const inputStyle={width:'100%',minWidth:0,padding:'13px 14px',border:'1px solid #dbe4f0',borderRadius:12,fontSize:15,color:'#172b4d',background:'#fff',outline:'none',boxShadow:'0 2px 8px rgba(22,44,88,.035)'};
+  const labelStyle={display:'grid',gap:7,fontSize:13,fontWeight:800,color:'#263957'};
+  const field=(label,key,type='text',placeholder='')=><label style={labelStyle}>{label}<input type={type} value={form[key]} onChange={e=>update(key,e.target.value)} placeholder={placeholder} style={inputStyle}/></label>;
+  const selectField=(label,key,options)=><label style={labelStyle}>{label}<select value={form[key]} onChange={e=>update(key,e.target.value)} style={inputStyle}><option value="">Choose if applicable</option>{options.map(v=><option key={v} value={v}>{v}</option>)}</select></label>;
   if(!apiBase)return <div style={{padding:30}}>Registration service is not configured. Please contact the gym.</div>;
-  if(done)return <div style={{maxWidth:560,margin:'8vh auto',padding:28,fontFamily:'Arial',textAlign:'center',border:'1px solid #dce7ee',borderRadius:18}}><h2>Registration submitted</h2><p>Your details have been sent to the gym.</p><strong>Registration reference: {done.memberCode||done.memberId}</strong><p>The gym team will confirm your membership and payment.</p></div>;
-  if(error&&!info)return <div style={{maxWidth:560,margin:'8vh auto',padding:24,fontFamily:'Arial'}}>{error}</div>;
-  if(info?.enabled===false)return <div style={{maxWidth:560,margin:'8vh auto',padding:28,fontFamily:'Arial',textAlign:'center',border:'1px solid #dce7ee',borderRadius:18}}><h2>Registration currently unavailable</h2><p>The gym is not accepting online registrations right now. Please contact the reception.</p></div>;
-  return <div style={{maxWidth:760,margin:'24px auto',padding:20,fontFamily:'Arial',color:'#1e293b'}}><div style={{background:'#087f73',color:'#fff',padding:22,borderRadius:'18px 18px 0 0'}}><h1 style={{margin:0,fontSize:25}}>{info?.gym?.name||'Gym'} – Member Registration</h1><p style={{margin:'8px 0 0',opacity:.9}}>Fill any details you wish to share. Every field is optional.</p></div><form onSubmit={submit} style={{padding:20,border:'1px solid #e2e8f0',borderTop:0,borderRadius:'0 0 18px 18px',display:'grid',gap:18}}>
-    <h3 style={{margin:0}}>Personal details</h3><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:14}}>{field('Full name','name')}{field('Mobile number','phone','tel')}{field('Date of birth','dob','date')}{<label style={{display:'grid',gap:6,fontSize:13,fontWeight:700}}>Gender<select value={form.gender} onChange={e=>update('gender',e.target.value)} style={{padding:12,border:'1px solid #dbe3ec',borderRadius:10}}><option value="">Prefer not to say</option><option>Male</option><option>Female</option><option>Other</option></select></label>}{<label style={{display:'grid',gap:6,fontSize:13,fontWeight:700}}>Diet preference<select value={form.dietPreference} onChange={e=>update('dietPreference',e.target.value)} style={{padding:12,border:'1px solid #dbe3ec',borderRadius:10}}><option value="">Not specified</option><option>Veg</option><option>Non-Veg</option><option>Eggetarian</option><option>Vegan</option></select></label>}{field('Address','address')}</div>
-    <h3 style={{margin:0}}>Membership</h3><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:14}}>{<label style={{display:'grid',gap:6,fontSize:13,fontWeight:700}}>Membership plan<select value={form.planName} onChange={e=>update('planName',e.target.value)} style={{padding:12,border:'1px solid #dbe3ec',borderRadius:10}}><option value="">Not selected</option>{(info?.plans||[]).map(p=><option key={p.name} value={p.name}>{p.name} {p.price!=null?`— ₹${p.price}`:''}</option>)}</select></label>}{field('Attendance number (optional)','attendanceNumber')}{field('Set 6-digit Member Portal PIN','pin','password','Leave blank to set later')}{field('Payment amount (optional)','paymentAmount','number','0')}</div>
-    <h3 style={{margin:0}}>Fitness & health (optional)</h3><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:14}}>{field('Height (cm)','height')}{field('Weight (kg)','weight')}{field('Aadhaar number (optional)','aadhaarNumber')}{field('Medical conditions','medicalConditions')}</div><h4 style={{margin:'0'}}>Body measurements</h4><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:14}}>{['chest','waist','hips','arms','thighs','bodyFat'].map(k=><label key={k} style={{display:'grid',gap:6,fontSize:13,fontWeight:700}}>{k[0].toUpperCase()+k.slice(1)}<input value={form.bodyMeasurements[k]} onChange={e=>setForm(f=>({...f,bodyMeasurements:{...f.bodyMeasurements,[k]:e.target.value}}))} style={{padding:12,border:'1px solid #dbe3ec',borderRadius:10}}/></label>)}</div>
-    {error&&<div style={{color:'#b91c1c',fontSize:13}}>{error}</div>}<button disabled={busy||info?.enabled!==true} style={{padding:14,border:0,borderRadius:11,background:'#087f73',color:'#fff',fontSize:16,fontWeight:800,cursor:'pointer'}}>{busy?'Submitting…':'Submit registration'}</button><small style={{color:'#64748b'}}>All fields are optional. Please share only information you are comfortable providing.</small>
-  </form></div>;
+  if(done)return <div className="selfreg-page"><div className="selfreg-success"><div className="selfreg-success-icon">✓</div><h2>Registration submitted!</h2><p>Your details have been securely sent to the gym team.</p><strong>Registration reference: {done.memberCode||done.memberId}</strong><p>The gym team will confirm your membership and payment.</p></div></div>;
+  if(error&&!info)return <div className="selfreg-page"><div className="selfreg-status">{error}</div></div>;
+  if(info?.enabled===false)return <div className="selfreg-page"><div className="selfreg-success"><div className="selfreg-success-icon">!</div><h2>Registration is currently closed</h2><p>The gym is not accepting online registrations right now. Please contact reception.</p></div></div>;
+  return <div className="selfreg-page"><style>{`
+    .selfreg-page{min-height:100vh;padding:30px 16px 60px;background:radial-gradient(circle at 5% 4%,rgba(38,104,235,.20),transparent 30%),radial-gradient(circle at 96% 8%,rgba(15,184,155,.20),transparent 30%),linear-gradient(145deg,#f4f7ff 0%,#eaf8f7 52%,#fff7ed 100%);font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;color:#172b4d}
+    .selfreg-shell{width:100%;max-width:960px;margin:0 auto;border:1px solid rgba(255,255,255,.9);border-radius:30px;overflow:hidden;background:rgba(255,255,255,.96);box-shadow:0 26px 90px rgba(28,55,102,.16);backdrop-filter:blur(16px)}
+    .selfreg-hero{padding:30px clamp(20px,5vw,48px);color:white;background:linear-gradient(118deg,#071c46 0%,#075f91 48%,#078a79 100%);position:relative;overflow:hidden}
+    .selfreg-hero:after{content:'';position:absolute;width:280px;height:280px;border:1px solid rgba(255,255,255,.17);border-radius:50%;right:-65px;top:-135px;box-shadow:0 0 0 25px rgba(255,255,255,.045),0 0 0 55px rgba(255,255,255,.035)}
+    .selfreg-brand{position:relative;z-index:2;display:flex;align-items:center;gap:15px;margin-bottom:18px}.selfreg-logo{width:76px;height:76px;flex:0 0 76px;object-fit:cover;border-radius:19px;border:2px solid rgba(255,255,255,.82);box-shadow:0 8px 24px rgba(0,0,0,.22);background:#10131b}.selfreg-brand-copy{min-width:0}.selfreg-brand-name{font-size:12px;font-weight:900;letter-spacing:2px;text-transform:uppercase;color:#d7f7ff}.selfreg-kicker{font-size:11px;letter-spacing:2px;font-weight:900;text-transform:uppercase;opacity:.88}.selfreg-hero h1{position:relative;z-index:1;margin:8px 0 7px;font-size:clamp(25px,4vw,36px);letter-spacing:-.8px}.selfreg-hero p{position:relative;z-index:1;margin:0;color:rgba(255,255,255,.9);font-size:14px;line-height:1.65;max-width:650px}
+    .selfreg-form{box-sizing:border-box;width:100%;padding:clamp(18px,4vw,38px);display:grid;gap:20px}.selfreg-form *{box-sizing:border-box;min-width:0}.selfreg-section{box-sizing:border-box;width:100%;min-width:0;padding:clamp(15px,2.5vw,21px);border:1px solid #e2eaf5;border-radius:20px;background:linear-gradient(135deg,#fff 0%,#f8fbff 100%);box-shadow:0 7px 24px rgba(33,59,99,.055)}
+    .selfreg-section-head{display:flex;align-items:center;gap:11px;margin:0 0 17px}.selfreg-section-icon{width:37px;height:37px;border-radius:12px;display:grid;place-items:center;color:#fff;font-size:18px;background:linear-gradient(135deg,#3779e8,#17a6a0);box-shadow:0 6px 14px rgba(55,121,232,.2)}.selfreg-section h3{margin:0;font-size:17px;letter-spacing:-.25px}.selfreg-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}.selfreg-grid.three{grid-template-columns:repeat(3,minmax(0,1fr))}.selfreg-grid.four{grid-template-columns:repeat(4,minmax(0,1fr))}
+    .selfreg-input:focus,.selfreg-form input:focus,.selfreg-form select:focus,.selfreg-form textarea:focus{border-color:#239baf!important;box-shadow:0 0 0 4px rgba(35,155,175,.12)!important;outline:none}.selfreg-terms{padding:20px 22px;border:1px solid #e2eaf5;border-radius:18px;background:linear-gradient(135deg,#f7faff,#f0fbf8);color:#53647d}.selfreg-terms h3{margin:0 0 12px;color:#142d50;font-size:15px;letter-spacing:.3px}.selfreg-terms ol{margin:0;padding-left:21px;display:grid;gap:8px;font-size:12px;line-height:1.6}.selfreg-terms li{padding-left:3px}
+    .selfreg-submit{width:100%;padding:16px;border:0;border-radius:15px;color:#fff;font-size:17px;font-weight:900;letter-spacing:.1px;background:linear-gradient(100deg,#087b9c,#078d80,#16a477);box-shadow:0 12px 26px rgba(8,132,133,.22);cursor:pointer;transition:transform .18s,box-shadow .18s}.selfreg-submit:hover{transform:translateY(-2px);box-shadow:0 16px 32px rgba(8,132,133,.28)}.selfreg-submit:disabled{opacity:.65;cursor:wait;transform:none}.selfreg-note{margin:0;text-align:center;color:#71819a;font-size:12px;line-height:1.6}.selfreg-error{padding:12px 14px;border-radius:12px;color:#a52642;background:#fff0f3;border:1px solid #ffd3dc;font-size:13px;font-weight:700}.selfreg-success{max-width:600px;margin:9vh auto;padding:42px 28px;text-align:center;border-radius:26px;background:white;box-shadow:0 24px 70px rgba(39,61,105,.15)}.selfreg-success-icon{width:58px;height:58px;margin:0 auto 16px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(135deg,#0b9b85,#4bc9a2);color:white;font-size:30px;font-weight:900}.selfreg-success h2{font-size:28px;margin:0 0 10px}.selfreg-success p{color:#66758c;line-height:1.6}.selfreg-success strong{display:inline-block;padding:12px 16px;border-radius:12px;background:#eef8ff;color:#1766a6}
+    @media(max-width:650px){.selfreg-page{padding:12px 9px 28px}.selfreg-shell{border-radius:20px}.selfreg-grid,.selfreg-grid.three,.selfreg-grid.four{grid-template-columns:repeat(2,minmax(0,1fr))}.selfreg-section{padding:15px}.selfreg-hero{padding:24px 19px}.selfreg-logo{width:64px;height:64px;flex-basis:64px;border-radius:16px}}
+    @media(max-width:430px){.selfreg-grid,.selfreg-grid.three,.selfreg-grid.four{grid-template-columns:1fr}}
+
+    /* Final registration-page layout hardening: isolate this public form from
+       the dashboard's global form/table styles, which previously caused
+       measurement inputs to overflow and overlap. */
+    .selfreg-page .selfreg-shell{width:min(100%,1040px)!important;max-width:1040px!important;margin:0 auto!important;overflow:hidden!important;border-radius:28px!important}
+    .selfreg-page .selfreg-hero{padding:clamp(24px,4vw,42px)!important;background:linear-gradient(120deg,#101b3d 0%,#174f83 48%,#078b7b 100%)!important}
+    .selfreg-page .selfreg-brand{display:flex!important;align-items:center!important;gap:16px!important;margin:0 0 22px!important}
+    .selfreg-page .selfreg-logo{display:block!important;width:82px!important;height:82px!important;flex:0 0 82px!important;object-fit:contain!important;padding:5px!important;border-radius:20px!important;background:#fff!important;border:2px solid rgba(255,255,255,.8)!important;box-shadow:0 12px 28px rgba(0,0,0,.24)!important}
+    .selfreg-page .selfreg-brand-name{font-size:14px!important;letter-spacing:2.4px!important;font-weight:950!important}
+    .selfreg-page .selfreg-kicker{font-size:12px!important;letter-spacing:1.2px!important}
+    .selfreg-page .selfreg-hero h1{font-size:clamp(27px,4vw,39px)!important;line-height:1.12!important;margin:8px 0 10px!important}
+    .selfreg-page .selfreg-hero p{font-size:15px!important;line-height:1.7!important}
+    .selfreg-page .selfreg-form{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:22px!important;width:100%!important;padding:clamp(16px,3.5vw,38px)!important}
+    .selfreg-page .selfreg-section{display:block!important;width:100%!important;min-width:0!important;padding:clamp(16px,2.5vw,24px)!important;border-radius:20px!important;border:1px solid #dce7f5!important;background:linear-gradient(145deg,#fff 0%,#f8fbff 100%)!important;box-shadow:0 9px 26px rgba(35,61,105,.065)!important}
+    .selfreg-page .selfreg-section-head{display:flex!important;align-items:center!important;margin:0 0 20px!important}
+    .selfreg-page .selfreg-section h3{font-size:19px!important;font-weight:900!important;color:#172b4d!important}
+    .selfreg-page .selfreg-grid,
+    .selfreg-page .selfreg-grid.three,
+    .selfreg-page .selfreg-grid.four{display:grid!important;width:100%!important;min-width:0!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;align-items:start!important;gap:18px!important}
+    .selfreg-page .selfreg-grid.four{grid-template-columns:repeat(3,minmax(0,1fr))!important}
+    .selfreg-page .selfreg-grid > label{display:flex!important;flex-direction:column!important;align-items:stretch!important;justify-content:flex-start!important;gap:8px!important;width:100%!important;min-width:0!important;max-width:100%!important;font-size:13px!important;line-height:1.35!important;font-weight:850!important;color:#263957!important}
+    .selfreg-page .selfreg-form input,
+    .selfreg-page .selfreg-form select,
+    .selfreg-page .selfreg-form textarea,
+    .selfreg-page .selfreg-grid > label > input{display:block!important;box-sizing:border-box!important;width:100%!important;min-width:0!important;max-width:100%!important;height:52px!important;min-height:52px!important;margin:0!important;padding:0 15px!important;border:1px solid #d6e1ef!important;border-radius:13px!important;background:#fff!important;color:#182b49!important;font:600 15px/1.3 Inter,system-ui,sans-serif!important;box-shadow:0 3px 10px rgba(25,49,86,.035)!important}
+    .selfreg-page .selfreg-form input:focus,
+    .selfreg-page .selfreg-form select:focus{border-color:#0b9c9a!important;box-shadow:0 0 0 4px rgba(11,156,154,.13)!important;outline:none!important}
+    .selfreg-page .selfreg-section-icon{width:40px!important;height:40px!important;flex:0 0 40px!important;border-radius:13px!important;background:linear-gradient(135deg,#426ff0,#09a68e)!important}
+    .selfreg-page .selfreg-submit{min-height:58px!important;border-radius:15px!important;font-size:18px!important;background:linear-gradient(100deg,#1469c5 0%,#087f9d 48%,#07977e 100%)!important;box-shadow:0 12px 26px rgba(8,111,153,.22)!important}
+    .selfreg-page .selfreg-terms{padding:22px 24px!important;border-radius:18px!important;background:linear-gradient(135deg,#f1f6ff,#effbf8)!important;border:1px solid #dce8f3!important}
+    .selfreg-page .selfreg-terms h3{font-size:16px!important;font-weight:950!important;color:#17365c!important}
+    .selfreg-page .selfreg-terms ol{font-size:13px!important;line-height:1.7!important;gap:9px!important}
+    .selfreg-page .selfreg-note{text-align:center!important;font-size:13px!important}
+    @media(max-width:700px){
+      .selfreg-page .selfreg-grid,
+      .selfreg-page .selfreg-grid.three{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+      .selfreg-page .selfreg-grid.four{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+      .selfreg-page .selfreg-logo{width:68px!important;height:68px!important;flex-basis:68px!important}
+    }
+    @media(max-width:460px){
+      .selfreg-page .selfreg-grid,
+      .selfreg-page .selfreg-grid.three,
+      .selfreg-page .selfreg-grid.four{grid-template-columns:minmax(0,1fr)!important}
+      .selfreg-page .selfreg-form{padding:13px!important;gap:15px!important}
+      .selfreg-page .selfreg-section{padding:15px!important}
+      .selfreg-page .selfreg-hero{padding:22px 17px!important}
+      .selfreg-page .selfreg-brand{gap:12px!important}
+      .selfreg-page .selfreg-logo{width:60px!important;height:60px!important;flex-basis:60px!important}
+    }
+  `}</style>
+    <div className="selfreg-shell"><header className="selfreg-hero"><div className="selfreg-brand"><img className="selfreg-logo" src={prefaceFitnessLogo} alt="Preface Fitness logo"/><div className="selfreg-brand-copy"><div className="selfreg-brand-name">Preface Fitness</div><div className="selfreg-kicker">Welcome • Start your fitness journey</div></div></div><h1>{info?.gym?.name||'Gym'} – Member Registration</h1><p>Share only the details you are comfortable providing. Every field is optional and you can leave any section blank.</p></header>
+      <form className="selfreg-form" onSubmit={submit}>
+        <section className="selfreg-section"><div className="selfreg-section-head"><span className="selfreg-section-icon">♙</span><h3>Personal details</h3></div><div className="selfreg-grid">{field('Full name','name')}{field('Mobile number','phone','tel')}{field('Date of birth','dob','date')}{selectField('Gender','gender',['Male','Female','Other'])}{selectField('Diet preference','dietPreference',['Veg','Non-Veg','Eggetarian','Vegan'])}{field('Address','address')}</div></section>
+        <section className="selfreg-section"><div className="selfreg-section-head"><span className="selfreg-section-icon">✦</span><h3>Membership & payment</h3></div><div className="selfreg-grid">{selectField('Membership plan','planName',(info?.plans||[]).map(p=>p.name))}{field('Attendance number (optional)','attendanceNumber')}{field('Set 6-digit Member Portal PIN','pin','password','Leave blank to set later')}{field('Payment amount (optional)','paymentAmount','number','0')}</div></section>
+        <section className="selfreg-section"><div className="selfreg-section-head"><span className="selfreg-section-icon">↗</span><h3>Fitness & health</h3></div><div className="selfreg-grid three">{field('Height (cm)','height','number')}{field('Weight (kg)','weight','number')}{field('Aadhaar number (optional)','aadhaarNumber')}</div><div style={{marginTop:15}}>{field('Medical conditions','medicalConditions')}</div></section>
+        <section className="selfreg-section"><div className="selfreg-section-head"><span className="selfreg-section-icon">⌁</span><h3>Body measurements</h3></div><div className="selfreg-grid four">{['chest','waist','hips','arms','thighs','bodyFat'].map(k=><label key={k} style={labelStyle}>{k==='bodyFat'?'Body fat (%)':k[0].toUpperCase()+k.slice(1)}<input type="number" value={form.bodyMeasurements[k]} onChange={e=>setForm(f=>({...f,bodyMeasurements:{...f.bodyMeasurements,[k]:e.target.value}}))} style={inputStyle}/></label>)}</div></section>
+        {error&&<div className="selfreg-error">{error}</div>}<button className="selfreg-submit" disabled={busy||info?.enabled!==true}>{busy?'Submitting registration…':'Submit registration'}</button><p className="selfreg-note">All fields are optional. Please share only information you are comfortable providing.</p><section className="selfreg-terms"><h3>NOTES &amp; TERMS</h3><ol><li>This document records the membership / fitness service billed by Preface Fitness.</li><li>Amounts paid are non-refundable.</li><li>Once your package has expired, it must be renewed. Expired packages will not be extended unless authorised by management.</li><li>Please retain this invoice for your records.</li><li>GST details should match the billing details configured by the gym.</li></ol></section>
+      </form>
+    </div>
+  </div>;
 }
 
 function PublicAttendancePage({ data, setData }) {
@@ -12310,6 +12383,8 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
       trainers: Array.isArray(current.publicPage?.trainers) ? current.publicPage.trainers : [],
       packages: Array.isArray(current.publicPage?.packages) && current.publicPage.packages.length ? current.publicPage.packages : MEMBERSHIP_PLANS.map((plan) => ({ name: plan.name, months: plan.months, price: plan.price, description: plan.description })),
       reviews: Array.isArray(current.publicPage?.reviews) ? current.publicPage.reviews : [],
+      galleryImages: Array.isArray(current.publicPage?.galleryImages) ? current.publicPage.galleryImages : [],
+      facilityImages: current.publicPage?.facilityImages && typeof current.publicPage.facilityImages === 'object' ? current.publicPage.facilityImages : {},
     },
   });
   const [authForm, setAuthForm] = useState({
@@ -12351,6 +12426,8 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
         trainers: Array.isArray(current.publicPage?.trainers) ? current.publicPage.trainers : [],
         packages: Array.isArray(current.publicPage?.packages) && current.publicPage.packages.length ? current.publicPage.packages : MEMBERSHIP_PLANS.map((plan) => ({ name: plan.name, months: plan.months, price: plan.price, description: plan.description })),
         reviews: Array.isArray(current.publicPage?.reviews) ? current.publicPage.reviews : [],
+        galleryImages: Array.isArray(current.publicPage?.galleryImages) ? current.publicPage.galleryImages : [],
+        facilityImages: current.publicPage?.facilityImages && typeof current.publicPage.facilityImages === 'object' ? current.publicPage.facilityImages : {},
       },
     });
     setAuthForm((form) => ({
@@ -12413,7 +12490,10 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
   const memberPortalUrl = `${PRODUCTION_APP_URL}?gym=${encodeURIComponent(data.gym?.id || PRODUCTION_GYM_ID)}#member-portal`;
   const memberPortalQrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&data=${encodeURIComponent(memberPortalUrl)}`;
   const registrationUrl = `${PRODUCTION_APP_URL}?gym=${encodeURIComponent(data.gym?.id || PRODUCTION_GYM_ID)}#register`;
-  const registrationQrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&data=${encodeURIComponent(registrationUrl)}`;
+  const registrationQrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&color=087F73&bgcolor=FFFFFF&data=${encodeURIComponent(registrationUrl)}`;
+  const gymPublicPageUrl = `${PRODUCTION_APP_URL}?gym=${encodeURIComponent(data.gym?.id || PRODUCTION_GYM_ID)}#gym`;
+  const gymWebsiteUrl = String(form.publicPage?.websiteUrl || PRODUCTION_APP_URL).trim();
+  const qrImageFor = (url, color) => `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&color=${color}&bgcolor=FFFFFF&data=${encodeURIComponent(url)}`;
   const openMemberPortalQr = () => { window.open(memberPortalQrImageUrl, '_blank', 'noopener,noreferrer'); showActionFeedback('Member Portal QR opened in a new tab.'); };
   const printMemberPortalQr = () => { const w = window.open('', '_blank', 'width=700,height=900'); if (!w) { showActionFeedback('Popup was blocked. Allow popups to print the Member Portal QR.', 'error'); return; } w.document.write(`<!doctype html><html><head><title>Member Portal QR</title><style>body{font-family:Arial,sans-serif;text-align:center;padding:40px;color:#17263b}img{width:360px;max-width:90vw}h1{font-size:28px}p{font-size:16px;color:#64748b}</style></head><body><h1>${String(form.gymName || 'Preface Fitness')}</h1><p>Scan to log in to your Member Portal</p><img src="${memberPortalQrImageUrl}" alt="Member Portal QR"/><p>Use your registered mobile/member ID and 6-digit PIN</p></body></html>`); w.document.close(); w.focus(); setTimeout(()=>w.print(),250); };
 
@@ -12614,6 +12694,65 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
 
 
   const updatePublicPage = (key, value) => setForm((f) => ({ ...f, publicPage: { ...(f.publicPage || {}), [key]: value } }));
+  const defaultPublicGalleryImages = [
+    'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=1200&q=85',
+    'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?auto=format&fit=crop&w=1200&q=85',
+    'https://images.unsplash.com/photo-1571902943202-507ec2618e8f?auto=format&fit=crop&w=1200&q=85',
+    'https://images.unsplash.com/photo-1540497077202-7c8a3999166f?auto=format&fit=crop&w=1200&q=85',
+  ];
+  const defaultFacilityImageSettings = [
+    { name: 'Strength & cardio zone', image: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=1000&q=85' },
+    { name: 'Personal training', image: 'https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?auto=format&fit=crop&w=1000&q=85' },
+    { name: 'Functional training', image: 'https://images.unsplash.com/photo-1579758629938-03607ccdbaba?auto=format&fit=crop&w=1000&q=85' },
+    { name: 'Locker & changing facilities', image: 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=1000&q=85' },
+    { name: 'Member progress tracking', image: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?auto=format&fit=crop&w=1000&q=85' },
+    { name: 'Diet & nutrition guidance', image: 'https://images.unsplash.com/photo-1490645935967-10de6ba17061?auto=format&fit=crop&w=1000&q=85' },
+    { name: 'Weight loss', image: 'https://images.unsplash.com/photo-1517964603305-11c0f6f66012?auto=format&fit=crop&w=1000&q=85' },
+    { name: 'Weight gain', image: 'https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?auto=format&fit=crop&w=1000&q=85' },
+    { name: 'Yoga', image: 'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?auto=format&fit=crop&w=1000&q=85' },
+    { name: 'Aerobics', image: 'https://images.unsplash.com/photo-1518611012118-696072aa579a?auto=format&fit=crop&w=1000&q=85' },
+    { name: 'Zumba', image: 'https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1000&q=85' },
+    { name: 'Steam Bath', image: 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?auto=format&fit=crop&w=1000&q=85' },
+    { name: 'Shower', image: 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=1000&q=85' },
+  ];
+  const publicFacilityImageKey = (name) => String(name || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const handlePublicFacilityImage = async (name, event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const image = await resizePublicImage(file, 1200, 0.78);
+      const facilityImages = { ...(form.publicPage?.facilityImages || {}), [publicFacilityImageKey(name)]: image };
+      updatePublicPage('facilityImages', facilityImages);
+      showActionFeedback(`${name} image selected. Click Save public page to publish it.`);
+    } catch (error) {
+      showActionFeedback(error?.message || 'Unable to process this image.', 'error');
+    } finally { event.target.value = ''; }
+  };
+  const resetPublicFacilityImage = (name) => {
+    const facilityImages = { ...(form.publicPage?.facilityImages || {}) };
+    delete facilityImages[publicFacilityImageKey(name)];
+    updatePublicPage('facilityImages', facilityImages);
+    showActionFeedback(`${name} will use its default photo after saving.`);
+  };
+  const handlePublicGalleryImage = async (index, event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const image = await resizePublicImage(file, 1500, 0.78);
+      const images = [...(form.publicPage?.galleryImages || [])];
+      images[index] = image;
+      updatePublicPage('galleryImages', images);
+      showActionFeedback(`Public page image ${index + 1} selected. Click Save public page to publish it.`);
+    } catch (error) {
+      showActionFeedback(error?.message || 'Unable to process this image.', 'error');
+    } finally { event.target.value = ''; }
+  };
+  const resetPublicGalleryImage = (index) => {
+    const images = [...(form.publicPage?.galleryImages || [])];
+    images[index] = '';
+    updatePublicPage('galleryImages', images);
+    showActionFeedback(`Image ${index + 1} will use the default public page photo after saving.`);
+  };
   const addPublicTrainer = () => { updatePublicPage('trainers', [...(form.publicPage?.trainers || []), { name: '', role: 'FITNESS TRAINER', experience: '', forte: '', specialization: '', certification: '', description: '', photo: '' }]); showActionFeedback('Trainer added to the draft.'); };
   const updatePublicTrainer = (index, key, value) => updatePublicPage('trainers', (form.publicPage?.trainers || []).map((item, i) => i === index ? { ...item, [key]: value } : item));
 
@@ -12926,6 +13065,38 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
             <Sparkles size={22} />
           </div>
 
+          <div className="form-section-title">Public page photos</div>
+          <p style={{fontSize:13,color:'#718096',lineHeight:1.55,marginTop:-4}}>Change the hero photo and the three gallery photos shown on your public gym page. Trainer and review photos can be managed in their own sections below.</p>
+          <div className="form-grid two">
+            {defaultPublicGalleryImages.map((fallback, index) => {
+              const chosen = form.publicPage?.galleryImages?.[index] || fallback;
+              return <div key={index} style={{border:'1px solid #e4eaf2',borderRadius:16,padding:13,display:'grid',gap:10,background:'#fbfcff'}}>
+                <strong style={{fontSize:13,color:'#26364d'}}>{index === 0 ? 'Hero image' : `Gallery image ${index + 1}`}</strong>
+                <img src={chosen} alt={`Public page image ${index + 1} preview`} style={{width:'100%',height:150,objectFit:'cover',borderRadius:11,background:'#edf2f7'}} />
+                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                  <label className="btn btn-secondary" style={{cursor:'pointer'}}>Change image<input type="file" accept="image/*" onChange={(e)=>handlePublicGalleryImage(index,e)} style={{display:'none'}} /></label>
+                  <button type="button" className="btn btn-secondary" onClick={()=>resetPublicGalleryImage(index)}>Use default</button>
+                </div>
+              </div>;
+            })}
+          </div>
+
+          <div className="form-section-title" style={{marginTop:24}}>Facilities & training section images</div>
+          <p style={{fontSize:13,color:'#718096',lineHeight:1.55,marginTop:-4}}>Yahan se screenshot wale “Everything you need to train with purpose” section ki har card image alag change kar sakte ho. Select image, preview check karo, phir Save public page dabao.</p>
+          <div className="form-grid three">
+            {defaultFacilityImageSettings.map((item) => {
+              const chosen = form.publicPage?.facilityImages?.[publicFacilityImageKey(item.name)] || item.image;
+              return <div key={item.name} style={{border:'1px solid #e4eaf2',borderRadius:16,padding:13,display:'grid',gap:10,background:'#fbfcff'}}>
+                <strong style={{fontSize:13,color:'#26364d'}}>{item.name}</strong>
+                <img src={chosen} alt={`${item.name} preview`} style={{width:'100%',height:130,objectFit:'cover',borderRadius:11,background:'#edf2f7'}} />
+                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                  <label className="btn btn-secondary" style={{cursor:'pointer'}}>Change image<input type="file" accept="image/*" onChange={(e)=>handlePublicFacilityImage(item.name,e)} style={{display:'none'}} /></label>
+                  <button type="button" className="btn btn-secondary" onClick={()=>resetPublicFacilityImage(item.name)}>Use default</button>
+                </div>
+              </div>;
+            })}
+          </div>
+
           <div className="form-section-title">Contact & social links</div>
           <div className="form-grid two">
             <FormField label="WhatsApp number"><input value={form.publicPage?.whatsappNumber || ''} onChange={(e) => updatePublicPage('whatsappNumber', e.target.value)} placeholder="Gym WhatsApp number, e.g. 919876543210" /></FormField>
@@ -13117,54 +13288,30 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
         )}
         {activeSettingsTab === 'qr' && (
           <div className="settings-tab-panel">
-<section className="card">
-          <div className="card-header"><div><h3>Member Portal QR Code</h3><p>Members scan this QR to open their private portal and sign in with their registered mobile/member ID and 6-digit PIN.</p></div><QrCode size={21}/></div>
-          <div style={{display:'grid',gridTemplateColumns:'180px 1fr',gap:'22px',alignItems:'center'}}>
-            <div style={{border:'1px solid #dce5eb',borderRadius:'16px',padding:'12px',background:'#fff',textAlign:'center'}}><img src={memberPortalQrImageUrl} alt="Member Portal QR" style={{width:'100%',maxWidth:'180px',display:'block',margin:'0 auto'}} /></div>
-            <div><div style={{fontSize:'15px',fontWeight:800,color:'#25364b'}}>Scan → Enter member ID/mobile → Enter 6-digit PIN</div><p style={{fontSize:'13px',lineHeight:1.6,color:'#687789',margin:'8px 0'}}>The QR contains only the portal URL and gym identifier; it does not contain a member's PIN or personal details. Give each member their PIN separately.</p><div style={{fontSize:'12px',color:'#64748b',wordBreak:'break-all',padding:'10px',borderRadius:9,background:'#f7fafc'}}>{memberPortalUrl}</div><div style={{display:'flex',gap:'10px',flexWrap:'wrap',marginTop:'12px'}}><button className="btn btn-primary" onClick={openMemberPortalQr}><QrCode size={17}/> Open Member Portal QR</button><button className="btn btn-secondary" onClick={printMemberPortalQr}><Printer size={17}/> Print Member Portal QR</button></div></div>
-          </div>
-        </section>
-<section className="card">
-          <div className="card-header"><div><h3>Attendance QR code</h3><p>This QR opens the password-free member check-in page.</p></div></div>
-          <div style={{padding:'12px 14px',borderRadius:'12px',background:'#f7fafc',border:'1px solid #e5ebf0',fontSize:'12px',color:'#64748b',wordBreak:'break-all',lineHeight:1.5}}>{qrUrl}</div>
-          <div style={{display:'flex',gap:'10px',flexWrap:'wrap',marginTop:'12px'}}>
-            <button className="btn btn-primary" onClick={openQr}><QrCode size={17}/> Generate / open QR</button>
-            <button className="btn btn-secondary" onClick={() => window.print()}><FileDown size={17}/> Print QR</button>
-          </div>
-          <p style={{margin:'12px 0 0',fontSize:'12px',color:'#7b8794',lineHeight:1.5}}>Print the QR and place it at the gym entrance. Members scan it with their phone camera; no owner password is required.</p>
-          <div style={{marginTop:'12px',padding:'12px 14px',borderRadius:'12px',background:'#eef9f7',border:'1px solid #d3ece7',fontSize:'12px',color:'#3d6b66',lineHeight:1.5}}><strong>Cloud attendance:</strong> member check-ins are written to the shared Cloudflare database, so the permanent QR can be used from members' phones without requiring the owner's browser to be open.</div>
-        </section>
-
-<section className="card">
-          <div className="card-header"><div><h3>Customer Self Registration QR</h3><p>Customers can fill their own registration form. Submission is controlled by the switch below.</p></div><QrCode size={21}/></div>
-          <div style={{display:'grid',gridTemplateColumns:'180px 1fr',gap:'22px',alignItems:'center'}}>
-            <div style={{border:'1px solid #dce5eb',borderRadius:'16px',padding:'12px',background:'#fff',textAlign:'center'}}><img src={registrationQrImageUrl} alt="Customer Registration QR" style={{width:'100%',maxWidth:'180px',display:'block',margin:'0 auto'}} /></div>
-            <div>
-              <label style={{display:'flex',alignItems:'center',gap:12,fontWeight:800,color:'#25364b',marginBottom:10}}>
-                <input type="checkbox" checked={Boolean(form.customerRegistrationEnabled)} onChange={async (e)=>{const enabled=e.target.checked;setForm(f=>({...f,customerRegistrationEnabled:enabled}));setData(d=>({...d,settings:{...(d.settings||{}),customerRegistrationEnabled:enabled}}));try{await saveCloudSettings({customerRegistrationEnabled:enabled});showActionFeedback(enabled?'Customer registration enabled.':'Customer registration disabled.');}catch(err){setForm(f=>({...f,customerRegistrationEnabled:!enabled}));setData(d=>({...d,settings:{...(d.settings||{}),customerRegistrationEnabled:!enabled}}));showActionFeedback(err.message||'Could not update registration setting.','error');}}}/>
-                Allow customer registration
-                <span style={{fontSize:12,fontWeight:800,color:form.customerRegistrationEnabled?'#07856f':'#b45309'}}>{form.customerRegistrationEnabled?'ON':'OFF'}</span>
-              </label>
-              <p style={{fontSize:13,lineHeight:1.6,color:'#687789',margin:'0 0 10px'}}>When toggled off, customer cannot submit a registration form.</p>
-              <div style={{fontSize:12,color:'#64748b',wordBreak:'break-all',padding:10,borderRadius:9,background:'#f7fafc'}}>{registrationUrl}</div>
-              <div style={{display:'flex',gap:10,flexWrap:'wrap',marginTop:12}}><button className="btn btn-primary" onClick={()=>window.open(registrationQrImageUrl,'_blank','noopener,noreferrer')}><QrCode size={17}/> Open Registration QR</button><button className="btn btn-secondary" onClick={()=>{const w=window.open('','_blank','width=700,height=900');if(!w)return;w.document.write(`<html><body style="font-family:Arial;text-align:center;padding:35px"><h1>${String(form.gymName||'Gym')}</h1><p>Scan to register as a member</p><img style="width:360px" src="${registrationQrImageUrl}"/><p>Customer Self Registration</p></body></html>`);w.document.close();w.print();}}><Printer size={17}/> Print QR</button></div>
-            </div>
-          </div>
-        </section>
-<section className="card">
-          <div className="card-header"><div><h3>Customer Feedback QR</h3><p>Place this QR at the gate, reception or workout floor so any customer can submit feedback or a complaint without logging in.</p></div><QrCode size={21} /></div>
-          <div style={{display:'grid',gridTemplateColumns:'180px 1fr',gap:'22px',alignItems:'center'}}>
-            <div style={{border:'1px solid #dce5eb',borderRadius:'16px',padding:'12px',background:'#fff',textAlign:'center'}}><img src={feedbackQrImageUrl} alt="Customer feedback QR" style={{width:'100%',maxWidth:'180px',display:'block',margin:'0 auto'}} /></div>
-            <div>
-              <div style={{fontSize:'15px',fontWeight:800,color:'#25364b'}}>Scan → Feedback / Complaint → Priority → Submit</div>
-              <p style={{fontSize:'13px',lineHeight:1.6,color:'#687789',margin:'8px 0'}}>The customer can enter their name optionally, choose the feedback type, select Low / Medium / High priority and submit the message. It is stored directly in the Customer Feedback section.</p>
-              <div style={{display:'flex',gap:'10px',flexWrap:'wrap',marginTop:'12px'}}>
-                <button className="btn btn-primary" onClick={openFeedbackQr}><QrCode size={17}/> Open Feedback QR</button>
-                <button className="btn btn-secondary" onClick={printFeedbackQr}><FileDown size={17}/> Print QR</button>
+            <style>{`.settings-qr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:18px}.settings-qr-card{border:1px solid #e2eaf3;border-radius:20px;padding:18px;background:linear-gradient(145deg,#fff,#f8fbff);box-shadow:0 8px 24px rgba(25,54,94,.055);display:grid;grid-template-columns:132px minmax(0,1fr);gap:16px;align-items:center}.settings-qr-art{padding:9px;border-radius:17px;background:#fff;border:1px solid #e6edf5;box-shadow:0 5px 16px rgba(24,55,96,.08)}.settings-qr-art img{display:block;width:100%;aspect-ratio:1;object-fit:contain}.settings-qr-card h3{font-size:16px;margin:0 0 6px;color:#172b4d}.settings-qr-card p{font-size:12px;line-height:1.55;color:#6b7a90;margin:0 0 9px}.settings-qr-link{display:block;word-break:break-all;padding:9px 10px;border-radius:10px;background:#eef5ff;color:#245c9e;font-size:11px;line-height:1.45;text-decoration:none}.settings-qr-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.settings-qr-actions a,.settings-qr-actions button{font-size:11px!important;padding:8px 10px!important}@media(max-width:520px){.settings-qr-card{grid-template-columns:104px minmax(0,1fr);padding:12px;gap:12px}}`}</style>
+            <section className="card"><div className="card-header"><div><h3>Gym QR codes & direct links</h3><p>Every QR is visible below. You can scan it or copy/open its direct link.</p></div><QrCode size={22}/></div>
+              <div className="settings-qr-grid">
+                {[
+                  {title:'Member Portal',desc:'Members sign in with mobile/member ID and their 6-digit PIN.',url:memberPortalUrl,color:'1769B2'},
+                  {title:'Attendance Check-in',desc:'Password-free member attendance check-in page.',url:qrUrl,color:'0B9B78'},
+                  {title:'Customer Registration',desc:'Self-registration form. Submission follows the admin ON/OFF switch.',url:registrationUrl,color:'087F73'},
+                  {title:'Customer Feedback',desc:'Submit feedback or complaints to the gym.',url:feedbackQrUrl,color:'D97706'},
+                  {title:'Gym Website',desc:'Main website address configured in Public Page settings.',url:gymWebsiteUrl,color:'7C3AED'},
+                  {title:'Public Gym Page',desc:'The gym profile page with facilities, photos, trainers and packages.',url:gymPublicPageUrl,color:'DB4777'},
+                ].map((item)=>{
+                  const imageUrl=qrImageFor(item.url,item.color);
+                  return <article className="settings-qr-card" key={item.title}>
+                    <div className="settings-qr-art"><img src={imageUrl} alt={`${item.title} QR code`}/></div>
+                    <div><h3>{item.title}</h3><p>{item.desc}</p><a className="settings-qr-link" href={item.url} target="_blank" rel="noreferrer">{item.url}</a><div className="settings-qr-actions"><a className="btn btn-secondary" href={item.url} target="_blank" rel="noreferrer">Open link</a><a className="btn btn-primary" href={imageUrl} target="_blank" rel="noreferrer">Open QR</a></div></div>
+                  </article>;
+                })}
               </div>
-            </div>
-          </div>
-        </section>
+            </section>
+            <section className="card">
+              <div className="card-header"><div><h3>Customer Self Registration control</h3><p>Turn registration ON only when reception is ready to accept new member submissions.</p></div><QrCode size={21}/></div>
+              <label style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:14,padding:16,borderRadius:14,background:form.customerRegistrationEnabled?'#e9fbf5':'#fff7ed',border:`1px solid ${form.customerRegistrationEnabled?'#9de6c8':'#fed7aa'}`,fontWeight:850,color:'#25364b'}}><span>Allow customer registration</span><span style={{display:'flex',alignItems:'center',gap:10}}><span style={{fontSize:12,color:form.customerRegistrationEnabled?'#07856f':'#b45309'}}>{form.customerRegistrationEnabled?'ON':'OFF'}</span><input type="checkbox" checked={Boolean(form.customerRegistrationEnabled)} onChange={async(e)=>{const enabled=e.target.checked;setForm(f=>({...f,customerRegistrationEnabled:enabled}));setData(d=>({...d,settings:{...(d.settings||{}),customerRegistrationEnabled:enabled}}));try{await saveCloudSettings({customerRegistrationEnabled:enabled});showActionFeedback(enabled?'Customer registration enabled.':'Customer registration disabled.');}catch(err){setForm(f=>({...f,customerRegistrationEnabled:!enabled}));setData(d=>({...d,settings:{...(d.settings||{}),customerRegistrationEnabled:!enabled}}));showActionFeedback(err.message||'Could not update registration setting.','error');}}}/></span></label>
+              <p style={{fontSize:13,lineHeight:1.6,color:'#687789',margin:'12px 0 0'}}>OFF hone par public form submit nahi ho sakta. Ye setting Worker par bhi enforce hoti hai. QR aur link visible rahenge, taaki aap unhe print/share kar sako.</p>
+            </section>
           </div>
         )}
         {activeSettingsTab === 'data' && (
