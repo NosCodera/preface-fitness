@@ -235,8 +235,6 @@ function mapMember(row) {
   return {
 
     id: row.member_code || row.id,
-    memberCode: row.member_code || '',
-    createdAt: row.created_at || '',
 
     cloudId: row.id,
 

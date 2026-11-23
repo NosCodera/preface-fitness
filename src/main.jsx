@@ -10768,6 +10768,10 @@ async function shareBillWhatsApp(member, settings, payment = null) {
 }
 
 function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = [], members = [], trainers = [], isOwner = false }) {
+  const [aadhaarFront, setAadhaarFront] = useState(null);
+  const [aadhaarBack, setAadhaarBack] = useState(null);
+  const [aadhaarBusy, setAadhaarBusy] = useState(false);
+  const [aadhaarStatus, setAadhaarStatus] = useState('');
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState('');
   const videoRef = useRef(null);
@@ -10858,6 +10862,183 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
     emergencyContact: '', dietPreference: 'Veg', gstinAadhaar: '', billingState: 'UTTAR PRADESH', billingStateCode: '09', referredBy: '', plan: 'Monthly', start: today, expiry: addMonthsToDate(today, MEMBERSHIP_PLANS.find((item) => item.name === 'Monthly')?.months || 1), amount: Number(planPrices?.Monthly || 0), paid: 0,
     due: 0, paymentMode: 'Cash', gstMode: 'without', gstRate: 5, height: '', weight: '', bodyFat: '', chest: '', shoulder: '', biceps: '', forearms: '', waist: '', hips: '', thighs: '', calves: '', neck: '', trainer: '', referral: 'None / Walk-In', referralOther: '', medicalConditions: [], medicalOther: '', surgeryDetails: '', additionalMedicalNotes: '', notes: '',
   });
+
+  const readAadhaarImages = async () => {
+    if (!aadhaarFront || !aadhaarBack) {
+      setAadhaarStatus('Please select both the front and back images first.');
+      return;
+    }
+
+    const prepareAadhaarImage = async (file, crop = 'full') => {
+      const bitmap = await createImageBitmap(file);
+      const maxSide = 3000;
+      const scale = Math.min(2.5, maxSide / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close?.();
+
+      // Crop the Aadhaar number strip separately; this prevents DOB/PIN/other
+      // numbers elsewhere on the card from being mistaken for the Aadhaar number.
+      if (crop === 'number') {
+        const y = Math.floor(canvas.height * 0.72);
+        const h = Math.max(1, canvas.height - y);
+        const cropped = document.createElement('canvas');
+        cropped.width = canvas.width;
+        cropped.height = h;
+        cropped.getContext('2d').drawImage(canvas, 0, y, canvas.width, h, 0, 0, canvas.width, h);
+        return cropped;
+      }
+      return canvas;
+    };
+
+    const cleanLines = (text) => String(text || '')
+      .replace(/\r/g, '\n')
+      .split('\n')
+      .map((line) => line.replace(/[|¦]/g, ' ').replace(/\s{2,}/g, ' ').trim())
+      // Keep English-script lines only. Aadhaar cards may show Hindi, Tamil,
+      // Telugu, etc. above the English line; those lines are intentionally ignored.
+      .filter((line) => line && /[A-Za-z]/.test(line))
+      .filter((line) => !/^(government of india|unique identification authority|uidai|aadhaar|my aadhaar)$/i.test(line));
+
+    const readText = async (worker, image, pageMode, whitelist) => {
+      // Always reset the whitelist. Tesseract retains previous parameters;
+      // otherwise the digit-only Aadhaar pass can corrupt name/address OCR.
+      await worker.setParameters({
+        tessedit_pageseg_mode: String(pageMode),
+        preserve_interword_spaces: '1',
+        tessedit_char_whitelist: whitelist || '',
+      });
+      const result = await worker.recognize(image);
+      return { text: String(result?.data?.text || ''), confidence: Number(result?.data?.confidence || 0) };
+    };
+
+    try {
+      setAadhaarBusy(true);
+      setAadhaarStatus('Reading front and back separately (English text)…');
+      const { createWorker } = await import('tesseract.js');
+      // English-only OCR is deliberate: ignore the first Hindi/regional-language
+      // name/address lines and extract the English versions requested.
+      const worker = await createWorker('eng');
+      try {
+        const frontImage = await prepareAadhaarImage(aadhaarFront);
+        const frontNumberImage = await prepareAadhaarImage(aadhaarFront, 'number');
+        const backImage = await prepareAadhaarImage(aadhaarBack);
+        // Tesseract workers are stateful and must not run multiple recognize()
+        // jobs concurrently: page-segmentation and character-whitelist settings
+        // can otherwise race between jobs and contaminate the other side's OCR.
+        const frontRead = await readText(worker, frontImage, 6);
+        const numberRead = await readText(worker, frontNumberImage, 6, '0123456789 ');
+        const backRead = await readText(worker, backImage, 6);
+
+        const frontLines = cleanLines(frontRead.text);
+        const backLines = cleanLines(backRead.text);
+
+        // DOB is taken only from a front-side line explicitly labelled DOB /
+        // Date of Birth. Do not confuse the issue date or a standalone year
+        // of birth with a complete date. The member form expects YYYY-MM-DD.
+        const normalizeAadhaarDob = (raw) => {
+          const match = String(raw || '').match(/\b(\d{1,2})[\/.\- ](\d{1,2})[\/.\- ](\d{4})\b/);
+          if (!match) return '';
+          const day = Number(match[1]);
+          const month = Number(match[2]);
+          const year = Number(match[3]);
+          const date = new Date(Date.UTC(year, month - 1, day));
+          if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return '';
+          return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        };
+        let dob = '';
+        const dobLabelIndex = frontLines.findIndex((line) => /\b(dob|date\s+of\s+birth)\b/i.test(line));
+        if (dobLabelIndex >= 0) {
+          const dobLine = frontLines[dobLabelIndex];
+          dob = normalizeAadhaarDob(dobLine);
+          if (!dob && frontLines[dobLabelIndex + 1]) dob = normalizeAadhaarDob(frontLines[dobLabelIndex + 1]);
+        }
+
+        // The Aadhaar number is read only from the bottom strip of the FRONT.
+        const numberDigits = String(numberRead.text || '').replace(/\D/g, '');
+        const numberCandidates = numberDigits.match(/\d{12}/g) || [];
+        const aadhaarNumber = numberCandidates.sort((a, b) => b.length - a.length)[0] || '';
+
+        const isFrontLabel = (line) =>
+          /(government|unique|identification|authority|uidai|aadhaar|male|female|dob|date of birth|year of birth|birth|enrolment|enrollment|issue date|download|www\.|help@|toll free|my aadhaar)/i.test(line)
+          || /\b\d{2}[/-]\d{2}[/-]\d{4}\b/.test(line)
+          || /\b(male|female)\b/i.test(line);
+
+        // Name: prefer a short English-script line in the identity area, before
+        // DOB/gender labels. Do not select labels, dates, or the address.
+        const nameCandidates = frontLines
+          .map((line) => line.replace(/^(?:name)\s*[:：-]\s*/i, '').trim())
+          .filter((line) => {
+            const words = line.split(/\s+/).filter(Boolean);
+            return words.length >= 2 && words.length <= 5
+              && /^[A-Za-z][A-Za-z .'-]*$/.test(line)
+              && line.length >= 4 && line.length <= 60
+              && !isFrontLabel(line)
+              && !/\d/.test(line)
+              && !/\b(address|s\/o|d\/o|w\/o|c\/o|dob|date|male|female)\b/i.test(line);
+          });
+        // Aadhaar front English name is generally the first plausible person-name
+        // line after the Government of India header. Avoid selecting "Government..."
+        // and prefer candidates nearest the DOB line.
+        let name = nameCandidates[0] || '';
+        const dobIndex = frontLines.findIndex((line) => /\b(dob|date of birth|year of birth)\b/i.test(line));
+        if (dobIndex > 0) {
+          const beforeDob = nameCandidates.filter((candidate) => {
+            const idx = frontLines.indexOf(candidate);
+            return idx >= 0 && idx < dobIndex;
+          });
+          if (beforeDob.length) name = beforeDob[beforeDob.length - 1];
+        }
+        name = name.replace(/\s{2,}/g, ' ').trim();
+
+        // Address: use English-only text from the BACK, beginning at the explicit
+        // "Address" label. Stop after the 6-digit PIN code; discard regional script.
+        const addressStart = backLines.findIndex((line) => /\baddress\b/i.test(line));
+        let addressLines = [];
+        if (addressStart >= 0) {
+          const first = backLines[addressStart].replace(/^.*?\baddress\b\s*[:：-]?\s*/i, '').trim();
+          if (first && /[A-Za-z]/.test(first)) addressLines.push(first);
+          for (const line of backLines.slice(addressStart + 1)) {
+            if (/^(mobile|phone|help|www\.|uidai|unique identification|government of india)/i.test(line)) break;
+            if (!/[A-Za-z]/.test(line)) continue;
+            addressLines.push(line);
+            if (/\b\d{6}\b/.test(line)) break;
+            if (addressLines.length >= 7) break;
+          }
+        }
+        const address = addressLines.join(', ')
+          .replace(/\s{2,}/g, ' ')
+          .replace(/,\s*,/g, ',')
+          .replace(/\s+,/g, ',')
+          .trim();
+
+        setForm((current) => ({
+          ...current,
+          ...(name ? { name } : {}),
+          ...(dob ? { dob } : {}),
+          ...(aadhaarNumber.length === 12 ? { gstinAadhaar: aadhaarNumber } : {}),
+          ...(address ? { address } : {}),
+        }));
+
+        const found = [name && 'English name', dob && 'Date of birth', aadhaarNumber.length === 12 && '12-digit Aadhaar number', address && 'English address'].filter(Boolean);
+        setAadhaarStatus(found.length
+          ? `Extracted: ${found.join(', ')}. Please verify every field against the original card before saving.`
+          : 'Could not reliably identify the fields. Use clear, straight photos and enter any missing details manually.');
+      } finally {
+        await worker.terminate();
+      }
+    } catch (error) {
+      console.error('Aadhaar OCR failed:', error);
+      setAadhaarStatus('OCR could not run. Check internet access for the English language data, or enter the details manually.');
+    } finally {
+      setAadhaarBusy(false);
+    }
+  };
 
   const update = (key, value) => {
     setForm((current) => {
@@ -10950,6 +11131,27 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
         </div>
       </div>
     )}
+    <div className="form-section-title">Fetch details from Aadhaar</div>
+    <div style={{ border: '1px solid #dbe5ef', borderRadius: '14px', padding: '14px', marginBottom: '16px', background: '#f8fbff' }}>
+      <div style={{ fontWeight: 750, color: '#243447', marginBottom: '6px' }}>Upload Aadhaar front and back</div>
+      <div style={{ color: '#64748b', fontSize: '12px', lineHeight: 1.55, marginBottom: '12px' }}>
+        Select clear images of both sides. OCR runs in this browser; the images are not uploaded to the gym server or saved in the member profile. Extracted details are suggestions—verify them against the original card before saving.
+      </div>
+      <div className="form-grid two">
+        <FormField label="Aadhaar front photo">
+          <input type="file" accept="image/*" onChange={(e) => { setAadhaarFront(e.target.files?.[0] || null); setAadhaarStatus(''); }} />
+        </FormField>
+        <FormField label="Aadhaar back photo">
+          <input type="file" accept="image/*" onChange={(e) => { setAadhaarBack(e.target.files?.[0] || null); setAadhaarStatus(''); }} />
+        </FormField>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginTop: '10px' }}>
+        <button type="button" className="btn btn-primary btn-sm" disabled={!aadhaarFront || !aadhaarBack || aadhaarBusy} onClick={readAadhaarImages}>{aadhaarBusy ? 'Reading Aadhaar…' : 'Fetch details from Aadhaar'}</button>
+        {(aadhaarFront || aadhaarBack) && <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setAadhaarFront(null); setAadhaarBack(null); setAadhaarStatus(''); }}>Clear images</button>}
+      </div>
+      {aadhaarStatus && <div role="status" style={{ marginTop: '10px', color: '#31506d', fontSize: '12px', lineHeight: 1.5 }}>{aadhaarStatus}</div>}
+      <div style={{ marginTop: '9px', color: '#8a5b16', fontSize: '11px', lineHeight: 1.5 }}>Privacy: Use only with the member’s informed consent. Do not retain Aadhaar photos. Review applicable UIDAI requirements and your organisation’s data-protection obligations.</div>
+    </div>
     <div className="form-section-title">Personal details</div>
 
     <div
