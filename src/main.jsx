@@ -2935,7 +2935,7 @@ function App() {
       return;
     }
     const requestedId = String(member.id || '').trim();
-    const id = requestedId || nextSystemMemberId(data.members);
+    const id = requestedId || nextSystemMemberId(data.members, data.settings?.memberIdFormat);
 
     if (data.members.some((item) => String(item.id).toLowerCase() === id.toLowerCase())) {
       setToast(`Member ID ${id} is already in use`);
@@ -3679,20 +3679,75 @@ function App() {
     }
   };
 
-  // Persist workout plans in the existing gym settings JSON so they survive
-  // reloads and sync across devices without requiring a new Cloudflare table.
+  // Workout plans are persisted as relational Cloudflare D1 records. The
+  // app_settings JSON copy was unreliable when the Training page remounted and
+  // also competed with the dedicated workout_plans collection during loading.
+  const workoutPlanCloudPayload = (plan) => ({
+    legacy_id: String(plan.id || ''),
+    name: plan.name || '',
+    goal: plan.goal || '',
+    level: plan.level || '',
+    duration_weeks: Number(plan.durationWeeks || 1),
+    trainer: plan.trainer || '',
+    trainer_name: plan.trainer || '',
+    notes: plan.notes || '',
+    assigned_member_ids: (plan.assignedMemberIds || []).map((memberId) => {
+      const member = (data.members || []).find((item) => String(item.id) === String(memberId));
+      return member?.cloudId || memberId;
+    }),
+    exercises: Array.isArray(plan.exercises) ? plan.exercises : [],
+    metadata: plan.metadata || {},
+    created_at: plan.createdAt || new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+
   const persistWorkoutPlans = async (nextPlans, successMessage) => {
-    setData((current) => ({ ...current, workoutPlans: nextPlans }));
     try {
-      await saveCloudSettings({ workoutPlans: nextPlans });
+      const { data: cloudRows, error: listError } = await backendClient
+        .from('workout_plans')
+        .select();
+      if (listError) throw new Error(listError.message || 'Unable to load existing workout plans');
+
+      const rows = Array.isArray(cloudRows) ? cloudRows : [];
+      const previousPlans = data.workoutPlans || [];
+      const savedPlans = [];
+
+      for (const plan of nextPlans) {
+        const existing = rows.find((row) =>
+          (plan.cloudId && String(row.id) === String(plan.cloudId)) ||
+          (row.legacy_id && String(row.legacy_id) === String(plan.id))
+        );
+        const payload = workoutPlanCloudPayload(plan);
+        const saved = existing
+          ? await updateRecord('workout_plans', existing.id, payload)
+          : await insertRecord('workout_plans', payload);
+        savedPlans.push({ ...plan, cloudId: saved?.id || existing?.id || plan.cloudId || null });
+      }
+
+      const retainedIds = new Set(nextPlans.map((plan) => String(plan.id)));
+      for (const previous of previousPlans) {
+        if (retainedIds.has(String(previous.id))) continue;
+        const existing = rows.find((row) =>
+          (previous.cloudId && String(row.id) === String(previous.cloudId)) ||
+          (row.legacy_id && String(row.legacy_id) === String(previous.id))
+        );
+        if (existing) await deleteRecord('workout_plans', existing.id);
+      }
+
+      // Clear the retired JSON snapshot so an intentionally empty D1 table
+      // cannot resurrect deleted plans during the next load.
+      try { await saveCloudSettings({ workoutPlans: [] }); }
+      catch (settingsError) { console.warn('Legacy workout-plan snapshot cleanup skipped:', settingsError); }
+
       setData((current) => ({
         ...current,
-        settings: { ...(current.settings || {}), workoutPlans: nextPlans },
+        workoutPlans: savedPlans,
+        settings: { ...(current.settings || {}), workoutPlans: [] },
       }));
       setToast(successMessage);
     } catch (error) {
       console.error('Workout plan cloud save failed:', error);
-      setToast(`Workout plan saved locally, but cloud save failed: ${error?.message || 'Please check connection/permissions'}`);
+      setToast(`Workout plan cloud save failed: ${error?.message || 'Please check connection/permissions'}`);
     }
   };
 
@@ -4219,8 +4274,8 @@ function App() {
       for (const row of rows) {
         let memberId = String(row.id || '').trim();
         if (!memberId || reservedIds.has(memberId.toLowerCase())) {
-          memberId = nextSystemMemberId([...(data.members || []), ...importedMembers]);
-          while (reservedIds.has(memberId.toLowerCase())) memberId = nextSystemMemberId([...(data.members || []), ...importedMembers, { id: memberId }]);
+          memberId = nextSystemMemberId([...(data.members || []), ...importedMembers], data.settings?.memberIdFormat);
+          while (reservedIds.has(memberId.toLowerCase())) memberId = nextSystemMemberId([...(data.members || []), ...importedMembers, { id: memberId }], data.settings?.memberIdFormat);
         }
         reservedIds.add(memberId.toLowerCase());
         const planPrice = Number(planPrices[row.plan] || row.amount || 0);
@@ -4554,7 +4609,7 @@ function App() {
     }
 
     const newMember = {
-      id: nextSystemMemberId(data.members),
+      id: nextSystemMemberId(data.members, data.settings?.memberIdFormat),
       name: lead.name,
       phone: lead.phone || '',
       email: lead.email || '',
@@ -7599,7 +7654,7 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
             ) : (
               initials(member.name)
             )}
-          </div><div><strong>{member.name}</strong><span>{member.id}</span></div></div></button></td>
+          </div><div><strong>{member.name}</strong><span>{member.memberCode || member.id}</span></div></div></button></td>
           <td><div className="contact-cell"><strong>{member.phone}</strong><span>{member.email || 'No email'}</span></div></td>
           <td>{member.plan}</td><td>{formatDate(member.expiry)}</td><td><span className="data-pill"><Activity size={13} />{member.visits}</span></td>
           <td>{Number(member.due || 0) > 0 ? <strong className="danger-text">₹{Number(member.due).toLocaleString('en-IN')}</strong> : <span className="paid-text">Paid</span>}</td>
@@ -10058,12 +10113,15 @@ function calculateAge(dob) {
   return `${age} yrs`;
 }
 
-function nextSystemMemberId(members) {
+function nextSystemMemberId(members, format = {}) {
+  const prefix = String(format?.prefix || 'PF').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '') || 'PF';
+  const width = Math.min(8, Math.max(1, Number(format?.numberLength) || 4));
+  const pattern = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-(\\d+)$`, 'i');
   const maxNumber = (members || []).reduce((max, member) => {
-    const match = String(member.id || '').match(/^PF-(\d+)$/i);
+    const match = String(member.id || '').match(pattern);
     return match ? Math.max(max, Number(match[1])) : max;
-  }, 1000);
-  return `PF-${maxNumber + 1}`;
+  }, 0);
+  return `${prefix}-${String(maxNumber + 1).padStart(width, '0')}`;
 }
 
 function calculateGstBreakdown(totalAmount, rate = 5) {
@@ -12217,6 +12275,7 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
     invoiceSeriesA: getInvoiceSeriesSettings(current, 'invoiceSeriesA'),
     invoiceSeriesB: getInvoiceSeriesSettings(current, 'invoiceSeriesB'),
     referralPointsPerReferral: Number(current.referralPointsPerReferral ?? 10),
+    memberIdFormat: { prefix: current.memberIdFormat?.prefix || 'PF', numberLength: Number(current.memberIdFormat?.numberLength || 4) },
     gymLatitude: current.gymLatitude || '',
     gymLongitude: current.gymLongitude || '',
     publicPage: {
@@ -12256,6 +12315,7 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
       invoiceSeriesA: getInvoiceSeriesSettings(current, 'invoiceSeriesA'),
       invoiceSeriesB: getInvoiceSeriesSettings(current, 'invoiceSeriesB'),
       referralPointsPerReferral: Number(current.referralPointsPerReferral ?? 10),
+      memberIdFormat: { prefix: current.memberIdFormat?.prefix || 'PF', numberLength: Number(current.memberIdFormat?.numberLength || 4) },
       gymLatitude: current.gymLatitude || '',
       gymLongitude: current.gymLongitude || '',
       publicPage: {
@@ -12275,7 +12335,7 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
     }));
     setAuthMessage('');
     setNoticeForm({ enabled: Boolean(current.notice?.enabled), dashboardEnabled: current.notice?.dashboardEnabled !== false, text: current.notice?.text || '', priority: current.notice?.priority || 'medium' });
-  }, [current.gymName, current.gymAddress, current.gymPhone, current.gymEmail, current.gstin, current.defaultGstRate, current.invoicePrefix, current.invoiceSeriesA, current.invoiceSeriesB, current.referralPointsPerReferral, current.gymLatitude, current.gymLongitude, current.publicPage, current.notice?.id, current.notice?.enabled, current.notice?.dashboardEnabled, current.notice?.text, current.notice?.priority, current.noticeHistory, current.auth?.username, current.auth?.passwordHash]);
+  }, [current.gymName, current.gymAddress, current.gymPhone, current.gymEmail, current.gstin, current.defaultGstRate, current.invoicePrefix, current.invoiceSeriesA, current.invoiceSeriesB, current.referralPointsPerReferral, current.memberIdFormat, current.gymLatitude, current.gymLongitude, current.publicPage, current.notice?.id, current.notice?.enabled, current.notice?.dashboardEnabled, current.notice?.text, current.notice?.priority, current.noticeHistory, current.auth?.username, current.auth?.passwordHash]);
 
   const useCurrentLocation = () => {
     if (!navigator.geolocation) { showActionFeedback('This browser does not support location detection.', 'error'); return setAuthMessage('This browser does not support location detection.'); }
@@ -12355,6 +12415,7 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
     const settingsPatch = {
       ...form,
       referralPointsPerReferral: Math.max(0, Number(form.referralPointsPerReferral || 0)),
+      memberIdFormat: { prefix: String(form.memberIdFormat?.prefix || 'PF').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '') || 'PF', numberLength: Math.min(8, Math.max(1, Number(form.memberIdFormat?.numberLength) || 4)) },
       invoiceSeriesA: getInvoiceSeriesSettings({ ...current, ...form }, 'invoiceSeriesA'),
       invoiceSeriesB: getInvoiceSeriesSettings({ ...current, ...form }, 'invoiceSeriesB'),
     };
@@ -12730,6 +12791,53 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
         </section>
 
 <section className="card">
+          <div className="card-header"><div><h3>Member ID format</h3><p>Choose the prefix and number of digits used for new member IDs. Example: PF-0129.</p></div></div>
+          <div className="form-grid two">
+            <FormField label="Member ID prefix"><input value={form.memberIdFormat?.prefix || 'PF'} onChange={(e) => setForm((f) => ({ ...f, memberIdFormat: { ...(f.memberIdFormat || {}), prefix: e.target.value.toUpperCase() } }))} placeholder="PF" /></FormField>
+            <FormField label="Number length"><input type="number" min="1" max="8" value={form.memberIdFormat?.numberLength || 4} onChange={(e) => setForm((f) => ({ ...f, memberIdFormat: { ...(f.memberIdFormat || {}), numberLength: Math.min(8, Math.max(1, Number(e.target.value) || 4)) } }))} /></FormField>
+          </div>
+          <div style={{padding:'12px 14px',background:'#f7f9fc',borderRadius:10,color:'#64748b',fontSize:13,marginBottom:12}}>Preview: <strong style={{color:'#172b46'}}>{(String(form.memberIdFormat?.prefix || 'PF').trim().toUpperCase() || 'PF')}-{String(Math.max(1, data.members?.length || 1)).padStart(Math.min(8, Math.max(1, Number(form.memberIdFormat?.numberLength) || 4)), '0')}</strong>. Saving this setting affects IDs generated for future members.</div>
+          <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+            <button className="btn btn-primary" type="button" onClick={saveSettings}><Save size={17}/> Save ID format</button>
+            <button className="btn btn-secondary" type="button" onClick={async () => {
+              const prefix = String(form.memberIdFormat?.prefix || 'PF').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '') || 'PF';
+              const width = Math.min(8, Math.max(1, Number(form.memberIdFormat?.numberLength) || 4));
+              const ordered = (data.members || []).map((member, index) => ({ member, index })).sort((a, b) => {
+                const at = Date.parse(a.member.createdAt || ''); const bt = Date.parse(b.member.createdAt || '');
+                if (Number.isFinite(at) && Number.isFinite(bt) && at !== bt) return at - bt;
+                return b.index - a.index;
+              });
+              if (!ordered.length) { showActionFeedback('No members found to number.', 'error'); return; }
+              if (ordered.some(({member}) => !member.cloudId)) { showActionFeedback('Some members are missing their Cloudflare record ID. Refresh the app and try again.', 'error'); return; }
+              if (!window.confirm(`Assign ${prefix}- IDs to all ${ordered.length} existing members by joining date? The oldest member gets ${prefix}-${String(1).padStart(width,'0')} and the newest gets ${prefix}-${String(ordered.length).padStart(width,'0')}.`)) return;
+              try {
+                const updated = new Map();
+                for (let index = 0; index < ordered.length; index += 1) {
+                  const { member } = ordered[index];
+                  const code = `${prefix}-${String(index + 1).padStart(width, '0')}`;
+                  const savedRow = await updateRecord('members', member.cloudId, { member_code: code });
+                  if (String(savedRow?.member_code || '') !== code) {
+                    throw new Error(`Cloudflare did not confirm ${code} for ${member.name || 'a member'}. No success was assumed; refresh and retry.`);
+                  }
+                  updated.set(String(member.cloudId), code);
+                }
+                setData((d) => ({
+                  ...d,
+                  members: (d.members || []).map((member) => {
+                    const code = updated.get(String(member.cloudId));
+                    return code ? { ...member, id: code, memberCode: code } : member;
+                  }),
+                  settings: { ...(d.settings || {}), memberIdFormat: { prefix, numberLength: width } },
+                }));
+                await saveCloudSettings({ memberIdFormat: { prefix, numberLength: width } });
+                showActionFeedback(`Assigned ${prefix}-0001 to oldest and ${prefix}-${String(ordered.length).padStart(width,'0')} to newest member.`);
+              } catch (error) { console.error('Member ID assignment failed:', error); showActionFeedback(error?.message || 'Could not update all member IDs. Please refresh and retry.', 'error'); }
+            }}><Users size={17}/> Assign IDs to all existing members</button>
+          </div>
+          <p style={{fontSize:12,color:'#718096',marginTop:10}}>This one-time action updates the Member Code in Cloudflare D1. Internal record IDs remain unchanged, so payments, attendance and member history stay linked.</p>
+        </section>
+
+<section className="card">
           <div className="card-header"><div><h3>Referral rewards</h3><p>Choose how many points a member earns for each successful referral.</p></div></div>
           <FormField label="Points per successful referral"><input type="number" min="0" step="1" value={form.referralPointsPerReferral} onChange={(e) => setForm((f) => ({...f,referralPointsPerReferral:e.target.value}))} /></FormField>
           <div style={{padding:'14px 16px',borderRadius:'12px',background:'#f5fbfa',border:'1px solid #dcefeb',color:'#55706e',fontSize:'13px',lineHeight:1.6}}>
@@ -13052,6 +13160,10 @@ function MemberPortalPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [portalData, setPortalData] = useState(null);
+  const [portalPin, setPortalPin] = useState('');
+  const [profileForm, setProfileForm] = useState({ measurements: {}, medical: { medicalConditions: [], medicalOther: '', surgeryDetails: '', additionalMedicalNotes: '' } });
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMessage, setProfileMessage] = useState('');
   const [showPin, setShowPin] = useState(false);
   const gymName = 'Preface Fitness';
 
@@ -13075,6 +13187,9 @@ function MemberPortalPage() {
         ? data.diet_plans
         : (Array.isArray(data.dietPlans) ? data.dietPlans : []);
       setPortalData({ ...data, diet_plans: normalizedDietPlans });
+      setPortalPin(pin);
+      const initialMeta = readMemberMeta(data.member.notes || '');
+      setProfileForm({ measurements: { height:data.member.height||'', weight:data.member.weight||'', body_fat:data.member.body_fat||'', chest:initialMeta.chest||'', shoulder:initialMeta.shoulder||'', biceps:initialMeta.biceps||'', forearms:initialMeta.forearms||'', waist:initialMeta.waist||'', hips:initialMeta.hips||'', thighs:initialMeta.thighs||'', calves:initialMeta.calves||'', neck:initialMeta.neck||'' }, medical: { medicalConditions:initialMeta.medicalConditions||[], medicalOther:initialMeta.medicalOther||'', surgeryDetails:initialMeta.surgeryDetails||'', additionalMedicalNotes:initialMeta.additionalMedicalNotes||'' } });
       setPin('');
     } catch (e) {
       console.error('Member portal login failed:', e);
@@ -13093,7 +13208,12 @@ function MemberPortalPage() {
     const html = `<main class="workout-print-page">${plans || '<p>No workout plans assigned.</p>'}</main><style>*{box-sizing:border-box}body{margin:0;padding:8px;background:#f4f7fb;color:#1b2942;font:10px/1.35 Arial,sans-serif}.workout-print-page{max-width:850px;margin:0 auto}.workout-card-sheet{font-family:Arial,Helvetica,sans-serif;background:#fff;color:#1b2942;border:1px solid #d9e4f0;border-radius:9px;overflow:hidden;margin:7px 0;break-inside:avoid}.workout-card-top{display:flex;justify-content:space-between;align-items:center;padding:7px 11px;background:linear-gradient(110deg,#f4f8fd,#eaf3fb);border-bottom:2px solid #159b91}.workout-brand{font-size:17px;line-height:1;font-weight:950;color:#173b5e}.workout-brand small{display:block;color:#168b9b;font-size:8px;letter-spacing:.08em;margin-top:3px}.workout-member-meta{display:flex;gap:14px;padding:5px 10px;background:#f5f8fc;color:#24527a;font-size:9px;font-weight:800}.workout-plan-strip{display:flex;justify-content:space-between;gap:8px;padding:5px 10px;background:#f7faff;border-bottom:1px solid #e5edf6;color:#24496d}.workout-plan-strip strong{font-size:11px}.workout-plan-strip span{font-size:9px;font-weight:900;color:#1769b2}.workout-day-card{margin:5px 9px 7px;border:1px solid #dce6f1;border-radius:7px;overflow:hidden;break-inside:avoid}.workout-day-heading{background:#e7f3ff;color:#1769b2;padding:5px 9px;font-size:10px;font-weight:950}.workout-warmup,.workout-cooldown{display:flex;justify-content:space-between;padding:3px 9px;font-size:9px;font-weight:900;color:#167f79}.workout-exercise-row{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:7px;align-items:center;padding:2px 8px;min-height:20px;background:#f7f9fc;color:#26384d;font-size:9px}.workout-exercise-row:nth-child(even){background:#eef3f8}.workout-number{width:14px;height:14px;border-radius:50%;display:grid;place-items:center;background:#159b91;color:#fff;font-size:8px;font-weight:950}.workout-exercise-dose{font-size:9px;font-weight:950;color:#1769b2}.workout-cooldown{border-top:1px solid #dce6f1;color:#168b9b}.workout-card-footer{display:flex;justify-content:space-between;padding:4px 10px;color:#71839a;font-size:8px;font-weight:800}@page{size:A4 portrait;margin:7mm}@media print{body{padding:0;background:#fff}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style>`;
     openPrintWindow('Preface Fitness Workout Card', html);
   };
-  const logout = () => { setPortalData(null); setIdentifier(''); setPin(''); setError(''); };
+  const logout = () => { setPortalData(null); setPortalPin(''); setProfileMessage(''); setIdentifier(''); setPin(''); setError(''); };
+  const updateProfileField = (section,key,value) => setProfileForm(current=>({...current,[section]:{...current[section],[key]:value}}));
+  const saveMemberPortalProfile = async () => {
+    if(!portalData?.member?.id || !portalPin) return; setProfileSaving(true); setProfileMessage('');
+    try { const {data,error:saveError}=await backendClient.rpc('member_portal_update_profile',{p_gym_id:gymId,p_member_id:portalData.member.id,p_pin:portalPin,p_profile:profileForm}); if(saveError) throw saveError; if(!data?.ok||!data.member) throw new Error('Profile update was not confirmed by the server.'); setPortalData(current=>({...current,member:data.member,profile_history:data.profile_history||current.profile_history||[]})); setProfileMessage('Your measurements and medical information have been saved successfully.'); } catch(e) { console.error('Member portal profile update failed:',e); setProfileMessage(e?.message||'Unable to save your profile. Please try again.'); } finally { setProfileSaving(false); }
+  };
   const card = { background:'rgba(255,255,255,.94)', border:'1px solid rgba(210,220,240,.9)', borderRadius:20, padding:20, boxShadow:'0 14px 36px rgba(44,55,110,.08)' };
   const label = { display:'block', fontSize:13, fontWeight:700, color:'#34445c', marginBottom:7 };
   const input = { width:'100%', boxSizing:'border-box', padding:'13px 14px', border:'1px solid #d7dfeb', borderRadius:11, fontSize:16, outlineColor:'#7654ef', background:'#fff' };
@@ -13127,6 +13247,19 @@ function MemberPortalPage() {
         <section style={{...card,marginBottom:16}}><h2 style={{fontSize:19,margin:'0 0 14px',background:'linear-gradient(90deg,#4f46e5,#0891b2)',WebkitBackgroundClip:'text',color:'transparent'}}>✦ Membership details</h2><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:14,fontSize:14}}><div><div style={{color:'#7b8798',marginBottom:4}}>Registered phone</div><strong>{portalData.member.phone||'—'}</strong></div><div><div style={{color:'#7b8798',marginBottom:4}}>Membership start</div><strong>{portalData.member.start_date||'—'}</strong></div><div><div style={{color:'#7b8798',marginBottom:4}}>Membership amount</div><strong>{moneyText(portalData.member.membership_amount)}</strong></div><div><div style={{color:'#7b8798',marginBottom:4}}>Amount paid</div><strong>{moneyText(portalData.member.paid_amount)}</strong></div></div></section>
         <section style={{...card,marginBottom:16}}><h2 style={{fontSize:19,margin:'0 0 14px',background:'linear-gradient(90deg,#059669,#0d9488)',WebkitBackgroundClip:'text',color:'transparent'}}>✦ Body measurements</h2>{!measurementRows.length?<p style={{color:'#778398',fontSize:14,margin:0}}>No body measurements have been added yet.</p>:<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(130px,1fr))',gap:10}}>{measurementRows.map(([name,value,unit])=><div key={name} style={{padding:12,borderRadius:11,background:'#f7f9fc',border:'1px solid #edf0f5'}}><div style={{fontSize:12,color:'#7b8798',marginBottom:5}}>{name}</div><strong style={{fontSize:17}}>{value}{unit?' '+unit:''}</strong></div>)}</div>}</section>
         <section style={{...card,marginBottom:16}}><h2 style={{fontSize:19,margin:'0 0 14px',background:'linear-gradient(90deg,#ea580c,#db2777)',WebkitBackgroundClip:'text',color:'transparent'}}>✦ Medical conditions & notes</h2>{(memberMeta.medicalConditions||[]).length===0 && !memberMeta.medicalOther && !memberMeta.surgeryDetails && !memberMeta.additionalMedicalNotes ? <p style={{color:'#778398',fontSize:14,margin:0}}>No medical conditions or notes have been recorded.</p>:<div style={{display:'grid',gap:10}}>{(memberMeta.medicalConditions||[]).length>0&&<div><div style={{fontSize:12,color:'#7b8798',marginBottom:6}}>Reported conditions / injuries</div><div style={{display:'flex',gap:7,flexWrap:'wrap'}}>{memberMeta.medicalConditions.map((condition)=><span key={condition} style={{padding:'6px 9px',borderRadius:99,background:'#fff4e5',border:'1px solid #ffe0b2',fontSize:12,fontWeight:700,color:'#8a5200'}}>{condition}</span>)}</div></div>}{memberMeta.medicalOther&&<div><div style={{fontSize:12,color:'#7b8798'}}>Other condition details</div><div style={{fontSize:14,whiteSpace:'pre-wrap'}}>{memberMeta.medicalOther}</div></div>}{memberMeta.surgeryDetails&&<div><div style={{fontSize:12,color:'#7b8798'}}>Surgery details</div><div style={{fontSize:14,whiteSpace:'pre-wrap'}}>{memberMeta.surgeryDetails}</div></div>}{memberMeta.additionalMedicalNotes&&<div><div style={{fontSize:12,color:'#7b8798'}}>Additional medical notes</div><div style={{fontSize:14,whiteSpace:'pre-wrap'}}>{memberMeta.additionalMedicalNotes}</div></div>}</div>}</section>
+        <section className="member-portal-no-print" style={{...card,marginBottom:16,border:'1px solid #c7d2fe'}}>
+          <h2 style={{fontSize:19,margin:'0 0 8px',color:'#5145cd'}}>✦ Update your fitness & health profile</h2>
+          <p style={{fontSize:13,color:'#718096',margin:'0 0 16px'}}>You can update only your own measurements and health information. Every save is recorded with its date and time.</p>
+          <div style={{fontWeight:850,marginBottom:9}}>Body measurements</div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(135px,1fr))',gap:10}}>{[['height','Height (cm)'],['weight','Weight (kg)'],['body_fat','Body fat (%)'],['chest','Chest (cm)'],['shoulder','Shoulder (cm)'],['biceps','Biceps (cm)'],['forearms','Forearms (cm)'],['waist','Waist (cm)'],['hips','Hips (cm)'],['thighs','Thighs (cm)'],['calves','Calves (cm)'],['neck','Neck (cm)']].map(([key,title])=><label key={key} style={{fontSize:12,fontWeight:750,color:'#526078'}}>{title}<input type="number" min="0" max="500" step="0.1" value={profileForm.measurements[key]??''} onChange={e=>updateProfileField('measurements',key,e.target.value)} style={{...input,marginTop:5,padding:'10px 11px',fontSize:14}} /></label>)}</div>
+          <div style={{fontWeight:850,margin:'18px 0 9px'}}>Medical conditions & injuries</div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:8}}>{MEMBER_MEDICAL_OPTIONS.map(condition=><label key={condition} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 9px',border:'1px solid #e7eaf0',borderRadius:9,fontSize:12,fontWeight:650}}><input type="checkbox" checked={(profileForm.medical.medicalConditions||[]).includes(condition)} onChange={e=>updateProfileField('medical','medicalConditions',e.target.checked?[...(profileForm.medical.medicalConditions||[]),condition]:(profileForm.medical.medicalConditions||[]).filter(x=>x!==condition))}/>{condition}</label>)}</div>
+          {[['medicalOther','Other condition details'],['surgeryDetails','Surgery details'],['additionalMedicalNotes','Additional medical notes']].map(([key,title])=><label key={key} style={{display:'block',fontSize:12,fontWeight:750,color:'#526078',marginTop:10}}>{title}<textarea rows="2" value={profileForm.medical[key]||''} onChange={e=>updateProfileField('medical',key,e.target.value)} style={{...input,marginTop:5,resize:'vertical',fontSize:14}} /></label>)}
+          <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',marginTop:14}}><button type="button" disabled={profileSaving} onClick={saveMemberPortalProfile} style={{border:0,borderRadius:11,padding:'12px 17px',background:'#5145cd',color:'#fff',fontWeight:850,cursor:profileSaving?'wait':'pointer'}}>{profileSaving?'Saving…':'Save profile changes'}</button>{profileMessage&&<span role="status" style={{fontSize:13,color:profileMessage.includes('successfully')?'#087f67':'#b42318'}}>{profileMessage}</span>}</div>
+        </section>
+        <section style={{...card,marginBottom:16}}><h2 style={{fontSize:19,margin:'0 0 12px',color:'#0f766e'}}>✦ Measurement progress history</h2>{!portalData.profile_history?.length?<p style={{fontSize:13,color:'#718096',margin:0}}>Your future updates will appear here with date-wise progress.</p>:<div style={{display:'grid',gap:10}}>{portalData.profile_history.map((entry,index)=>{const older=portalData.profile_history[index+1];return <div key={entry.id||index} style={{padding:12,border:'1px solid #e4edf3',borderRadius:11,background:'#f8fbfd'}}><strong style={{fontSize:13}}>{new Date(entry.changed_at).toLocaleString('en-IN')}</strong><div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:8}}>{Object.entries(entry.measurements||{}).filter(([,v])=>v!==''&&v!=null).map(([k,v])=>{const before=older?.measurements?.[k];const delta=before!==undefined&&before!==''&&Number.isFinite(Number(v))&&Number.isFinite(Number(before))?Number(v)-Number(before):null;return <span key={k} style={{padding:'5px 8px',borderRadius:8,background:'#e8f6f2',fontSize:11,color:'#11685f'}}>{k.replace('_',' ')}: {v}{delta!==null&&delta!==0?` (${delta>0?'+':''}${Number(delta.toFixed(1))})`:''}</span>})}</div></div>})}</div>}</section>
+        <section style={{...card,marginBottom:16}}><h2 style={{fontSize:19,margin:'0 0 12px',color:'#7c3aed'}}>✦ Medical information history</h2>{!portalData.profile_history?.length?<p style={{fontSize:13,color:'#718096',margin:0}}>Changes to your health information will be recorded here.</p>:<div style={{display:'grid',gap:10}}>{portalData.profile_history.map((entry,index)=><div key={entry.id||index} style={{padding:12,border:'1px solid #eee7fb',borderRadius:11}}><strong style={{fontSize:13}}>{new Date(entry.changed_at).toLocaleString('en-IN')}</strong><div style={{fontSize:12,color:'#6b5a80',marginTop:6}}>Conditions: {(entry.medical?.medicalConditions||[]).join(', ')||'None'}{entry.medical?.medicalOther?` · ${entry.medical.medicalOther}`:''}{entry.medical?.surgeryDetails?` · Surgery: ${entry.medical.surgeryDetails}`:''}{entry.medical?.additionalMedicalNotes?` · Notes: ${entry.medical.additionalMedicalNotes}`:''}</div></div>)}</div>}</section>
+        <section style={{...card,marginBottom:16}}><h2 style={{fontSize:19,margin:'0 0 12px',color:'#1769b2'}}>✦ Personal Training history</h2>{!portalData.pt_sessions?.length?<p style={{fontSize:13,color:'#718096',margin:0}}>No PT plan or session history is available yet.</p>:<div style={{display:'grid',gap:10}}>{portalData.pt_sessions.map((pt,index)=>{const total=Number(pt.sessions_total||0),done=Number(pt.sessions_completed||0),remaining=Math.max(0,total-done);return <div key={pt.id||index} style={{padding:13,border:'1px solid #dce7f2',borderRadius:12,background:'#f9fbff'}}><div style={{display:'flex',justifyContent:'space-between',gap:10,flexWrap:'wrap'}}><strong style={{fontSize:15,color:'#173b5d'}}>{pt.plan_name||pt.session_type||'Personal Training'}</strong><span style={{fontSize:11,fontWeight:850,color:remaining>0?'#087f67':'#b42318'}}>{remaining} sessions left</span></div><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(130px,1fr))',gap:9,marginTop:10,fontSize:12}}><div>Trainer<br/><strong>{pt.trainer_name||'Not recorded'}</strong></div><div>Start / PT date<br/><strong>{pt.session_date||'—'}</strong></div><div>Sessions<br/><strong>{done} completed / {total} total</strong></div><div>Expires on<br/><strong>{pt.expiry_date||'Not specified'}</strong></div><div>Status<br/><strong>{pt.status||'—'}</strong></div></div>{getPTSessionHistory(pt.notes).length>0&&<div style={{marginTop:10,paddingTop:9,borderTop:'1px solid #e4edf5'}}><div style={{fontSize:11,fontWeight:850,color:'#526078',marginBottom:6}}>Completed PT session log</div>{getPTSessionHistory(pt.notes).slice().reverse().map((log,logIndex)=><div key={log.id||logIndex} style={{display:'flex',justifyContent:'space-between',gap:8,fontSize:11,color:'#64748b',padding:'4px 0'}}><span>{log.date||'Session'} {log.time?`· ${log.time}`:''}</span><span>{log.recordedBy||pt.trainer_name||'Trainer'}</span></div>)}</div>}</div>})}</div>}</section>
         <section className="member-portal-workouts" style={{...card,marginBottom:16,background:'#ffffff',border:'1px solid #d9e4f0',color:'#1b2942'}}>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,flexWrap:'wrap',marginBottom:14}}>
             <h2 style={{fontSize:19,margin:0,color:'#1769b2',letterSpacing:'.04em'}}>✦ FITNESS • WORKOUT PLAN</h2>

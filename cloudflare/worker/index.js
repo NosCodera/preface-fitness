@@ -164,13 +164,52 @@ export default {
      if(credential?.pin_hash){const bcrypt=await import('bcryptjs');valid=await bcrypt.compare(pin,credential.pin_hash);}
      if(!valid){const attempts=Number(attempt?.attempts||0)+1;const locked=attempts>=5?now+900:null;await env.DB.prepare(`INSERT INTO member_portal_login_attempts(gym_id,identifier_key,attempts,window_started_at,locked_until,updated_at) VALUES(?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(gym_id,identifier_key) DO UPDATE SET attempts=excluded.attempts,window_started_at=CASE WHEN member_portal_login_attempts.window_started_at<? THEN excluded.window_started_at ELSE member_portal_login_attempts.window_started_at END,locked_until=excluded.locked_until,updated_at=CURRENT_TIMESTAMP`).bind(gymId,identifierKey,attempts,now,locked,now-900).run();return response({error:'Invalid member ID/mobile or PIN'},401,headers);}
      await env.DB.prepare('DELETE FROM member_portal_login_attempts WHERE gym_id=? AND identifier_key=?').bind(gymId,identifierKey).run();
-     const [payments,attendance,workouts,diets]=await Promise.all([
+     const [payments,attendance,workouts,diets,ptSessions,profileHistory]=await Promise.all([
       env.DB.prepare('SELECT * FROM payments WHERE gym_id=? AND member_id=? ORDER BY COALESCE(payment_date,created_at) DESC LIMIT 100').bind(gymId,member.id).all(),
       env.DB.prepare('SELECT * FROM attendance WHERE gym_id=? AND member_id=? ORDER BY attendance_date DESC LIMIT 100').bind(gymId,member.id).all(),
-      env.DB.prepare('SELECT * FROM workout_plans WHERE gym_id=? AND (assigned_member_ids_json LIKE ? OR assigned_member_ids_json IS NULL) ORDER BY created_at DESC').bind(gymId,`%${member.id}%`).all(),
-      env.DB.prepare('SELECT * FROM diet_plans WHERE gym_id=? AND (assigned_member_ids_json LIKE ? OR assigned_member_ids_json IS NULL) ORDER BY created_at DESC').bind(gymId,`%${member.id}%`).all()
+      env.DB.prepare('SELECT * FROM workout_plans WHERE gym_id=? AND assigned_member_ids_json LIKE ? ORDER BY created_at DESC').bind(gymId,`%${member.id}%`).all(),
+      env.DB.prepare('SELECT * FROM diet_plans WHERE gym_id=? AND assigned_member_ids_json LIKE ? ORDER BY created_at DESC').bind(gymId,`%${member.id}%`).all(),
+      env.DB.prepare('SELECT p.*,COALESCE(NULLIF(p.trainer_name,\'\'),t.name) AS trainer_name FROM pt_sessions p LEFT JOIN trainers t ON t.id=p.trainer_id AND t.gym_id=p.gym_id WHERE p.gym_id=? AND p.member_id=? ORDER BY COALESCE(p.session_date,p.created_at) DESC').bind(gymId,member.id).all(),
+      env.DB.prepare('SELECT id,changed_at,measurements_json,medical_json FROM member_portal_profile_history WHERE gym_id=? AND member_id=? ORDER BY changed_at DESC LIMIT 100').bind(gymId,member.id).all()
      ]);
-     return response({ok:true,member:decodeRow('members',member),payments:(payments.results||[]).map(r=>decodeRow('payments',r)),attendance:attendance.results||[],workout_plans:(workouts.results||[]).map(r=>decodeRow('workout_plans',r)),diet_plans:(diets.results||[]).map(r=>decodeRow('diet_plans',r))},200,headers);
+     return response({ok:true,member:decodeRow('members',member),payments:(payments.results||[]).map(r=>decodeRow('payments',r)),attendance:attendance.results||[],workout_plans:(workouts.results||[]).map(r=>decodeRow('workout_plans',r)),diet_plans:(diets.results||[]).map(r=>decodeRow('diet_plans',r)),pt_sessions:(ptSessions.results||[]).map(r=>decodeRow('pt_sessions',r)),profile_history:(profileHistory.results||[]).map(r=>({...r,measurements:JSON.parse(r.measurements_json||'{}'),medical:JSON.parse(r.medical_json||'{}')}))},200,headers);
+    }
+    if(name==='member_portal_update_profile'){
+     const gymId=String(a.p_gym_id||''); const memberId=String(a.p_member_id||''); const pin=String(a.p_pin||''); const profile=a.p_profile||{};
+     if(!gymId||!memberId||!/^[0-9]{6}$/.test(pin)) return response({error:'Member, gym and 6-digit PIN are required'},400,headers);
+     const member=await env.DB.prepare('SELECT * FROM members WHERE id=? AND gym_id=?').bind(memberId,gymId).first();
+     const credential=member?await env.DB.prepare('SELECT pin_hash FROM member_portal_credentials WHERE gym_id=? AND member_id=?').bind(gymId,memberId).first():null;
+     if(!member||!credential?.pin_hash) return response({error:'Member portal account not found'},404,headers);
+     const attemptKey=await sha256(`${gymId}:profile:${memberId}`); const now=Math.floor(Date.now()/1000);
+     const attempt=await env.DB.prepare('SELECT attempts,locked_until,window_started_at FROM member_portal_login_attempts WHERE gym_id=? AND identifier_key=?').bind(gymId,attemptKey).first();
+     if(attempt?.locked_until&&Number(attempt.locked_until)>now) return response({error:'Too many failed attempts. Try again in 15 minutes.'},429,headers);
+     const bcrypt=await import('bcryptjs'); const pinValid=await bcrypt.compare(pin,credential.pin_hash);
+     if(!pinValid){const attempts=Number(attempt?.attempts||0)+1;const locked=attempts>=5?now+900:null;await env.DB.prepare(`INSERT INTO member_portal_login_attempts(gym_id,identifier_key,attempts,window_started_at,locked_until,updated_at) VALUES(?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(gym_id,identifier_key) DO UPDATE SET attempts=excluded.attempts,window_started_at=CASE WHEN member_portal_login_attempts.window_started_at<? THEN excluded.window_started_at ELSE member_portal_login_attempts.window_started_at END,locked_until=excluded.locked_until,updated_at=CURRENT_TIMESTAMP`).bind(gymId,attemptKey,attempts,now,locked,now-900).run();return response({error:'Invalid member PIN'},401,headers);}
+     await env.DB.prepare('DELETE FROM member_portal_login_attempts WHERE gym_id=? AND identifier_key=?').bind(gymId,attemptKey).run();
+     const allowed=['height','weight','body_fat','chest','shoulder','biceps','forearms','waist','hips','thighs','calves','neck'];
+     const measurements={}; for(const key of allowed){const value=profile.measurements?.[key]; if(value!==undefined&&value!==null&&String(value).trim()!==''){const n=Number(value);if(!Number.isFinite(n)||n<0||n>500)return response({error:`Invalid ${key} value`},400,headers);measurements[key]=String(n);}else measurements[key]='';}
+     const conditions=Array.isArray(profile.medical?.medicalConditions)?profile.medical.medicalConditions.map(x=>String(x).trim()).filter(Boolean).slice(0,40):[];
+     const medical={medicalConditions:conditions,medicalOther:String(profile.medical?.medicalOther||'').slice(0,2000),surgeryDetails:String(profile.medical?.surgeryDetails||'').slice(0,2000),additionalMedicalNotes:String(profile.medical?.additionalMedicalNotes||'').slice(0,3000)};
+     const marker='<!--PREFACE_MEMBER_META:'; const notes=String(member.notes||''); const idx=notes.lastIndexOf(marker); let meta={}; if(idx>=0){try{meta=JSON.parse(notes.slice(idx+marker.length).split('-->')[0]||'{}')}catch{meta={}}} const clean=idx>=0?notes.slice(0,idx).trim():notes.trim();
+     const nextMeta={...meta,...medical}; for(const key of ['chest','shoulder','biceps','forearms','waist','hips','thighs','calves','neck'])nextMeta[key]=measurements[key]||'';
+     const nextNotes=`${clean}${clean?'\n\n':''}${marker}${JSON.stringify(nextMeta)}-->`;
+     const previousMeasurements={height:member.height||'',weight:member.weight||'',body_fat:member.body_fat||'',...Object.fromEntries(['chest','shoulder','biceps','forearms','waist','hips','thighs','calves','neck'].map(k=>[k,meta[k]||'']))};
+     const previousMedical={medicalConditions:meta.medicalConditions||[],medicalOther:meta.medicalOther||'',surgeryDetails:meta.surgeryDetails||'',additionalMedicalNotes:meta.additionalMedicalNotes||''};
+     const changedAt=new Date().toISOString(); const historyId=uid();
+     const existingHistory=await env.DB.prepare('SELECT id FROM member_portal_profile_history WHERE gym_id=? AND member_id=? LIMIT 1').bind(gymId,memberId).first();
+     const statements=[];
+     if(!existingHistory && (Object.values(previousMeasurements).some(v=>String(v||'').trim()!=='') || previousMedical.medicalConditions.length || previousMedical.medicalOther || previousMedical.surgeryDetails || previousMedical.additionalMedicalNotes)){
+      statements.push(env.DB.prepare('INSERT INTO member_portal_profile_history(id,gym_id,member_id,changed_at,measurements_json,medical_json) VALUES(?,?,?,?,?,?)').bind(uid(),gymId,memberId,member.updated_at||member.created_at||changedAt,JSON.stringify(previousMeasurements),JSON.stringify(previousMedical)));
+     }
+     statements.push(
+      env.DB.prepare('UPDATE members SET height=?,weight=?,body_fat=?,notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND gym_id=?').bind(measurements.height||null,measurements.weight||null,measurements.body_fat||null,nextNotes,memberId,gymId),
+      env.DB.prepare('INSERT INTO member_portal_profile_history(id,gym_id,member_id,changed_at,measurements_json,medical_json) VALUES(?,?,?,?,?,?)').bind(historyId,gymId,memberId,changedAt,JSON.stringify(measurements),JSON.stringify(medical)),
+      env.DB.prepare('INSERT INTO progress_records(id,gym_id,member_id,record_date,weight,body_fat,chest,waist,hips,arms,thighs,neck,notes,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)').bind(uid(),gymId,memberId,changedAt.slice(0,10),Number(measurements.weight)||null,Number(measurements.body_fat)||null,Number(measurements.chest)||null,Number(measurements.waist)||null,Number(measurements.hips)||null,Number(measurements.biceps)||null,Number(measurements.thighs)||null,Number(measurements.neck)||null,'Member portal self-reported update')
+     );
+     await env.DB.batch(statements);
+     const updated=await env.DB.prepare('SELECT * FROM members WHERE id=? AND gym_id=?').bind(memberId,gymId).first();
+     const rows=await env.DB.prepare('SELECT id,changed_at,measurements_json,medical_json FROM member_portal_profile_history WHERE gym_id=? AND member_id=? ORDER BY changed_at DESC LIMIT 100').bind(gymId,memberId).all();
+     return response({ok:true,member:decodeRow('members',updated),profile_history:(rows.results||[]).map(r=>({...r,measurements:JSON.parse(r.measurements_json||'{}'),medical:JSON.parse(r.medical_json||'{}')}))},200,headers);
     }
     const user=await auth(req,env); if(!user) return response({error:'Unauthorized'},401,headers);
     if(name==='get_my_access') return response({userId:user.id,gymId:user.gym_id,role:user.role,permissions:JSON.parse(user.permissions_json||'{}')},200,headers);
