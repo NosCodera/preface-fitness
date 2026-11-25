@@ -2651,6 +2651,7 @@ function App() {
       return 'Dashboard';
     }
   });
+  const [membersPageKey, setMembersPageKey] = useState(0);
   const [query, setQuery] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [modal, setModal] = useState(null);
@@ -3172,8 +3173,9 @@ function App() {
       return;
     }
 
+    // Honor the package start date explicitly selected in the renewal form.
     const currentDays = getDaysRemaining(member.expiry);
-    const renewalStart = currentDays >= 0 && member.expiry ? member.expiry : today;
+    const renewalStart = String(renewal.packageStartDate || (currentDays >= 0 && member.expiry ? member.expiry : today));
     const newExpiry = addMonthsToDate(renewalStart, plan.months);
     const renewalAmount = Number(
       renewal.amount || planPrices[plan.name] || plan.price
@@ -4797,6 +4799,9 @@ function App() {
 
     setActive(label);
     setQuery('');
+    // Re-mount MembersPage when Members is clicked so an open profile
+    // closes and the member list is shown even if the active section is unchanged.
+    if (label === 'Members') setMembersPageKey((key) => key + 1);
   };
 
   // Store the current page only for this tab. The initializer reads it only
@@ -5006,7 +5011,7 @@ function App() {
             <>
           {active === 'Performance' && <PerformancePage data={data} />}
           {active === 'Dashboard' && <Dashboard {...{ activeMembers, expiringMembers, overdue, revenue, data, navigate, setModal, markAttendance, isReadOnlyStaff }} />}
-          {active === 'Members' && <MembersPage members={data.members} query={query} setQuery={setQuery} setModal={setModal} markAttendance={markAttendance} deleteMember={deleteMember} settings={data.settings || {}} payments={data.payments || []} ptSessions={data.ptSessions || []} trainers={data.trainers || []} workoutPlans={data.workoutPlans || []} dietPlans={data.dietPlans || []} sendMemberPortalCredentials={sendMemberPortalCredentials} isOwner={isOwner} />}
+          {active === 'Members' && <MembersPage key={membersPageKey} members={data.members} query={query} setQuery={setQuery} setModal={setModal} markAttendance={markAttendance} deleteMember={deleteMember} settings={data.settings || {}} payments={data.payments || []} ptSessions={data.ptSessions || []} trainers={data.trainers || []} workoutPlans={data.workoutPlans || []} dietPlans={data.dietPlans || []} sendMemberPortalCredentials={sendMemberPortalCredentials} isOwner={isOwner} />}
           {active === 'Leads' && <LeadsPage leads={data.leads} members={data.members} setModal={setModal} updateLeadStage={updateLeadStage} updateLeadDetails={updateLeadDetails} deleteLead={deleteLead} convertLeadToMember={convertLeadToMember} />}
           {active === 'Website Enquiries' && <WebsiteEnquiriesPage enquiries={data.websiteEnquiries || []} onUpdateStatus={updateWebsiteEnquiryStatus} onDelete={deleteWebsiteEnquiry} />}
           {active === 'Memberships' && <MembershipsPage members={data.members} data={data} setModal={setModal} planPrices={planPrices} setData={setData} setToast={setToast} onRenewMembership={renewMembership} />}
@@ -7015,8 +7020,12 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
       const description = String(payment.description || '');
       const renewal = notes.match(/Membership renewal - ([^|]+)/i);
       if (renewal?.[1]) return renewal[1].trim();
-      const described = description.match(/^(.+?)\\s+membership$/i);
-      return described?.[1]?.trim() || member.plan || 'Membership';
+      // Initial/imported payments store the original plan in their notes.
+      // Never use member.plan as a fallback: it changes with every renewal.
+      const notedPlan = notes.match(/(?:^|\|)\s*Plan:\s*([^|]+)/i);
+      if (notedPlan?.[1]) return notedPlan[1].trim();
+      const described = description.match(/^(.+?)\s+membership(?:\s+\(Excel import\))?$/i);
+      return described?.[1]?.trim() || 'Membership';
     };
 
     const membershipHistory = memberMembershipPayments.map((payment, index, all) => {
@@ -13081,7 +13090,7 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
           </div>
 
           <div className="form-section-title" style={{marginTop:24}}>Facilities & training section images</div>
-          <p style={{fontSize:13,color:'#718096',lineHeight:1.55,marginTop:-4}}>Change the images for each facility and training section shown on your public gym page.</p>
+          <p style={{fontSize:13,color:'#718096',lineHeight:1.55,marginTop:-4}}>Yahan se screenshot wale “Everything you need to train with purpose” section ki har card image alag change kar sakte ho. Select image, preview check karo, phir Save public page dabao.</p>
           <div className="form-grid three">
             {defaultFacilityImageSettings.map((item) => {
               const chosen = form.publicPage?.facilityImages?.[publicFacilityImageKey(item.name)] || item.image;
@@ -13309,7 +13318,7 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
             <section className="card">
               <div className="card-header"><div><h3>Customer Self Registration control</h3><p>Turn registration ON only when reception is ready to accept new member submissions.</p></div><QrCode size={21}/></div>
               <label style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:14,padding:16,borderRadius:14,background:form.customerRegistrationEnabled?'#e9fbf5':'#fff7ed',border:`1px solid ${form.customerRegistrationEnabled?'#9de6c8':'#fed7aa'}`,fontWeight:850,color:'#25364b'}}><span>Allow customer registration</span><span style={{display:'flex',alignItems:'center',gap:10}}><span style={{fontSize:12,color:form.customerRegistrationEnabled?'#07856f':'#b45309'}}>{form.customerRegistrationEnabled?'ON':'OFF'}</span><input type="checkbox" checked={Boolean(form.customerRegistrationEnabled)} onChange={async(e)=>{const enabled=e.target.checked;setForm(f=>({...f,customerRegistrationEnabled:enabled}));setData(d=>({...d,settings:{...(d.settings||{}),customerRegistrationEnabled:enabled}}));try{await saveCloudSettings({customerRegistrationEnabled:enabled});showActionFeedback(enabled?'Customer registration enabled.':'Customer registration disabled.');}catch(err){setForm(f=>({...f,customerRegistrationEnabled:!enabled}));setData(d=>({...d,settings:{...(d.settings||{}),customerRegistrationEnabled:!enabled}}));showActionFeedback(err.message||'Could not update registration setting.','error');}}}/></span></label>
-              <p style={{fontSize:13,lineHeight:1.6,color:'#687789',margin:'12px 0 0'}}>Turning this off will prevent customers from registering themselves unneccessarily.</p>
+              <p style={{fontSize:13,lineHeight:1.6,color:'#687789',margin:'12px 0 0'}}>OFF hone par public form submit nahi ho sakta. Ye setting Worker par bhi enforce hoti hai. QR aur link visible rahenge, taaki aap unhe print/share kar sako.</p>
             </section>
           </div>
         )}
