@@ -326,7 +326,8 @@ function mapMember(row) {
 
     notes: row.notes || '',
 
-    photo: row.photo || '',
+    // Support both current and legacy D1 member photo columns.
+    photo: row.photo || row.photo_url || row.metadata?.photo || row.metadata?.photoUrl || '',
 
     dietPreference: row.diet_preference || '',
 
@@ -1170,7 +1171,7 @@ function buildSettings(rows) {
 
   for (const row of rows) {
 
-    if (row.setting_key) {
+    if (row.setting_key && !String(row.setting_key).startsWith('staff_profile_')) {
 
       out[row.setting_key] =
 
@@ -2271,4 +2272,22 @@ export async function setStaffActive(
 
   return data;
 
+}
+
+export async function saveStaffProfile(userId, { displayName = '', avatar = '' } = {}) {
+  const { data, error } = await backendClient.rpc('set_staff_profile', {
+    p_user_id: userId,
+    p_display_name: displayName,
+    p_avatar: avatar,
+  });
+  throwIfError(error, 'Unable to save staff profile');
+  return data;
+}
+
+export async function deleteStaffLogin(userId) {
+  const { data, error } = await backendClient.rpc('delete_staff_login', {
+    p_user_id: userId,
+  });
+  throwIfError(error, 'Unable to delete staff account');
+  return data;
 }

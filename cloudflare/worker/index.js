@@ -276,8 +276,8 @@ export default {
     }
     if(name==='get_gym_staff'){
      if(user.role!=='owner') return response({error:'Only the gym owner can view staff accounts'},403,headers);
-     const rows=await env.DB.prepare("SELECT gu.id AS user_id,u.email,u.display_name,gu.role,gu.permissions_json AS permissions,gu.is_active FROM gym_users gu JOIN users u ON u.id=gu.id WHERE gu.gym_id=? AND gu.role<>'owner' ORDER BY u.email").bind(user.gym_id).all();
-     return response({staff:(rows.results||[]).map(r=>({...r,permissions:JSON.parse(r.permissions||'{}'),is_active:!!r.is_active}))},200,headers);
+     const rows=await env.DB.prepare("SELECT gu.id AS user_id,u.email,u.display_name,gu.role,gu.permissions_json AS permissions,gu.is_active,s.setting_value_json AS profile_json FROM gym_users gu JOIN users u ON u.id=gu.id LEFT JOIN app_settings s ON s.gym_id=gu.gym_id AND s.setting_key=('staff_profile_' || gu.id) WHERE gu.gym_id=? AND gu.role<>'owner' ORDER BY u.email").bind(user.gym_id).all();
+     return response({staff:(rows.results||[]).map(r=>{let profile={};try{profile=JSON.parse(r.profile_json||'{}')}catch{};return {...r,avatar:profile.avatar||'',permissions:JSON.parse(r.permissions||'{}'),is_active:!!r.is_active};})},200,headers);
     }
     if(name==='update_staff_permissions'){
      if(user.role!=='owner') return response({error:'Only the gym owner can change staff permissions'},403,headers);
@@ -296,6 +296,33 @@ export default {
      await env.DB.prepare('UPDATE gym_users SET is_active=? WHERE id=? AND gym_id=?').bind(active?1:0,targetId,user.gym_id).run();
      if(!active) await env.DB.prepare('DELETE FROM sessions WHERE user_id=? AND gym_id=?').bind(targetId,user.gym_id).run();
      return response({success:true,userId:targetId,is_active:active},200,headers);
+    }
+    if(name==='set_staff_profile'){
+     if(user.role!=='owner') return response({error:'Only the gym owner can edit staff profiles'},403,headers);
+     const targetId=String(a.p_user_id||''); const displayName=String(a.p_display_name||'').trim(); const avatar=String(a.p_avatar||'');
+     if(!targetId||!displayName||displayName.length>100) return response({error:'A staff name of 1 to 100 characters is required'},400,headers);
+     const target=await env.DB.prepare("SELECT role FROM gym_users WHERE id=? AND gym_id=?").bind(targetId,user.gym_id).first();
+     if(!target||target.role==='owner') return response({error:'Staff account not found'},404,headers);
+     if(avatar && (!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(avatar) || avatar.length>180000)) return response({error:'Invalid or oversized profile photo. Please choose a smaller image.'},400,headers);
+     await env.DB.batch([
+      env.DB.prepare('UPDATE users SET display_name=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND gym_id=?').bind(displayName,targetId,user.gym_id),
+      env.DB.prepare("INSERT INTO app_settings(id,gym_id,setting_key,setting_value_json,created_at,updated_at) VALUES(?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) ON CONFLICT(gym_id,setting_key) DO UPDATE SET setting_value_json=excluded.setting_value_json,updated_at=CURRENT_TIMESTAMP").bind(uid(),user.gym_id,`staff_profile_${targetId}`,JSON.stringify({avatar}))
+     ]);
+     return response({success:true,userId:targetId,display_name:displayName,avatar},200,headers);
+    }
+    if(name==='delete_staff_login'){
+     if(user.role!=='owner') return response({error:'Only the gym owner can delete staff accounts'},403,headers);
+     const targetId=String(a.p_user_id||'');
+     if(!targetId||targetId===user.id) return response({error:'You cannot delete your own account'},400,headers);
+     const target=await env.DB.prepare("SELECT role FROM gym_users WHERE id=? AND gym_id=?").bind(targetId,user.gym_id).first();
+     if(!target||target.role==='owner') return response({error:'Staff account not found'},404,headers);
+     await env.DB.batch([
+      env.DB.prepare('DELETE FROM sessions WHERE user_id=? AND gym_id=?').bind(targetId,user.gym_id),
+      env.DB.prepare('DELETE FROM app_settings WHERE gym_id=? AND setting_key=?').bind(user.gym_id,`staff_profile_${targetId}`),
+      env.DB.prepare('DELETE FROM gym_users WHERE id=? AND gym_id=?').bind(targetId,user.gym_id),
+      env.DB.prepare('DELETE FROM users WHERE id=? AND gym_id=?').bind(targetId,user.gym_id)
+     ]);
+     return response({success:true,userId:targetId},200,headers);
     }
     if(name==='public_get_gym_profile'||name==='public_check_in'||name==='public_submit_feedback') return response({error:'Use the public /api/public/* endpoint for this operation.'},400,headers);
     if(name==='set_member_portal_pin'){
@@ -317,10 +344,22 @@ export default {
     const table=match[1], id=match[2], spec=TABLE_MAP[table]; if(!spec) return response({error:'Unknown table'},404,headers);
     if(req.method==='GET'){
      if(id){const row=await env.DB.prepare(`SELECT * FROM ${table} WHERE id=? AND gym_id=?`).bind(id,user.gym_id).first();return row?response({data:decodeRow(table,row)},200,headers):response({error:'Record not found'},404,headers);}
-     const limit=Math.min(500,Math.max(1,Number(url.searchParams.get('limit')||100)));
-     const orderBy=table==='payments' ? "COALESCE(created_at,payment_date,'') DESC, rowid DESC" : "COALESCE(created_at,'') DESC";
-     const rows=await env.DB.prepare(`SELECT * FROM ${table} WHERE gym_id=? ORDER BY ${orderBy} LIMIT ?`).bind(user.gym_id,limit).all();
-     return response({data:(rows.results||[]).map(r=>decodeRow(table,r))},200,headers);
+     const limit=Math.min(table==='members'?10:500,Math.max(1,Number(url.searchParams.get('limit')||100)));
+     const after=Math.max(0,Number(url.searchParams.get('after')||0));
+     // Stable ordering is essential when the client requests subsequent pages.
+     const orderBy=table==='payments'
+      ? "COALESCE(created_at,payment_date,'') DESC, rowid DESC"
+      : table==='members'
+       ? "COALESCE(created_at,'') DESC, rowid DESC"
+       : "COALESCE(created_at,'') DESC";
+     // Member rows can contain base64 photos. Return at most 10 rows per
+     // response; the client follows the offset cursor in separate requests.
+     // This avoids the previous serial 2-row query loop and the 50 MB D1 cap.
+     const rows=await env.DB.prepare(
+      `SELECT * FROM ${table} WHERE gym_id=? ORDER BY ${orderBy} LIMIT ? OFFSET ?`
+     ).bind(user.gym_id,limit,after).all();
+     const resultRows=rows.results||[];
+     return response({data:resultRows.map(r=>decodeRow(table,r))},200,headers);
     }
     if(!canWrite(user,table)) return response({error:'Permission denied'},403,headers);
     if(req.method==='POST'||req.method==='PUT'||req.method==='PATCH'){

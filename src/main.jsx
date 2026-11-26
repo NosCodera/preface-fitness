@@ -69,6 +69,8 @@ import {
   provisionStaffLogin,
   updateStaffPermissions,
   setStaffActive,
+  saveStaffProfile,
+  deleteStaffLogin,
 } from './cloudData';
 
 const PT_HISTORY_MARKER = '<!--PREFACE_PT_HISTORY:';
@@ -2656,6 +2658,13 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState('');
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [profileNameDraft, setProfileNameDraft] = useState('');
+  const [profilePhotoDraft, setProfilePhotoDraft] = useState('');
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [adminMenuOpen, setAdminMenuOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notificationReadIds, setNotificationReadIds] = useState([]);
   const [excelImportPreview, setExcelImportPreview] = useState(null);
   const [excelImportBusy, setExcelImportBusy] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -2673,7 +2682,105 @@ function App() {
   // Existing staff accounts may not yet have an explicit 'enquiries' key.
   // Reuse their existing Leads or Customer Feedback permission for access.
   const can = (permission) => isOwner || access.permissions?.[permission] === true || (permission === 'enquiries' && (access.permissions?.leads === true || access.permissions?.feedback === true));
+  const adminProfile = data.settings?.adminProfile || {};
+  const adminDisplayName = String(adminProfile.name || '').trim() || (isOwner ? 'Administrator' : 'Staff Member');
+  const greetingHour = new Date().getHours();
+  const greeting = greetingHour >= 4 && greetingHour < 12 ? 'Good morning' : greetingHour >= 12 && greetingHour < 18 ? 'Good afternoon' : greetingHour >= 18 ? 'Good evening' : 'Hello';
+  const notificationItems = useMemo(() => {
+    const enquiries = (data.websiteEnquiries || []).map((item) => ({
+      id: `enquiry:${String(item.cloudId || item.id)}`,
+      type: 'enquiry',
+      title: 'New website enquiry',
+      name: item.details?.name || item.memberName || 'Website visitor',
+      detail: item.details?.interestedPlan || item.details?.message || 'Submitted an enquiry',
+      date: item.createdAt || item.date || '',
+      page: 'Website Enquiries',
+    }));
+    const feedback = (data.feedbacks || []).map((item) => ({
+      id: `feedback:${String(item.cloudId || item.id)}`,
+      type: 'feedback',
+      title: 'Customer feedback received',
+      name: item.memberName || 'Customer',
+      detail: item.feedback || item.category || 'New feedback',
+      date: item.createdAt || item.date || '',
+      page: 'Customer Feedback',
+    }));
+    return [...enquiries, ...feedback].sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()).slice(0, 30);
+  }, [data.websiteEnquiries, data.feedbacks]);
+  const unreadNotificationCount = notificationItems.filter((item) => !notificationReadIds.includes(item.id)).length;
   const seenWebsiteEnquiriesRef = useRef(null);
+  const seenAdminNotificationsRef = useRef(null);
+
+  useEffect(() => {
+    if (!access.gymId) return;
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(`preface-notification-read:${access.gymId}`) || '[]');
+      setNotificationReadIds(Array.isArray(stored) ? stored : []);
+    } catch { setNotificationReadIds([]); }
+  }, [access.gymId]);
+
+  const markNotificationRead = (id) => {
+    setNotificationReadIds((current) => {
+      const next = current.includes(id) ? current : [...current, id];
+      try { window.localStorage.setItem(`preface-notification-read:${access.gymId}`, JSON.stringify(next.slice(-500))); } catch {}
+      return next;
+    });
+  };
+  const markAllNotificationsRead = () => {
+    const allIds = notificationItems.map((item) => item.id);
+    setNotificationReadIds(allIds);
+    try { window.localStorage.setItem(`preface-notification-read:${access.gymId}`, JSON.stringify(allIds)); } catch {}
+  };
+
+  const openProfileEditor = () => {
+    setProfileNameDraft(String(adminProfile.name || ''));
+    setProfilePhotoDraft(String(adminProfile.photo || ''));
+    setAdminMenuOpen(false);
+    setProfileModalOpen(true);
+  };
+
+  const handleProfilePhoto = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { setToast('Please choose an image file.'); return; }
+    if (file.size > 5 * 1024 * 1024) { setToast('Please choose an image smaller than 5 MB.'); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const image = new Image();
+      image.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxSide = 240;
+        const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+        const context = canvas.getContext('2d');
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        setProfilePhotoDraft(canvas.toDataURL('image/jpeg', 0.76));
+      };
+      image.onerror = () => setToast('Unable to read this image. Please try another photo.');
+      image.src = String(reader.result || '');
+    };
+    reader.onerror = () => setToast('Unable to read this image. Please try again.');
+    reader.readAsDataURL(file);
+  };
+
+  const saveAdminProfile = async () => {
+    const name = String(profileNameDraft || '').trim();
+    if (!name) { setToast('Please enter the administrator name.'); return; }
+    setProfileSaving(true);
+    const profile = { name: name.slice(0, 60), photo: profilePhotoDraft || '' };
+    try {
+      await saveCloudSettings({ adminProfile: profile });
+      setData((current) => ({ ...current, settings: { ...(current.settings || {}), adminProfile: profile } }));
+      setProfileModalOpen(false);
+      setToast('Administrator profile updated successfully.');
+    } catch (error) {
+      console.error('Administrator profile save failed:', error);
+      setToast(error?.message || 'Could not save administrator profile.');
+    } finally {
+      setProfileSaving(false);
+    }
+  };
 
   // Staff may add a new member and record payments. Other mutations are
   // blocked at the app-shell capture layer; deletion remains blocked always.
@@ -4693,15 +4800,14 @@ function App() {
   };
 
 
-  // Public enquiries use the existing public_submit_feedback RPC and feedbacks table,
-  // so no database migration or new table is required. Realtime is used when enabled;
-  // polling is the fallback and also works when the feedbacks table is not in Realtime.
+  // Keep website enquiries and customer feedback fresh. Polling is the fallback;
+  // the existing realtime channel refreshes immediately when the backend supports it.
   useEffect(() => {
     if (!isAuthenticated || !access.gymId || cloudStatus !== 'connected') return undefined;
     let stopped = false;
     let refreshInProgress = false;
 
-    const refreshWebsiteEnquiries = async (notify = false) => {
+    const refreshAdminNotifications = async (notify = false) => {
       if (refreshInProgress || stopped) return;
       refreshInProgress = true;
       try {
@@ -4709,41 +4815,54 @@ function App() {
         if (stopped || !cloud) return;
         const websiteEnquiries = Array.isArray(cloud.websiteEnquiries) ? cloud.websiteEnquiries : [];
         const regularFeedbacks = Array.isArray(cloud.feedbacks) ? cloud.feedbacks : [];
-        const currentIds = new Set(websiteEnquiries.map((item) => String(item.cloudId || item.id)));
+        const currentIds = new Set([
+          ...websiteEnquiries.map((item) => `enquiry:${String(item.cloudId || item.id)}`),
+          ...regularFeedbacks.map((item) => `feedback:${String(item.cloudId || item.id)}`),
+        ]);
 
-        if (seenWebsiteEnquiriesRef.current === null) {
-          seenWebsiteEnquiriesRef.current = currentIds;
+        if (seenAdminNotificationsRef.current === null) {
+          seenAdminNotificationsRef.current = currentIds;
+          // On first use only, treat existing records as the initial inbox baseline.
+          let hasStoredReadState = false;
+          try { hasStoredReadState = window.localStorage.getItem(`preface-notification-read:${access.gymId}`) !== null; } catch {}
+          if (!hasStoredReadState) {
+            setNotificationReadIds((current) => {
+              const next = [...new Set([...current, ...currentIds])];
+              try { window.localStorage.setItem(`preface-notification-read:${access.gymId}`, JSON.stringify(next.slice(-500))); } catch {}
+              return next;
+            });
+          }
         } else {
-          const previousIds = seenWebsiteEnquiriesRef.current;
-          const hasNew = [...currentIds].some((id) => !previousIds.has(id));
-          if (notify && hasNew) setToast('New customer enquiry received');
-          seenWebsiteEnquiriesRef.current = currentIds;
+          const previousIds = seenAdminNotificationsRef.current;
+          const newIds = [...currentIds].filter((id) => !previousIds.has(id));
+          if (notify && newIds.length) {
+            setToast(newIds.some((id) => id.startsWith('enquiry:')) ? 'New website enquiry received' : 'New customer feedback received');
+          }
+          seenAdminNotificationsRef.current = currentIds;
         }
 
         setData((current) => ({
           ...current,
-          // The feedback list deliberately excludes Website Enquiry records.
           feedbacks: regularFeedbacks,
           websiteEnquiries,
         }));
       } catch (error) {
-        console.error('Unable to refresh website enquiries:', error);
+        console.error('Unable to refresh admin notifications:', error);
       } finally {
         refreshInProgress = false;
       }
     };
 
-    // Establish a baseline first so old enquiries do not trigger a notification.
-    refreshWebsiteEnquiries(false);
-    const pollId = window.setInterval(() => refreshWebsiteEnquiries(true), 30000);
+    refreshAdminNotifications(false);
+    const pollId = window.setInterval(() => refreshAdminNotifications(true), 30000);
     const channel = backendClient
-      .channel(`preface-website-enquiries-${access.gymId}`)
+      .channel(`preface-admin-notifications-${access.gymId}`)
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
         table: 'feedbacks',
         filter: `gym_id=eq.${access.gymId}`,
-      }, () => refreshWebsiteEnquiries(true))
+      }, () => refreshAdminNotifications(true))
       .subscribe();
 
     return () => {
@@ -4925,6 +5044,34 @@ function App() {
           <ShieldCheck size={14} style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: '6px' }} /> Staff Access
         </div>
       )}
+      {profileModalOpen && isOwner && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !profileSaving) setProfileModalOpen(false); }}>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="admin-profile-title" style={{maxWidth:520}}>
+            <div className="modal-header">
+              <div><h3 id="admin-profile-title">Edit administrator profile</h3><span>Update the name and photo shown across your dashboard.</span></div>
+              <button type="button" className="icon-btn" aria-label="Close profile editor" onClick={() => setProfileModalOpen(false)} disabled={profileSaving}><X size={18}/></button>
+            </div>
+            <div className="modal-body">
+              <FormField label="Administrator name">
+                <input value={profileNameDraft} onChange={(event) => setProfileNameDraft(event.target.value)} placeholder="Enter your name" maxLength={60} autoFocus />
+              </FormField>
+              <div style={{display:'grid',justifyItems:'center',gap:12,padding:'14px 0'}}>
+                {profilePhotoDraft ? <img src={profilePhotoDraft} alt="Administrator profile preview" style={{width:112,height:112,borderRadius:28,objectFit:'cover',border:'4px solid #fff',boxShadow:'0 8px 24px rgba(35,40,80,.16)'}}/> : <div style={{width:112,height:112,borderRadius:28,display:'grid',placeItems:'center',background:'linear-gradient(135deg,#7255ff,#a44cff)',color:'#fff',fontSize:42,fontWeight:900}}>{(profileNameDraft.trim().charAt(0) || 'A').toUpperCase()}</div>}
+                <label className="btn btn-secondary" style={{cursor:'pointer'}}>
+                  <Camera size={16}/> {profilePhotoDraft ? 'Change photo' : 'Upload photo'}
+                  <input type="file" accept="image/*" onChange={handleProfilePhoto} style={{display:'none'}}/>
+                </label>
+                {profilePhotoDraft && <button type="button" className="btn btn-danger btn-sm" onClick={() => setProfilePhotoDraft('')}>Remove photo</button>}
+                <small style={{color:'#8792a5',textAlign:'center'}}>JPG, PNG or WebP · Maximum 5 MB. Photo is resized before saving.</small>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-secondary" onClick={() => setProfileModalOpen(false)} disabled={profileSaving}>Cancel</button>
+              <button type="button" className="btn btn-primary" onClick={saveAdminProfile} disabled={profileSaving || !profileNameDraft.trim()}><Save size={16}/>{profileSaving ? 'Saving…' : 'Save profile'}</button>
+            </div>
+          </div>
+        </div>
+      )}
       <aside className={`sidebar sidebar-compact ${sidebarOpen ? 'open' : 'collapsed'}`}>
         <div className="brand-block compact-brand">
           <div className="brand-logo"><img src={LOGO_URL} alt="Preface Fitness logo" /></div>
@@ -4974,8 +5121,43 @@ function App() {
             </div>
             <div className="topbar-actions">
               <button className="icon-btn vibrant-icon-btn" title="Logout" onClick={logout}><LogOut size={19} /></button>
-              <button className="icon-btn vibrant-icon-btn" title="Website enquiries" onClick={() => navigate('Website Enquiries')}><Bell size={20} />{(data.websiteEnquiries || []).some((item) => !['Resolved', 'Closed'].includes(item.status)) && <span className="notification-dot" />}</button>
-              <div className="admin-chip vibrant-admin-chip"><div className="avatar">{isOwner ? 'O' : 'S'}</div><div><strong>{isOwner ? 'Administrator' : 'Staff Member'}</strong><span>{isOwner ? 'Owner' : 'Staff'}</span></div><ChevronDown size={15} /></div>
+              <div style={{position:'relative'}}>
+                <button className="icon-btn vibrant-icon-btn" title="Notifications" aria-label="Open notifications" aria-expanded={notificationsOpen} onClick={() => { setNotificationsOpen((open) => !open); setAdminMenuOpen(false); }} style={{position:'relative'}}>
+                  <Bell size={20} />
+                  {unreadNotificationCount > 0 && <span style={{position:'absolute',top:-5,right:-5,minWidth:18,height:18,padding:'0 4px',borderRadius:99,background:'#ef476f',color:'#fff',fontSize:10,fontWeight:900,display:'grid',placeItems:'center',border:'2px solid #fff'}}>{unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}</span>}
+                </button>
+                {notificationsOpen && <div role="dialog" aria-label="Notifications" style={{position:'absolute',right:0,top:54,width:360,maxWidth:'min(92vw,360px)',maxHeight:470,overflow:'hidden',zIndex:150,background:'#fff',border:'1px solid #e7e5f2',borderRadius:17,boxShadow:'0 18px 55px rgba(31,35,72,.20)',color:'#1d2940'}}>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'15px 16px',borderBottom:'1px solid #edf0f6'}}>
+                    <div><strong style={{fontSize:16}}>Notifications</strong><div style={{fontSize:11,color:'#8993a6',marginTop:3}}>{unreadNotificationCount} unread</div></div>
+                    <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                      {unreadNotificationCount > 0 && <button type="button" onClick={markAllNotificationsRead} style={{border:0,background:'transparent',color:'#694cf2',fontSize:11,fontWeight:800,cursor:'pointer'}}>Mark all read</button>}
+                      <button type="button" aria-label="Close notifications" onClick={() => setNotificationsOpen(false)} style={{border:0,background:'#f4f2ff',borderRadius:8,width:28,height:28,cursor:'pointer',color:'#6751c8'}}><X size={15}/></button>
+                    </div>
+                  </div>
+                  <div style={{maxHeight:385,overflowY:'auto'}}>
+                    {notificationItems.filter((item) => !notificationReadIds.includes(item.id)).length ? notificationItems.filter((item) => !notificationReadIds.includes(item.id)).map((item) => {
+                      const unread = true;
+                      return <button type="button" key={item.id} onClick={() => { markNotificationRead(item.id); setNotificationsOpen(false); navigate(item.page); }} style={{width:'100%',display:'flex',gap:11,textAlign:'left',padding:'13px 15px',border:0,borderBottom:'1px solid #f0f1f6',background:'#f7f5ff',cursor:'pointer',color:'#26344c'}}>
+                        <span style={{width:36,height:36,flex:'0 0 36px',display:'grid',placeItems:'center',borderRadius:12,background:item.type==='enquiry'?'#e9f5ff':'#e8fbf5',color:item.type==='enquiry'?'#347dcc':'#0a9b79'}}>{item.type==='enquiry'?<Mail size={17}/>:<MessageCircle size={17}/>}</span>
+                        <span style={{minWidth:0,flex:1}}><strong style={{display:'block',fontSize:12,fontWeight:850}}>{item.title}</strong><span style={{display:'block',fontSize:12,marginTop:3,color:'#536078'}}>{item.name}</span><span style={{display:'block',fontSize:11,marginTop:3,color:'#8792a5',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{item.detail}</span><small style={{display:'block',marginTop:5,color:'#9aa3b2',fontSize:10}}>{item.date ? new Date(item.date).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : 'Recently'}</small></span>
+                        {unread && <span style={{width:8,height:8,marginTop:5,borderRadius:99,background:'#7652f6',flex:'0 0 8px'}}/>}
+                      </button>;
+                    }) : <div style={{padding:28,textAlign:'center',color:'#8b95a7'}}><Bell size={24}/><strong style={{display:'block',marginTop:8,fontSize:13}}>You're all caught up</strong><span style={{fontSize:11}}>Read notifications are automatically hidden. New enquiries and feedback will appear here.</span></div>}
+                  </div>
+                  <button type="button" onClick={() => { setNotificationsOpen(false); navigate('Website Enquiries'); }} style={{width:'100%',padding:12,border:0,background:'#faf9ff',color:'#694cf2',fontWeight:850,fontSize:12,cursor:'pointer'}}>Open enquiry inbox</button>
+                </div>}
+              </div>
+              <div style={{position:'relative'}}>
+                <button type="button" className="admin-chip vibrant-admin-chip" aria-haspopup="menu" aria-expanded={adminMenuOpen} onClick={() => { setAdminMenuOpen((open) => !open); setNotificationsOpen(false); }} style={{display:'flex',alignItems:'center',gap:9,cursor:'pointer',color:'inherit'}}>
+                  {isOwner && adminProfile.photo ? <img src={adminProfile.photo} alt="" style={{width:37,height:37,borderRadius:12,objectFit:'cover'}}/> : <div className="avatar">{isOwner ? (adminDisplayName.charAt(0).toUpperCase() || 'O') : 'S'}</div>}
+                  <div style={{textAlign:'left',minWidth:0}}><strong style={{display:'block',maxWidth:135,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{isOwner ? adminDisplayName : 'Staff Member'}</strong><span>{isOwner ? 'Owner' : 'Staff'}</span></div>
+                  <ChevronDown size={15} />
+                </button>
+                {adminMenuOpen && <div role="menu" style={{position:'absolute',right:0,top:56,minWidth:190,zIndex:150,padding:6,background:'#fff',border:'1px solid #e7e5f2',borderRadius:13,boxShadow:'0 16px 42px rgba(31,35,72,.18)'}}>
+                  {isOwner && <button type="button" role="menuitem" onClick={openProfileEditor} style={{width:'100%',display:'flex',alignItems:'center',gap:9,padding:'11px 12px',border:0,borderRadius:9,background:'transparent',color:'#26344c',fontWeight:800,textAlign:'left',cursor:'pointer'}}><Pencil size={16}/> Edit profile</button>}
+                  {!isOwner && <div style={{padding:'10px 12px',fontSize:12,color:'#7b879b'}}>Signed in as staff</div>}
+                </div>}
+              </div>
             </div>
           </div>
           <div className="top-navigation-scroll" aria-label="Main navigation">
@@ -6756,6 +6938,9 @@ function PTSessionModal({ trainers, members, onClose, onSave }) {
 
 function Dashboard({ activeMembers, expiringMembers, overdue, revenue, data, navigate, setModal, markAttendance, isReadOnlyStaff }) {
   const [fromDate, setFromDate] = useState(today);
+  const dashboardHour = new Date().getHours();
+  const greeting = dashboardHour >= 4 && dashboardHour < 12 ? 'Good morning' : dashboardHour >= 12 && dashboardHour < 18 ? 'Good afternoon' : dashboardHour >= 18 ? 'Good evening' : 'Hello';
+  const adminDisplayName = String(data?.settings?.adminProfile?.name || '').trim() || (isReadOnlyStaff ? 'Staff Member' : 'Administrator');
   const [toDate, setToDate] = useState(today);
   const [activityFrom, setActivityFrom] = useState(today);
   const [activityTo, setActivityTo] = useState(today);
@@ -6851,7 +7036,7 @@ function Dashboard({ activeMembers, expiringMembers, overdue, revenue, data, nav
       <div className="vibrant-dashboard-hero">
         <div>
           <div className="eyebrow">PREFACE FITNESS · COMMAND CENTER</div>
-          <h1>Good day, {isReadOnlyStaff ? 'Staff' : 'Administrator'} <span>👋</span></h1>
+          <h1>{greeting}, {isReadOnlyStaff ? 'Staff' : adminDisplayName} <span>👋</span></h1>
           <p>Everything important about your gym, at a glance.</p>
         </div>
         <div className="vibrant-dashboard-actions">
@@ -7696,7 +7881,30 @@ function PublicMemberRegistrationPage({ gymId }) {
   const field=(label,key,type='text',placeholder='')=><label style={labelStyle}>{label}<input type={type} value={form[key]} onChange={e=>update(key,e.target.value)} placeholder={placeholder} style={inputStyle}/></label>;
   const selectField=(label,key,options)=><label style={labelStyle}>{label}<select value={form[key]} onChange={e=>update(key,e.target.value)} style={inputStyle}><option value="">Choose if applicable</option>{options.map(v=><option key={v} value={v}>{v}</option>)}</select></label>;
   if(!apiBase)return <div style={{padding:30}}>Registration service is not configured. Please contact the gym.</div>;
-  if(done)return <div className="selfreg-page"><div className="selfreg-success"><div className="selfreg-success-icon">✓</div><h2>Registration submitted!</h2><p>Your details have been securely sent to the gym team.</p><strong>Registration reference: {done.memberCode||done.memberId}</strong><p>The gym team will confirm your membership and payment.</p></div></div>;
+  if(done)return <div className="selfreg-page selfreg-success-page">
+    <style>{`
+      .selfreg-success-page{min-height:100vh;box-sizing:border-box;display:grid;place-items:center;padding:28px 16px 48px;background:radial-gradient(circle at 8% 8%,rgba(64,132,255,.22),transparent 32%),radial-gradient(circle at 92% 12%,rgba(18,190,160,.20),transparent 30%),linear-gradient(145deg,#f1f6ff 0%,#eaf9f6 52%,#fff5eb 100%);font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;color:#172b4d}
+      .selfreg-success-page .selfreg-success{position:relative;isolation:isolate;box-sizing:border-box;width:min(100%,560px);margin:0 auto;padding:42px clamp(22px,6vw,48px) 34px;text-align:center;overflow:hidden;border:1px solid rgba(255,255,255,.92);border-radius:30px;background:rgba(255,255,255,.94);box-shadow:0 28px 85px rgba(30,62,110,.17);backdrop-filter:blur(14px);animation:selfregSuccessIn .55s cubic-bezier(.2,.8,.2,1) both}
+      .selfreg-success-page .selfreg-success:before{content:"";position:absolute;z-index:-1;width:250px;height:250px;right:-115px;top:-145px;border-radius:50%;background:linear-gradient(135deg,rgba(31,181,160,.15),rgba(63,126,240,.10))}
+      .selfreg-success-page .selfreg-success-icon{width:86px;height:86px;margin:0 auto 22px;border:7px solid #e8fbf5;border-radius:28px;display:grid;place-items:center;background:linear-gradient(135deg,#0da88e,#42c99d);color:white;font-size:45px;font-weight:900;box-shadow:0 12px 28px rgba(13,168,142,.25);transform:rotate(-4deg)}
+      .selfreg-success-page .selfreg-success h2{margin:0 0 12px;color:#142d50;font-size:clamp(27px,5vw,35px);line-height:1.16;letter-spacing:-.8px}
+      .selfreg-success-page .selfreg-success p{margin:12px auto;color:#66758c;font-size:15px;line-height:1.75;max-width:420px}
+      .selfreg-success-page .selfreg-success strong{display:block;box-sizing:border-box;margin:24px 0 20px;padding:17px 18px;border:1px dashed #9acdc9;border-radius:17px;background:linear-gradient(120deg,#f0fbff,#effcf6);color:#126d83;font-size:17px;line-height:1.5;overflow-wrap:anywhere}
+      .selfreg-success-page .selfreg-success strong:before{content:"REGISTRATION REFERENCE";display:block;margin-bottom:6px;color:#688096;font-size:10px;font-weight:900;letter-spacing:1.5px}
+      .selfreg-success-page .selfreg-success p:last-child{margin:0;padding:15px 16px;border-radius:16px;background:#f5f7ff;color:#596982;font-size:13px;text-align:left}
+      .selfreg-success-page .selfreg-success p:last-child:before{content:"NEXT STEP  •  ";color:#5369cb;font-size:10px;font-weight:900;letter-spacing:1px}
+      @keyframes selfregSuccessIn{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
+      @media(max-width:480px){.selfreg-success-page{padding:18px 12px}.selfreg-success-page .selfreg-success{padding:34px 21px 25px;border-radius:24px}.selfreg-success-page .selfreg-success-icon{width:76px;height:76px;border-radius:24px}}
+      @media(prefers-reduced-motion:reduce){.selfreg-success-page .selfreg-success{animation:none}}
+    `}</style>
+    <div className="selfreg-success" role="status" aria-live="polite">
+      <div className="selfreg-success-icon" aria-hidden="true">✓</div>
+      <h2>Registration submitted!</h2>
+      <p>Your details have been securely sent to the gym team.</p>
+      <strong>{done.memberCode||done.memberId}</strong>
+      <p>The gym team will confirm your membership and payment.</p>
+    </div>
+  </div>;
   if(error&&!info)return <div className="selfreg-page"><div className="selfreg-status">{error}</div></div>;
   if(info?.enabled===false)return <div className="selfreg-page"><div className="selfreg-success"><div className="selfreg-success-icon">!</div><h2>Registration is currently closed</h2><p>The gym is not accepting online registrations right now. Please contact reception.</p></div></div>;
   return <div className="selfreg-page"><style>{`
@@ -10144,6 +10352,7 @@ function RenewalModal({ member, onClose, onRenew, planPrices }) {
     plan: defaultPlan,
     amount: Number(member.amount || planPrices[defaultPlan] || 0),
     paid: 0,
+    mode: 'Cash',
     paymentDate: today,
     packageStartDate: defaultPackageStart,
   });
@@ -10172,7 +10381,8 @@ function RenewalModal({ member, onClose, onRenew, planPrices }) {
       <FormField label="Amount paid"><input type="number" min="0" value={form.paid} onChange={(e) => setForm({ ...form, paid:e.target.value })} /></FormField>
     </div>
 
-    <div className="form-grid two renewal-date-grid">
+    <div className="form-grid three renewal-date-grid">
+      <FormField label="Payment mode"><select value={form.mode || 'Cash'} onChange={(e) => setForm((current) => ({ ...current, mode: e.target.value }))}><option>Cash</option><option>UPI</option><option>Card</option><option>Bank transfer</option></select></FormField>
       <FormField label="Date of payment">
         <input type="date" value={form.paymentDate} onChange={(e) => setForm({ ...form, paymentDate:e.target.value })} />
       </FormField>
@@ -10965,6 +11175,11 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
     due: 0, paymentMode: 'Cash', gstMode: 'without', gstRate: 5, height: '', weight: '', bodyFat: '', chest: '', shoulder: '', biceps: '', forearms: '', waist: '', hips: '', thighs: '', calves: '', neck: '', trainer: '', referral: 'None / Walk-In', referralOther: '', medicalConditions: [], medicalOther: '', surgeryDetails: '', additionalMedicalNotes: '', notes: '',
   });
 
+  const [referralCustomerSearch, setReferralCustomerSearch] = useState('');
+  const filteredReferralCustomers = members
+    .filter((item) => !member || item.id !== member.id)
+    .filter((item) => `${item.name || ''} ${item.id || ''}`.toLowerCase().includes(referralCustomerSearch.trim().toLowerCase()));
+
   const update = (key, value) => {
     setForm((current) => {
       const next = { ...current, [key]: value };
@@ -11158,7 +11373,7 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
     <div className="form-grid two">
       <FormField label="Diet preference"><select value={form.dietPreference || ''} onChange={(e) => update('dietPreference', e.target.value)}><option value="">Not specified</option><option>Veg</option><option>Eggetarian</option><option>Non-veg</option></select></FormField>
       <FormField label="Referral type"><select value={form.referral || 'None / Walk-In'} onChange={(e) => { const value = e.target.value; update('referral', value); if (value !== 'Customer') update('referredBy', ''); if (value !== 'Others') update('referralOther', ''); }}><option>None / Walk-In</option><option>Customer</option><option>Others</option></select></FormField>
-      {form.referral === 'Customer' && <FormField label="Select referring customer"><select value={form.referredBy || ''} onChange={(e) => update('referredBy', e.target.value)}><option value="">Select customer</option>{members.filter((item) => !member || item.id !== member.id).map((item) => <option key={item.id} value={item.id}>{item.name} · {item.id}</option>)}</select></FormField>}
+      {form.referral === 'Customer' && <FormField label="Select referring customer"><input type="search" value={referralCustomerSearch} onChange={(e) => setReferralCustomerSearch(e.target.value)} placeholder="Search customer by name or ID" style={{ marginBottom: 7 }} /><select value={form.referredBy || ''} onChange={(e) => update('referredBy', e.target.value)}><option value="">Select customer</option>{filteredReferralCustomers.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.id}</option>)}</select>{referralCustomerSearch && filteredReferralCustomers.length === 0 && <small style={{ display: 'block', color: '#718096', marginTop: 5 }}>No matching customers found.</small>}</FormField>}
       {form.referral === 'Others' && <FormField label="Referral details"><input value={form.referralOther || ''} onChange={(e) => update('referralOther', e.target.value)} placeholder="e.g. Friend, banner, local event" /></FormField>}
     </div>
     <FormField label="Address"><textarea rows="2" value={form.address} onChange={(e) => update('address', e.target.value)} placeholder="Member address" /></FormField>
@@ -12112,8 +12327,13 @@ function StaffAccessPage() {
   const [permissions, setPermissions] = useState(DEFAULT_STAFF_PERMISSIONS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [deletingStaff, setDeletingStaff] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileForm, setProfileForm] = useState({ name: '', avatar: '' });
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const photoInputRef = useRef(null);
 
   const loadStaff = async () => {
     setLoading(true);
@@ -12122,9 +12342,9 @@ function StaffAccessPage() {
       const rows = await getGymStaff();
       setStaff(rows);
       if (rows.length) {
-        const first = rows[0];
-        setSelectedStaffId(first.user_id);
-        setPermissions({ ...DEFAULT_STAFF_PERMISSIONS, ...(first.permissions || {}) });
+        const current = rows.find((item) => item.user_id === selectedStaffId) || rows[0];
+        setSelectedStaffId(current.user_id);
+        setPermissions({ ...DEFAULT_STAFF_PERMISSIONS, ...(current.permissions || {}) });
       } else {
         setSelectedStaffId('');
         setPermissions(DEFAULT_STAFF_PERMISSIONS);
@@ -12136,9 +12356,13 @@ function StaffAccessPage() {
     }
   };
 
+  useEffect(() => { loadStaff(); }, []);
+
+  const selectedStaff = staff.find((item) => item.user_id === selectedStaffId);
+
   useEffect(() => {
-    loadStaff();
-  }, []);
+    setProfileForm({ name: selectedStaff?.display_name || '', avatar: selectedStaff?.avatar || '' });
+  }, [selectedStaffId, selectedStaff?.display_name, selectedStaff?.avatar]);
 
   const createStaff = async (event) => {
     event.preventDefault();
@@ -12154,12 +12378,12 @@ function StaffAccessPage() {
       });
       const account = created?.user || created;
       if (!account?.user_id) throw new Error('Staff account was not confirmed by the server.');
-      const row = { ...account, permissions: account.permissions || DEFAULT_STAFF_PERMISSIONS, is_active: true };
+      const row = { ...account, avatar: '', permissions: account.permissions || DEFAULT_STAFF_PERMISSIONS, is_active: true };
       setStaff((current) => [...current, row]);
       setSelectedStaffId(row.user_id);
       setPermissions({ ...DEFAULT_STAFF_PERMISSIONS, ...(row.permissions || {}) });
       setNewStaff({ name: '', email: '', password: '' });
-      setMessage(`Staff account created for ${row.email}. They can now sign in using the email and password.`);
+      setMessage(`Staff account created for ${row.email}.`);
     } catch (err) {
       setError(err?.message || 'Unable to create staff account.');
     } finally {
@@ -12167,203 +12391,189 @@ function StaffAccessPage() {
     }
   };
 
-  const selectedStaff = staff.find((item) => item.user_id === selectedStaffId);
-
   const handleStaffChange = (userId) => {
     setSelectedStaffId(userId);
     const selected = staff.find((item) => item.user_id === userId);
-    setPermissions({
-      ...DEFAULT_STAFF_PERMISSIONS,
-      ...(selected?.permissions || {}),
-    });
+    setPermissions({ ...DEFAULT_STAFF_PERMISSIONS, ...(selected?.permissions || {}) });
     setMessage('');
     setError('');
   };
 
-  const togglePermission = (key) => {
-    setPermissions((current) => ({
-      ...current,
-      [key]: !current[key],
-    }));
-  };
-
-  const setAllPermissions = (value) => {
-    setPermissions(
-      Object.fromEntries(
-        STAFF_PERMISSION_DEFINITIONS.map((item) => [item.key, value])
-      )
-    );
-  };
+  const togglePermission = (key) => setPermissions((current) => ({ ...current, [key]: !current[key] }));
+  const setAllPermissions = (value) => setPermissions(Object.fromEntries(STAFF_PERMISSION_DEFINITIONS.map((item) => [item.key, value])));
 
   const savePermissions = async () => {
     if (!selectedStaffId) return;
-    setSaving(true);
-    setMessage('');
-    setError('');
+    setSaving(true); setMessage(''); setError('');
     try {
       await updateStaffPermissions(selectedStaffId, permissions);
-      setStaff((current) => current.map((item) => (
-        item.user_id === selectedStaffId
-          ? { ...item, permissions }
-          : item
-      )));
+      setStaff((current) => current.map((item) => item.user_id === selectedStaffId ? { ...item, permissions } : item));
       setMessage('Permissions saved successfully.');
-    } catch (err) {
-      setError(err?.message || 'Unable to save permissions.');
-    } finally {
-      setSaving(false);
-    }
+    } catch (err) { setError(err?.message || 'Unable to save permissions.'); }
+    finally { setSaving(false); }
   };
 
   const toggleStaffStatus = async () => {
     if (!selectedStaff) return;
     const nextStatus = !selectedStaff.is_active;
-    setMessage('');
-    setError('');
+    setMessage(''); setError('');
     try {
       await setStaffActive(selectedStaff.user_id, nextStatus);
-      setStaff((current) => current.map((item) => (
-        item.user_id === selectedStaff.user_id
-          ? { ...item, is_active: nextStatus }
-          : item
-      )));
+      setStaff((current) => current.map((item) => item.user_id === selectedStaff.user_id ? { ...item, is_active: nextStatus } : item));
       setMessage(nextStatus ? 'Staff account enabled.' : 'Staff account disabled.');
-    } catch (err) {
-      setError(err?.message || 'Unable to update staff status.');
-    }
+    } catch (err) { setError(err?.message || 'Unable to update staff status.'); }
   };
 
-  if (loading) {
-    return (
-      <div>
-        <div className="page-header">
-          <div>
-            <h1>Staff Access</h1>
-            <p>Loading staff accounts...</p>
-          </div>
-        </div>
-        <section className="card">
-          <div style={{ padding: '24px', color: '#718096' }}>Loading...</div>
-        </section>
-      </div>
-    );
-  }
+  const readStaffPhoto = (file) => new Promise((resolve, reject) => {
+    if (!file) return resolve('');
+    if (!/^image\/(jpeg|png|webp)$/i.test(file.type)) return reject(new Error('Please choose a JPG, PNG or WEBP image.'));
+    if (file.size > 5 * 1024 * 1024) return reject(new Error('Photo must be smaller than 5 MB.'));
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read this image.'));
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => reject(new Error('This image could not be opened.'));
+      image.onload = () => {
+        const canvas = document.createElement('canvas');
+        const scale = Math.min(1, 320 / Math.max(image.width, image.height));
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+        const context = canvas.getContext('2d');
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.76));
+      };
+      image.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  const handlePhotoChange = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const avatar = await readStaffPhoto(file);
+      setProfileForm((current) => ({ ...current, avatar }));
+      setError('');
+    } catch (err) { setError(err.message); }
+    event.target.value = '';
+  };
+
+  const saveProfile = async (event) => {
+    event.preventDefault();
+    if (!selectedStaff) return;
+    const name = String(profileForm.name || '').trim();
+    if (!name) { setError('Please enter the staff member name.'); return; }
+    setSavingProfile(true); setError(''); setMessage('');
+    try {
+      await saveStaffProfile(selectedStaff.user_id, { displayName: name, avatar: profileForm.avatar || '' });
+      setStaff((current) => current.map((item) => item.user_id === selectedStaff.user_id ? { ...item, display_name: name, avatar: profileForm.avatar || '' } : item));
+      setProfileOpen(false);
+      setMessage('Staff profile updated successfully.');
+    } catch (err) { setError(err?.message || 'Unable to save staff profile.'); }
+    finally { setSavingProfile(false); }
+  };
+
+  const removeStaff = async () => {
+    if (!selectedStaff) return;
+    const confirmed = window.confirm(`Permanently delete ${selectedStaff.display_name || selectedStaff.email}'s staff login? They will no longer be able to sign in. This cannot be undone.`);
+    if (!confirmed) return;
+    setDeletingStaff(true); setError(''); setMessage('');
+    try {
+      await deleteStaffLogin(selectedStaff.user_id);
+      const remaining = staff.filter((item) => item.user_id !== selectedStaff.user_id);
+      setStaff(remaining);
+      const next = remaining[0];
+      setSelectedStaffId(next?.user_id || '');
+      setPermissions({ ...DEFAULT_STAFF_PERMISSIONS, ...(next?.permissions || {}) });
+      setProfileOpen(false);
+      setMessage('Staff account permanently deleted.');
+    } catch (err) { setError(err?.message || 'Unable to delete staff account.'); }
+    finally { setDeletingStaff(false); }
+  };
+
+  const avatarStyle = { width: 62, height: 62, borderRadius: '20px', objectFit: 'cover', background: 'linear-gradient(135deg,#ede9ff,#dff8f3)', border: '2px solid #fff', boxShadow: '0 5px 16px rgba(40,55,90,.12)' };
+  const initials = (name, email) => String(name || email || 'S').trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
+
+  if (loading) return <div><div className="page-header"><div><h1>Staff Access</h1><p>Loading staff accounts...</p></div></div><section className="card"><div style={{ padding: 24, color: '#718096' }}>Loading staff workspace...</div></section></div>;
 
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h1>Staff Access</h1>
-          <p>Choose which sections each staff member can access.</p>
-        </div>
+        <div><h1>Staff Access</h1><p>Manage your team, profile photos and individual feature permissions.</p></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#718096', fontSize: 13 }}><Users size={17}/> {staff.length} team {staff.length === 1 ? 'member' : 'members'}</div>
       </div>
 
-      {error && (
-        <div style={{ marginBottom: '16px', padding: '12px 14px', borderRadius: '10px', background: '#fff4f4', border: '1px solid #ffd7d7', color: '#b83240' }}>
-          {error}
-        </div>
-      )}
+      {error && <div style={{ marginBottom: 16, padding: '12px 14px', borderRadius: 12, background: '#fff4f4', border: '1px solid #ffd7d7', color: '#b83240' }}>{error}</div>}
+      {message && <div style={{ marginBottom: 16, padding: '12px 14px', borderRadius: 12, background: '#effaf7', border: '1px solid #d4eee6', color: '#14796d' }}>{message}</div>}
 
-      <section className="card" style={{ marginBottom: '18px' }}>
-        <div className="card-header">
-          <div>
-            <h3><UserPlus size={18} style={{ verticalAlign: 'middle', marginRight: 7 }} />Add staff account</h3>
-            <p>Create a separate login for a staff member. Password must contain at least 8 characters.</p>
-          </div>
+      <section className="card" style={{ marginBottom: 18, overflow: 'hidden' }}>
+        <div style={{ padding: '18px 20px', background: 'linear-gradient(115deg,#f5f2ff 0%,#effbf9 100%)', borderBottom: '1px solid #e8edf4' }}>
+          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 9 }}><UserPlus size={19}/> Add a team member</h3>
+          <p style={{ margin: '6px 0 0', color: '#718096', fontSize: 13 }}>Create a secure staff login, then add their photo and configure access.</p>
         </div>
-        <form onSubmit={createStaff} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 12, alignItems: 'end' }}>
-          <label className="professional-field">Staff name
-            <input required maxLength={100} value={newStaff.name} onChange={(event) => setNewStaff((v) => ({ ...v, name: event.target.value }))} placeholder="Full name" />
-          </label>
-          <label className="professional-field">Email address
-            <input required type="email" maxLength={254} value={newStaff.email} onChange={(event) => setNewStaff((v) => ({ ...v, email: event.target.value }))} placeholder="staff@example.com" />
-          </label>
-          <label className="professional-field">Temporary password
-            <input required type="password" minLength={8} maxLength={128} autoComplete="new-password" value={newStaff.password} onChange={(event) => setNewStaff((v) => ({ ...v, password: event.target.value }))} placeholder="At least 8 characters" />
-          </label>
-          <button className="btn btn-primary" type="submit" disabled={creatingStaff}>
-            {creatingStaff ? 'Creating account...' : 'Create staff login'}
-          </button>
+        <form onSubmit={createStaff} style={{ padding: 20, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 12, alignItems: 'end' }}>
+          <label className="professional-field">Staff name<input required maxLength={100} value={newStaff.name} onChange={(event) => setNewStaff((v) => ({ ...v, name: event.target.value }))} placeholder="Full name"/></label>
+          <label className="professional-field">Email address<input required type="email" maxLength={254} value={newStaff.email} onChange={(event) => setNewStaff((v) => ({ ...v, email: event.target.value }))} placeholder="staff@example.com"/></label>
+          <label className="professional-field">Temporary password<input required type="password" minLength={8} maxLength={128} autoComplete="new-password" value={newStaff.password} onChange={(event) => setNewStaff((v) => ({ ...v, password: event.target.value }))} placeholder="At least 8 characters"/></label>
+          <button className="btn btn-primary" type="submit" disabled={creatingStaff}>{creatingStaff ? 'Creating account...' : <><Plus size={16}/> Create staff login</>}</button>
         </form>
       </section>
 
-      {staff.length === 0 ? (
-        <section className="card">
-          <div className="card-header"><div><h3>No staff accounts yet</h3><p>Create the first staff login using the form above. You can then configure its permissions below.</p></div></div>
+      {staff.length === 0 ? <section className="card" style={{ padding: 32, textAlign: 'center' }}>
+        <div style={{ width: 64, height: 64, margin: '0 auto 12px', borderRadius: 22, background: '#f1edff', color: '#7654e8', display: 'grid', placeItems: 'center' }}><Users size={28}/></div>
+        <h3>No staff accounts yet</h3><p style={{ color: '#718096' }}>Create the first team login above to get started.</p>
+      </section> : <>
+        <section className="card" style={{ marginBottom: 18, padding: 18 }}>
+          <div className="card-header" style={{ marginBottom: 14 }}><div><h3>Team members</h3><p>Select a profile to manage its details and permissions.</p></div></div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(245px,1fr))', gap: 12 }}>
+            {staff.map((item) => {
+              const active = item.user_id === selectedStaffId;
+              return <button key={item.user_id} type="button" onClick={() => handleStaffChange(item.user_id)} style={{ textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12, padding: 14, borderRadius: 16, border: active ? '1.5px solid #8060ed' : '1px solid #e5eaf2', background: active ? 'linear-gradient(120deg,#f5f1ff,#f2fbfa)' : '#fff', cursor: 'pointer', boxShadow: active ? '0 8px 22px rgba(112,80,220,.10)' : 'none', color: '#203246' }}>
+                {item.avatar ? <img src={item.avatar} alt="" style={avatarStyle}/> : <div style={{ ...avatarStyle, display: 'grid', placeItems: 'center', color: '#7153df', fontSize: 19, fontWeight: 800 }}>{initials(item.display_name,item.email)}</div>}
+                <span style={{ minWidth: 0, flex: 1 }}><strong style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.display_name || 'Staff member'}</strong><span style={{ display: 'block', color: '#718096', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.email}</span><span style={{ display: 'inline-flex', marginTop: 6, fontSize: 11, fontWeight: 700, color: item.is_active ? '#16845d' : '#b83240' }}>{item.is_active ? '● Active' : '● Disabled'}</span></span>
+                {active && <CheckCircle2 size={19} color="#7654e8"/>}
+              </button>;
+            })}
+          </div>
         </section>
-      ) : (
-        <>
-          <section className="card" style={{ marginBottom: '18px' }}>
-            <div className="card-header">
-              <div>
-                <h3>Select staff member</h3>
-                <p>Permissions below apply only to the selected staff account.</p>
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-              <select
-                value={selectedStaffId}
-                onChange={(event) => handleStaffChange(event.target.value)}
-                style={{ minWidth: '320px', maxWidth: '100%', height: '42px', border: '1px solid #dce5ea', borderRadius: '10px', padding: '0 12px', background: '#fff', color: '#203246' }}
-              >
-                {staff.map((item) => (
-                  <option key={item.user_id} value={item.user_id}>
-                    {item.display_name ? `${item.display_name} — ${item.email}` : item.email}
-                  </option>
-                ))}
-              </select>
-              <span style={{ fontSize: '13px', fontWeight: 700, color: selectedStaff?.is_active ? '#16736e' : '#b83240' }}>
-                {selectedStaff?.is_active ? 'Active' : 'Disabled'}
-              </span>
-            </div>
-          </section>
 
-          <section className="card">
-            <div className="card-header">
-              <div>
-                <h3>Feature access</h3>
-                <p>Turn sections on or off for this staff member.</p>
-              </div>
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <button className="btn btn-secondary" type="button" onClick={() => setAllPermissions(true)}>Allow all</button>
-                <button className="btn btn-secondary" type="button" onClick={() => setAllPermissions(false)}>Remove all</button>
-              </div>
+        {selectedStaff && <section className="card" style={{ overflow: 'hidden' }}>
+          <div style={{ padding: '20px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 15, background: 'linear-gradient(110deg,#f4f1ff,#eefaf8)', borderBottom: '1px solid #e8edf4' }}>
+            {selectedStaff.avatar ? <img src={selectedStaff.avatar} alt="" style={{ ...avatarStyle, width: 76, height: 76, borderRadius: 24 }}/> : <div style={{ ...avatarStyle, width: 76, height: 76, borderRadius: 24, display: 'grid', placeItems: 'center', color: '#7153df', fontSize: 23, fontWeight: 800 }}>{initials(selectedStaff.display_name,selectedStaff.email)}</div>}
+            <div style={{ flex: 1, minWidth: 180 }}><h3 style={{ margin: 0, fontSize: 20 }}>{selectedStaff.display_name || 'Staff member'}</h3><p style={{ margin: '5px 0', color: '#718096' }}>{selectedStaff.email}</p><span style={{ fontSize: 12, fontWeight: 700, color: selectedStaff.is_active ? '#16845d' : '#b83240' }}>{selectedStaff.is_active ? 'ACTIVE ACCOUNT' : 'ACCOUNT DISABLED'}</span></div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="btn btn-secondary" type="button" onClick={() => setProfileOpen(true)}><Pencil size={15}/> Edit profile</button>
+              <button className="btn btn-secondary" type="button" onClick={toggleStaffStatus}>{selectedStaff.is_active ? 'Disable account' : 'Enable account'}</button>
+              <button className="btn btn-secondary" type="button" onClick={removeStaff} disabled={deletingStaff} style={{ color: '#b83240', borderColor: '#f1cccc' }}><Trash2 size={15}/> {deletingStaff ? 'Deleting...' : 'Delete profile'}</button>
             </div>
+          </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '10px' }}>
-              {STAFF_PERMISSION_DEFINITIONS.map((item) => (
-                <label key={item.key} style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', padding: '14px', border: '1px solid #e5ebef', borderRadius: '12px', cursor: 'pointer', background: permissions[item.key] ? '#f7fbfa' : '#fff' }}>
-                  <input
-                    type="checkbox"
-                    checked={permissions[item.key] === true}
-                    onChange={() => togglePermission(item.key)}
-                    style={{ marginTop: '3px' }}
-                  />
-                  <span>
-                    <strong style={{ display: 'block', color: '#203246', marginBottom: '4px' }}>{item.label}</strong>
-                    <span style={{ display: 'block', fontSize: '12px', lineHeight: 1.45, color: '#718096' }}>{item.description}</span>
-                  </span>
-                </label>
-              ))}
+          <div style={{ padding: 20 }}>
+            <div className="card-header"><div><h3>Feature permissions</h3><p>Choose exactly which parts of Preface Fitness this staff member can access.</p></div><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><button className="btn btn-secondary" type="button" onClick={() => setAllPermissions(true)}>Allow all</button><button className="btn btn-secondary" type="button" onClick={() => setAllPermissions(false)}>Remove all</button></div></div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(250px,1fr))', gap: 10 }}>
+              {STAFF_PERMISSION_DEFINITIONS.map((item) => <label key={item.key} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: 14, border: '1px solid #e5ebef', borderRadius: 13, cursor: 'pointer', background: permissions[item.key] ? '#f4fbf8' : '#fff' }}>
+                <input type="checkbox" checked={permissions[item.key] === true} onChange={() => togglePermission(item.key)} style={{ marginTop: 3 }}/>
+                <span><strong style={{ display: 'block', color: '#203246', marginBottom: 4 }}>{item.label}</strong><span style={{ display: 'block', fontSize: 12, lineHeight: 1.45, color: '#718096' }}>{item.description}</span></span>
+              </label>)}
             </div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 20 }}><button className="btn btn-primary" type="button" onClick={savePermissions} disabled={saving}>{saving ? 'Saving...' : <><Save size={16}/> Save permissions</>}</button></div>
+          </div>
+        </section>}
+      </>}
 
-            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '20px' }}>
-              <button className="btn btn-primary" type="button" onClick={savePermissions} disabled={saving || !selectedStaffId}>
-                {saving ? 'Saving...' : 'Save permissions'}
-              </button>
-              <button className="btn btn-secondary" type="button" onClick={toggleStaffStatus} disabled={!selectedStaffId}>
-                {selectedStaff?.is_active ? 'Disable staff' : 'Enable staff'}
-              </button>
+      {profileOpen && selectedStaff && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setProfileOpen(false); }}>
+        <section className="modal" role="dialog" aria-modal="true" aria-labelledby="staff-profile-title" style={{ width: 'min(520px, calc(100vw - 28px))', maxWidth: 520 }}>
+          <div className="modal-header"><div><h2 id="staff-profile-title">Edit staff profile</h2><p>Update the display name and profile picture.</p></div><button className="icon-btn" type="button" onClick={() => setProfileOpen(false)} aria-label="Close"><X size={18}/></button></div>
+          <form onSubmit={saveProfile} style={{ padding: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
+              {profileForm.avatar ? <img src={profileForm.avatar} alt="Staff preview" style={{ ...avatarStyle, width: 88, height: 88, borderRadius: 26 }}/> : <div style={{ ...avatarStyle, width: 88, height: 88, borderRadius: 26, display: 'grid', placeItems: 'center', color: '#7153df', fontSize: 24, fontWeight: 800 }}>{initials(profileForm.name,selectedStaff.email)}</div>}
+              <div><input ref={photoInputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={handlePhotoChange} style={{ display: 'none' }}/><button className="btn btn-secondary" type="button" onClick={() => photoInputRef.current?.click()}><Camera size={15}/> {profileForm.avatar ? 'Change photo' : 'Upload photo'}</button>{profileForm.avatar && <button className="btn btn-secondary" type="button" onClick={() => setProfileForm((v) => ({ ...v, avatar: '' }))} style={{ marginLeft: 7, color: '#b83240' }}>Remove</button>}<p style={{ margin: '8px 0 0', color: '#718096', fontSize: 12 }}>JPG, PNG or WEBP · Max 5 MB. Photo is optimized before saving.</p></div>
             </div>
-
-            {message && (
-              <div style={{ marginTop: '14px', padding: '11px 13px', borderRadius: '10px', background: '#f1faf8', border: '1px solid #d6eee9', color: '#16736e', fontSize: '13px' }}>
-                {message}
-              </div>
-            )}
-          </section>
-        </>
-      )}
+            <label className="professional-field">Staff name<input autoFocus required maxLength={100} value={profileForm.name} onChange={(event) => setProfileForm((v) => ({ ...v, name: event.target.value }))} placeholder="Enter full name"/></label>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 9, marginTop: 22 }}><button className="btn btn-secondary" type="button" onClick={() => setProfileOpen(false)}>Cancel</button><button className="btn btn-primary" type="submit" disabled={savingProfile}>{savingProfile ? 'Saving...' : 'Save profile'}</button></div>
+          </form>
+        </section>
+      </div>}
     </div>
   );
 }

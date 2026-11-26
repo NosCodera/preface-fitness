@@ -64,7 +64,25 @@ export function createCloudflareClient({ baseUrl, getToken, gymId, timeoutMs = D
     updateAccount: ({ currentPassword, email, password }) => request('/api/auth/account', { method: 'PATCH', body: { currentPassword, ...(email === undefined ? {} : { email }), ...(password ? { password } : {}) } }),
     changes: ({ after = 0, limit = 100 } = {}) => request(`/api/changes?after=${encodeURIComponent(after)}&limit=${encodeURIComponent(limit)}`),
     rpc: (name, args = {}) => request('/api/rpc', { method: 'POST', body: { name, args } }),
-    list: async (table, { limit = 100, after = '' } = {}) => (await request(`/api/data/${encodeURIComponent(table)}?limit=${encodeURIComponent(limit)}&after=${encodeURIComponent(after)}`)).data || [],
+    list: async (table, { limit = 100, after = '' } = {}) => {
+      const safeLimit = Math.min(500, Math.max(1, Number(limit) || 100));
+      // Member rows may contain base64 photos. Fetch them in small independent
+      // D1/HTTP pages so no single D1 result or Worker response becomes enormous.
+      const pageSize = table === 'members' ? 10 : safeLimit;
+      let offset = Math.max(0, Number(after) || 0);
+      const rows = [];
+      while (rows.length < safeLimit) {
+        const take = Math.min(pageSize, safeLimit - rows.length);
+        const payload = await request(
+          `/api/data/${encodeURIComponent(table)}?limit=${encodeURIComponent(take)}&after=${encodeURIComponent(offset)}`
+        );
+        const page = Array.isArray(payload?.data) ? payload.data : [];
+        rows.push(...page);
+        offset += page.length;
+        if (page.length < take) break;
+      }
+      return rows;
+    },
     get: async (table, id) => (await request(`/api/data/${encodeURIComponent(table)}/${encodeURIComponent(id)}`)).data,
     upsert: (table, rows) => request(`/api/data/${encodeURIComponent(table)}`, { method: 'POST', body: rows }),
     remove: (table, id) => request(`/api/data/${encodeURIComponent(table)}/${encodeURIComponent(id)}`, { method: 'DELETE' }),
