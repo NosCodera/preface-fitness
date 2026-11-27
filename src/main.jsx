@@ -2483,7 +2483,7 @@ function PrefaceFitMitraPage({ members = [], progressRecords = [], createWorkout
   };
   const analyzeMember = () => {
     if (!memberId) return;
-    setProfile({weight:weight || '',height:height || '',medical:medical || '',waist:meta.waist || '',chest:meta.chest || '',weakness:meta.additionalMedicalNotes || ''});
+    setProfile({weight:weight || '',height:height || '',age:member?.age || '',sex:member?.gender || '',medical:medical || '',waist:meta.waist || '',chest:meta.chest || '',weakness:meta.additionalMedicalNotes || ''});
     const notesText = String(member?.notes || '');
     const prefMatch = notesText.match(/(?:dietary preference|diet preference|food preference)\s*[:=-]\s*([^|\n]+)/i);
     const savedPreference = member?.dietaryPreference || member?.dietPreference || meta.dietaryPreference || meta.dietPreference || prefMatch?.[1]?.trim() || '';
@@ -2494,52 +2494,102 @@ function PrefaceFitMitraPage({ members = [], progressRecords = [], createWorkout
     const selectedGoals = Array.isArray(answers.goal) ? answers.goal : [answers.goal].filter(Boolean);
     if (!selectedGoals.length) { window.alert('Please select at least one primary goal.'); return; }
     const goalLabel = selectedGoals.join(' + ');
-    const hasFatLoss = selectedGoals.includes('Fat Loss');
-    const hasMuscleBuilding = selectedGoals.includes('Muscle Building');
-    const hasWeightGain = selectedGoals.includes('Weight Gain');
+    const primaryGoal = selectedGoals.includes('Fat Loss') ? 'Fat Loss' : selectedGoals.includes('Muscle Building') ? 'Muscle Building' : selectedGoals.includes('Weight Gain') ? 'Weight Gain' : selectedGoals.includes('Strength & Stamina') ? 'Strength & Stamina' : 'General Fitness';
     const kg = Number(profile.weight || 70);
-    const kcalFactor = hasFatLoss && (hasMuscleBuilding || hasWeightGain) ? 30 : hasWeightGain ? 36 : hasMuscleBuilding ? 34 : hasFatLoss ? 27 : 30;
-    const kcal = Math.max(1400, Math.round(kg * kcalFactor));
-    const protein = Math.round(kg * (hasMuscleBuilding ? 1.9 : hasFatLoss ? 1.8 : 1.7));
-    const weekdayOptions = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-    const dayCount = Math.max(1, Math.min(7, Number(answers.days) || 4));
-    const workoutDays = weekdayOptions.slice(0, dayCount);
-    const phase1 = [
-      {name:'Goblet Squat',muscle:'Legs',sets:3,reps:'10-12',rest:'75 sec'},
-      {name:'Machine Chest Press',muscle:'Chest',sets:3,reps:'10-12',rest:'75 sec'},
-      {name:'Lat Pulldown',muscle:'Back',sets:3,reps:'10-12',rest:'75 sec'},
-      {name:'Dumbbell Romanian Deadlift',muscle:'Hamstrings',sets:2,reps:'10',rest:'90 sec'},
-      {name:'Plank',muscle:'Core',sets:3,reps:'20-30 sec',rest:'45 sec'}
+    const cm = Number(profile.height || 0);
+    const age = Number(profile.age || member?.age || 30);
+    const sex = String(profile.sex || member?.gender || '').toLowerCase();
+    const days = Math.max(2, Math.min(6, Number(answers.days) || 4));
+    const minutes = Math.max(20, Number(answers.minutes) || 45);
+    const experience = answers.experience || 'Beginner';
+    const limitationText = `${profile.medical || ''} ${profile.weakness || ''} ${answers.restrictions || ''}`.toLowerCase();
+    const avoidKnee = /(knee|meniscus|acl|mcl|patella|घुटना|घुटने)/i.test(limitationText);
+    const avoidBack = /(back pain|lower back|slip disc|sciatica|spine|कमर|रीढ़)/i.test(limitationText);
+    const avoidShoulder = /(shoulder|rotator|कंधा|कंधे)/i.test(limitationText);
+    const avoidWrist = /(wrist|elbow|हाथ की कलाई|कोहनी)/i.test(limitationText);
+    const avoidImpact = /(ankle|heel|foot|plantar|shin|running|jump|टखना|एड़ी|पैर)/i.test(limitationText);
+    const sedentary = days <= 2 ? 1.25 : days <= 3 ? 1.35 : days <= 4 ? 1.45 : days <= 5 ? 1.55 : 1.65;
+    const bmr = cm > 0 && kg > 0 ? (10*kg + 6.25*cm - 5*age + (sex.includes('female') ? -161 : sex.includes('male') ? 5 : -78)) : kg * 22;
+    const maintenance = Math.round(bmr * sedentary);
+    const calorieDelta = primaryGoal === 'Fat Loss' ? -0.15 : primaryGoal === 'Weight Gain' ? 0.10 : primaryGoal === 'Muscle Building' ? 0.05 : 0;
+    const kcal = Math.max(1400, Math.round(maintenance * (1 + calorieDelta) / 50) * 50);
+    const proteinFactor = primaryGoal === 'Fat Loss' || primaryGoal === 'Muscle Building' ? 1.8 : primaryGoal === 'Weight Gain' ? 1.7 : 1.5;
+    const protein = Math.round(kg * proteinFactor);
+    const fat = Math.round((kcal * 0.27) / 9);
+    const carbs = Math.max(0, Math.round((kcal - protein*4 - fat*9) / 4));
+
+    // Exercise selection changes with goal, available days, experience and reported limitations.
+    const pool = {
+      push:[['Machine Chest Press','Chest'],['Incline Push-up','Chest'],['Cable Fly','Chest'],['Lateral Raise','Shoulders'],['Triceps Pushdown','Triceps']],
+      pull:[['Lat Pulldown','Back'],['Chest Supported Row','Back'],['Seated Cable Row','Back'],['Biceps Curl','Biceps'],['Face Pull','Shoulders']],
+      legs:[['Leg Press','Quads'],['Seated Leg Curl','Hamstrings'],['Glute Bridge','Glutes'],['Hip Thrust','Glutes'],['Calf Raise','Calves']],
+      core:[['Dead Bug','Core'],['Bird Dog','Core'],['Pallof Press','Core'],['Plank','Core']],
+      strength:[['Goblet Squat','Quads'],['Dumbbell Bench Press','Chest'],['Lat Pulldown','Back'],['Dumbbell Romanian Deadlift','Hamstrings'],['Farmer Carry','Core']]
+    };
+    if (avoidKnee) { pool.legs = [['Glute Bridge','Glutes'],['Seated Leg Curl','Hamstrings'],['Hip Thrust','Glutes']]; pool.strength = [['Machine Chest Press','Chest'],['Lat Pulldown','Back'],['Seated Leg Curl','Hamstrings'],['Glute Bridge','Glutes'],['Dead Bug','Core']]; }
+    if (avoidBack) { pool.pull = [['Lat Pulldown','Back'],['Chest Supported Row','Back'],['Face Pull','Shoulders'],['Biceps Curl','Biceps']]; pool.legs = [['Leg Extension (pain-free range)','Quads'],['Seated Leg Curl','Hamstrings'],['Glute Bridge','Glutes']]; pool.strength = [['Machine Chest Press','Chest'],['Lat Pulldown','Back'],['Seated Leg Curl','Hamstrings'],['Glute Bridge','Glutes'],['Dead Bug','Core']]; }
+    if (avoidShoulder) { pool.push = [['Machine Chest Press (pain-free range)','Chest'],['Cable Triceps Pushdown','Triceps']]; pool.strength = [['Leg Press (pain-free range)','Quads'],['Lat Pulldown','Back'],['Seated Cable Row','Back'],['Glute Bridge','Glutes'],['Dead Bug','Core']]; }
+    if (avoidWrist) { pool.push = [['Machine Chest Press (neutral grip)','Chest'],['Cable Fly (if pain-free)','Chest'],['Cable Lateral Raise','Shoulders']]; pool.core = [['Dead Bug','Core'],['Bird Dog','Core']]; }
+    const split = days <= 3 ? ['Full Body A','Full Body B','Full Body C'] : days === 4 ? ['Upper Body','Lower Body','Upper Body · Variation','Lower Body · Variation'] : days === 5 ? ['Push','Pull','Legs','Upper Body','Lower Body'] : ['Push','Pull','Legs','Push · Variation','Pull · Variation','Legs · Variation'];
+    const exercises = [];
+    const phaseSpecs = [
+      {phase:'Phase 1 · Foundation (Weeks 1–2)',sets:experience==='Beginner'?2:3,reps:primaryGoal==='Strength & Stamina'?'10-12':'10-15',rest:'60-90 sec'},
+      {phase:'Phase 2 · Build (Weeks 3–6)',sets:experience==='Beginner'?3:4,reps:primaryGoal==='Strength & Stamina'?'6-10':'8-12',rest:'75-120 sec'},
+      {phase:'Phase 3 · Progress (Weeks 7–8)',sets:experience==='Beginner'?3:4,reps:primaryGoal==='Strength & Stamina'?'5-8':'8-12',rest:'90-150 sec'}
     ];
-    const phase2 = [
-      {name:'Leg Press',muscle:'Legs',sets:4,reps:'8-12',rest:'90 sec'},
-      {name:'Dumbbell Bench Press',muscle:'Chest',sets:4,reps:'8-12',rest:'90 sec'},
-      {name:'Seated Cable Row',muscle:'Back',sets:4,reps:'10-12',rest:'75 sec'},
-      {name:'Dumbbell Shoulder Press',muscle:'Shoulders',sets:3,reps:'10',rest:'75 sec'},
-      {name:'Dead Bug',muscle:'Core',sets:3,reps:'10 each side',rest:'45 sec'}
+    split.forEach((dayName, dayIndex) => {
+      let selected;
+      if (dayName.startsWith('Full')) selected = [...pool.strength.slice(0,4), ...pool.core.slice(0,1)];
+      else if (dayName.startsWith('Upper') || dayName.startsWith('Push')) selected = [...pool.push.slice(0,3), ...pool.pull.slice(0,2), ...pool.push.slice(3,5)];
+      else if (dayName.startsWith('Pull')) selected = [...pool.pull.slice(0,4), ...pool.core.slice(0,1)];
+      else selected = [...pool.legs.slice(0,4), ...pool.core.slice(0,1)];
+      if (minutes <= 30) selected = selected.slice(0,4);
+      if (primaryGoal === 'Fat Loss' && !avoidImpact && dayIndex === split.length-1) selected = [...selected, ['Low-impact cycling / brisk walk','Cardio']];
+      if (primaryGoal === 'Strength & Stamina' && dayIndex === 0) selected = selected.map(([name,muscle]) => [name,muscle]);
+      phaseSpecs.forEach(spec => selected.forEach(([name,muscle],i) => exercises.push({id:`FM-${dayIndex}-${spec.phase}-${i}`,name,muscle,muscleGroup:muscle,sets:spec.sets,reps:spec.reps,rest:spec.rest,phase:spec.phase,day:dayName})));
+    });
+    const workoutNotes = [
+      `Goal focus: ${primaryGoal}. Schedule: ${days} days/week, ${minutes} minutes/session; preferred time: ${answers.workoutTime}.`,
+      `Experience: ${experience}. Start with a load that leaves 2–3 good reps in reserve; increase reps before adding weight.`,
+      `Limitations considered: ${profile.medical || 'None reported'}. Stop any movement that causes pain. Avoid or replace movements that aggravate the reported area.`,
+      avoidImpact ? 'Impact cardio excluded because a foot/ankle/shin limitation was reported; use pain-free low-impact activity only if cleared.' : 'Optional cardio: 15–25 minutes at a conversational pace, 2–3 times weekly, adjusted to recovery.',
+      'This is a draft template. Injury, persistent pain, pregnancy, heart/metabolic conditions or post-surgery restrictions require clinician/physio clearance before exercise.'
+    ].join('\n');
+
+    // Diet preference and exclusions determine the actual food choices, not just the title.
+    const pref = String(answers.dietPreference || '').toLowerCase();
+    const isVegan = pref === 'vegan';
+    const nonVegAllowed = pref.includes('non-vegetarian');
+    const vegetarian = isVegan || (!nonVegAllowed && pref.includes('vegetarian'));
+    const eggsAllowed = pref.includes('egg') || nonVegAllowed;
+    const restrictions = String(answers.restrictions || '').toLowerCase();
+    const noDairy = /lactose|dairy[- ]?free|milk allergy|दूध से एलर्जी/.test(restrictions);
+    const noGluten = /gluten|celiac| गेहूं|wheat allergy/.test(restrictions);
+    const noNuts = /nut allergy|peanut allergy|nuts|मूंगफली से एलर्जी/.test(restrictions);
+    const proteinOptions = [];
+    if (!noDairy && !isVegan) proteinOptions.push('curd / Greek yogurt', 'low-fat paneer');
+    if (isVegan || vegetarian) proteinOptions.push('tofu', 'soya chunks', 'dal + roasted chana');
+    if (eggsAllowed) proteinOptions.push('eggs');
+    if (nonVegAllowed) proteinOptions.push('chicken / fish');
+    if (!proteinOptions.length) proteinOptions.push('dal + chana + tofu (confirm ingredients against restrictions)');
+    const proteinChoice = (i) => proteinOptions[i % proteinOptions.length];
+    const carb = noGluten ? ['rice','poha','millet (bajra/jowar)','potato'] : ['roti / rice','oats','poha / upma','roti'];
+    const breakfastProtein = proteinChoice(0), lunchProtein = proteinChoice(1), snackProtein = proteinChoice(2), dinnerProtein = proteinChoice(3);
+    const meals = [
+      {meal:'Breakfast',food:`${noGluten?'poha / rice-based breakfast':'oats / poha'} + ${breakfastProtein} + 1 seasonal fruit`,calories:Math.round(kcal*.25),protein:Math.round(protein*.24),items:[]},
+      {meal:'Lunch',food:`${lunchProtein} + ${carb[0]} + 1–2 bowls vegetables + salad`,calories:Math.round(kcal*.32),protein:Math.round(protein*.32),items:[]},
+      {meal:'Evening snack',food:`${snackProtein} + ${noNuts?'roasted chana':'roasted chana / seeds'} + seasonal fruit`,calories:Math.round(kcal*.15),protein:Math.round(protein*.18),items:[]},
+      {meal:'Dinner',food:`${dinnerProtein} + ${carb[3]} + cooked vegetables`,calories:kcal-Math.round(kcal*.72),protein:protein-Math.round(protein*.74),items:[]}
     ];
-    const phase3 = [
-      {name:'Squat Variation',muscle:'Legs',sets:4,reps:'6-10',rest:'120 sec'},
-      {name:'Incline Dumbbell Press',muscle:'Chest',sets:4,reps:'8-10',rest:'90 sec'},
-      {name:'Chest Supported Row',muscle:'Back',sets:4,reps:'8-12',rest:'90 sec'},
-      {name:'Hip Thrust',muscle:'Glutes',sets:3,reps:'10-12',rest:'90 sec'},
-      {name:'Farmer Carry',muscle:'Core',sets:3,reps:'30 sec',rest:'60 sec'}
-    ];
-    const exercises = [
-      ...phase1.map((e,i)=>({...e,id:`AI-P1-${i}`,phase:'Phase 1 · Foundation (Weeks 1–2)',day:workoutDays[i%dayCount]})),
-      ...phase2.map((e,i)=>({...e,id:`AI-P2-${i}`,phase:'Phase 2 · Build (Weeks 3–6)',day:workoutDays[i%dayCount]})),
-      ...phase3.map((e,i)=>({...e,id:`AI-P3-${i}`,phase:'Phase 3 · Progress (Weeks 7–8)',day:workoutDays[i%dayCount]})),
-    ];
-    const pref = answers.dietPreference || 'No preference specified';
-    const dietMeals = [
-      {meal:'Breakfast',food:'Oats + milk + banana + curd',calories:Math.round(kcal*.25),protein:Math.round(protein*.22),items:[]},
-      {meal:'Lunch',food:'Dal / chicken / paneer + rice or roti + vegetables',calories:Math.round(kcal*.32),protein:Math.round(protein*.32),items:[]},
-      {meal:'Snack',food:'Greek yogurt / roasted chana + seasonal fruit',calories:Math.round(kcal*.15),protein:Math.round(protein*.16),items:[]},
-      {meal:'Dinner',food:'Paneer / tofu / chicken + roti + vegetables',calories:kcal-Math.round(kcal*.72),protein:protein-Math.round(protein*.70),items:[]}
-    ];
+    const dietNotes = [
+      `Preference: ${answers.dietPreference || 'Not specified'}. Exclusions/allergies: ${answers.restrictions || 'None specified'}.`,
+      `Estimated starting target: ${kcal} kcal, ${protein} g protein, ${carbs} g carbohydrate and ${fat} g fat per day. Estimate uses available profile data and activity days; it is not a measured metabolic test.`,
+      primaryGoal === 'Fat Loss' ? 'Fat-loss approach: modest estimated calorie deficit; review 2–3 week weight trend and energy, then adjust gradually.' : primaryGoal === 'Weight Gain' || primaryGoal === 'Muscle Building' ? 'Growth approach: small estimated calorie surplus (or near-maintenance for recomposition); monitor weight and strength trend.' : 'General approach: start near estimated maintenance and adjust using energy, performance and 2–3 week weight trend.',
+      'Meal descriptions are food choices, not gram-accurate prescriptions. Coach should confirm portions, allergies, medical nutrition needs and actual food availability before assigning. For kidney disease, diabetes, pregnancy, eating-disorder history or other clinical needs, refer to a registered dietitian/doctor.'
+    ].join('\n');
     setGenerated({
-      workout:{name:`${goalLabel} · ${member?.name || 'Member'} Workout`,goal:goalLabel,level:answers.experience,durationWeeks:8,trainer:'Preface FitMitra AI',assignedMemberIds:[member.id],exercises,notes:`PHASE 1 (Weeks 1–2): Learn technique, easy-moderate effort, leave 3 reps in reserve.\nPHASE 2 (Weeks 3–6): Gradually add reps or small weight increments, leave 2 reps in reserve.\nPHASE 3 (Weeks 7–8): Progress load only with clean form; review recovery and measurements.\nSchedule: ${dayCount} days/week (${workoutDays.join(', ')}), ${answers.minutes} minutes/session, preferred time: ${answers.workoutTime}. Profile considerations: ${profile.medical || 'None reported'}. Avoid painful movements and obtain medical clearance for relevant conditions.`},
-      diet:{name:`${goalLabel} Nutrition · ${member?.name || 'Member'}`,goal:goalLabel,calories:kcal,protein,durationWeeks:8,coach:'Preface FitMitra AI',assignedMemberIds:[member.id],meals:dietMeals,notes:`Diet preference: ${pref}. Restrictions: ${answers.restrictions || 'None specified'}. Illustrative targets only; adjust to progress, appetite and clinician/dietitian advice.`}
+      workout:{name:`${primaryGoal} · ${member?.name || 'Member'} Workout`,goal:goalLabel,level:experience,durationWeeks:8,trainer:'Preface FitMitra',assignedMemberIds:[member.id],exercises,notes:workoutNotes},
+      diet:{name:`${primaryGoal} Nutrition · ${member?.name || 'Member'}`,goal:goalLabel,calories:kcal,protein,carbs,fat,durationWeeks:8,coach:'Preface FitMitra',assignedMemberIds:[member.id],meals,notes:dietNotes}
     });
     thinking('preview');
   };
@@ -2573,6 +2623,8 @@ function PrefaceFitMitraPage({ members = [], progressRecords = [], createWorkout
             <div className="form-grid two">
               <FormField label="Current weight (kg)"><input type="text" inputMode="decimal" autoComplete="off" value={profile.weight} onChange={e=>setProfile(p=>({...p,weight:e.target.value}))} placeholder="Enter current weight (e.g. 85)"/></FormField>
               <FormField label="Height (cm)"><input type="text" inputMode="decimal" autoComplete="off" value={profile.height} onChange={e=>setProfile(p=>({...p,height:e.target.value}))} placeholder="Enter height (e.g. 175)"/></FormField>
+              <FormField label="Age (years) · optional"><input type="number" min="16" max="100" value={profile.age || ''} onChange={e=>setProfile(p=>({...p,age:e.target.value}))} placeholder="Age"/></FormField>
+              <FormField label="Sex for calorie estimate · optional"><select value={profile.sex || ''} onChange={e=>setProfile(p=>({...p,sex:e.target.value}))}><option value="">Not specified</option><option value="male">Male</option><option value="female">Female</option></select></FormField>
               <FormField label="Any injuries, pain or physical limitations?"><input type="text" value={profile.medical || ''} onChange={e=>setProfile(p=>({...p,medical:e.target.value}))} placeholder="Describe injury / pain, or type None"/></FormField>
             </div>
             <div style={{display:'flex',justifyContent:'flex-end',marginTop:16}}><button className="btn btn-primary" onClick={()=>thinking('preferences')}>Continue <Sparkles size={15}/></button></div>
@@ -2604,8 +2656,8 @@ function PrefaceFitMitraPage({ members = [], progressRecords = [], createWorkout
           </>}
           {!busy && stage==='preview' && generated && <>
             <div style={{display:'flex',alignItems:'center',gap:10}}><Sparkles color="#159b91"/><div><h3 style={{margin:0}}>Your 8-week plan is ready</h3><small style={{color:'#71839a'}}>For {member?.name} · {answers.goal}</small></div></div>
-            <div className="panel" style={{padding:15,marginTop:14}}><h4>Workout plan · 3 phases</h4>{['Phase 1 · Foundation (Weeks 1–2)','Phase 2 · Build (Weeks 3–6)','Phase 3 · Progress (Weeks 7–8)'].map((p,i)=><div key={p} style={{padding:'10px 0',borderTop:'1px solid #edf1f5'}}><strong>{p}</strong><p style={{margin:'4px 0',fontSize:13,color:'#71839a'}}>{['Technique, movement quality and easy-moderate effort.','Progressive overload with gradual increases in reps or load.','Consolidate strength gains and review recovery and progress.'][i]}</p>{generated.workout.exercises.filter(e=>e.phase.startsWith(`Phase ${i+1}`)).map(e=><span key={e.id} className="data-pill" style={{margin:'2px 4px 2px 0',display:'inline-flex'}}>{e.name}</span>)}</div>)}</div>
-            <div className="panel" style={{padding:15,marginTop:12}}><h4>Diet plan · daily targets</h4><div style={{display:'flex',gap:16,flexWrap:'wrap',marginBottom:10}}><strong>{generated.diet.calories} kcal</strong><strong>{generated.diet.protein} g protein</strong></div>{generated.diet.meals.map(m=><div key={m.meal} style={{padding:'8px 0',borderTop:'1px solid #edf1f5'}}><strong>{m.meal}</strong><div style={{fontSize:13,color:'#71839a'}}>{m.food} · {m.calories} kcal · {m.protein}g protein</div></div>)}</div>
+            <div className="panel" style={{padding:15,marginTop:14}}><h4>Workout plan · 3 phases</h4>{['Phase 1 · Foundation (Weeks 1–2)','Phase 2 · Build (Weeks 3–6)','Phase 3 · Progress (Weeks 7–8)'].map((p,i)=><div key={p} style={{padding:'10px 0',borderTop:'1px solid #edf1f5'}}><strong>{p}</strong><p style={{margin:'4px 0',fontSize:13,color:'#71839a'}}>{['Technique, movement quality and easy-moderate effort.','Progressive overload with gradual increases in reps or load.','Consolidate strength gains and review recovery and progress.'][i]}</p>{generated.workout.exercises.filter(e=>e.phase.startsWith(`Phase ${i+1}`)).map(e=><span key={e.id} className="data-pill" style={{margin:'2px 4px 2px 0',display:'inline-flex'}}>{e.name}</span>)}</div>)}</div><p style={{whiteSpace:'pre-line',fontSize:12,color:'#71839a',marginTop:10}}>{generated.workout.notes}</p>
+            <div className="panel" style={{padding:15,marginTop:12}}><h4>Diet plan · daily targets</h4><div style={{display:'flex',gap:16,flexWrap:'wrap',marginBottom:10}}><strong>{generated.diet.calories} kcal</strong><strong>{generated.diet.protein} g protein</strong><strong>{generated.diet.carbs || '—'} g carbs</strong><strong>{generated.diet.fat || '—'} g fat</strong></div>{generated.diet.meals.map(m=><div key={m.meal} style={{padding:'8px 0',borderTop:'1px solid #edf1f5'}}><strong>{m.meal}</strong><div style={{fontSize:13,color:'#71839a'}}>{m.food} · {m.calories} kcal · {m.protein}g protein</div></div>)}<p style={{whiteSpace:'pre-line',fontSize:12,color:'#71839a',marginTop:10}}>{generated.diet.notes}</p></div>
             <p style={{fontSize:12,color:'#8a6470',lineHeight:1.5}}>Review before assigning. This is a structured planning draft, not a medical prescription. Injuries, chronic conditions and dietary allergies should be reviewed by a qualified professional.</p>
             <div style={{display:'flex',justifyContent:'space-between',gap:8,flexWrap:'wrap'}}><button className="btn btn-secondary" onClick={()=>setStage('preferences')}>Adjust answers</button><button className="btn btn-primary" disabled={saving} onClick={savePlans}>{saving?'Adding plans…':'Add both plans to member profile'} <CheckCircle2 size={16}/></button></div>
           </>}
@@ -7040,6 +7092,13 @@ function Dashboard({ activeMembers, expiringMembers, overdue, revenue, data, nav
           <p>Everything important about your gym, at a glance.</p>
         </div>
         <div className="vibrant-dashboard-actions">
+          <PrintIconButton label="Print dashboard snapshot" onClick={() => printProfessionalReport({
+            gymName: data?.settings?.gymName || 'Preface Fitness', title: 'Dashboard Snapshot',
+            subtitle: 'Current dashboard statistics and performance overview',
+            meta: [`Statistics period: ${rangeLabel}`, `Generated: ${formatDate(today)}`],
+            columns: ['Metric', 'Current value', 'Progress'],
+            rows: tiles.map(tile => [tile.label, tile.value, `${Math.round(tile.progress || 0)}%`]),
+          })} />
           <button className="btn btn-secondary" onClick={() => setModal('lead')}><Target size={18} /> New lead</button>
           <button className="btn btn-primary" onClick={() => setModal('member')}><Plus size={19} /> Add member</button>
         </div>
@@ -7085,6 +7144,27 @@ function Dashboard({ activeMembers, expiringMembers, overdue, revenue, data, nav
             <label><span>From</span><div className="membership-date-input"><input type="date" value={activityFrom} onChange={e=>setActivityFrom(e.target.value)} /><CalendarDays size={18}/></div></label>
             <span className="membership-range-arrow">→</span>
             <label><span>To</span><div className="membership-date-input"><input type="date" value={activityTo} min={activityFrom} onChange={e=>setActivityTo(e.target.value)} /><CalendarDays size={18}/></div></label>
+            <PrintIconButton label="Print membership activity snapshot" onClick={() => printProfessionalReport({
+              gymName: data?.settings?.gymName || 'Preface Fitness', title: 'Membership Activity & Timeline',
+              subtitle: 'Membership, collection, attendance and engagement summary',
+              meta: [`Period: ${formatDate(activityStart)} – ${formatDate(activityEnd)}`, `Generated: ${formatDate(today)}`],
+              columns: ['Activity', 'Count / amount', 'Details'],
+              rows: [
+                ['Members enrolled', activityMembersEnrolled.length, 'Joined in selected period'],
+                ['Memberships expiring', activityExpiring.length, 'Expiry falls in selected period'],
+                ['Expired in period', activityExpired.length, 'Already crossed expiry'],
+                ['Collection', `₹${activityCollection.toLocaleString('en-IN',{maximumFractionDigits:2})}`, `${activityPayments.length} payment(s)`],
+                ['Attendance visits', activityAttendance.length, 'Check-ins in selected period'],
+                ['Lead activity', activityLeads.length, 'Lead records in selected period'],
+                ['PT sessions', activityPT.length, 'Sessions in selected period'],
+                ['Active at period end', activityActive.length, `Active on ${formatDate(activityEnd)}`],
+              ],
+              sections: [
+                { title: 'Expiring memberships', columns: ['Member', 'Member ID', 'Plan', 'Expiry', 'Status'], rows: activityExpiring.map(m => [m.name, m.memberCode || m.id, m.plan || '—', formatDate(String(m.expiry).slice(0,10)), String(m.expiry).slice(0,10) < today ? 'Expired' : 'Upcoming']) },
+                { title: 'Members enrolled', columns: ['Member', 'Member ID', 'Plan', 'Joined'], rows: activityMembersEnrolled.map(m => [m.name, m.memberCode || m.id, m.plan || '—', formatDate(m.createdAt || m.start || m.joinDate)]) },
+                { title: 'Payments received', columns: ['Date', 'Member', 'Payment mode', 'Amount'], rows: activityPayments.map(pay => [formatDate(pay.date), pay.memberName || data.members.find(m => String(m.id) === String(pay.memberId))?.name || '—', pay.paymentMode || pay.mode || '—', `₹${Number(pay.amount || 0).toLocaleString('en-IN')}`]) },
+              ],
+            })} />
           </div>
         </div>
         <div className="membership-activity-stats">
@@ -7847,6 +7927,13 @@ function MembersPage({ members, query, setQuery, setModal, markAttendance, delet
       <div className="member-toolbar">
         <div className="search-box member-search"><Search size={16} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by name, phone, email or member ID..." /></div>
         <select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option>All</option><option>Active</option><option>Expiring</option><option>Expired</option></select>
+        <PrintIconButton label="Print filtered members" onClick={() => printProfessionalReport({
+          gymName: settings?.gymName || 'Preface Fitness', title: 'Members Register',
+          subtitle: 'Member list based on the filters currently applied on screen',
+          meta: [`Status filter: ${statusFilter}`, `Search: ${query || 'All members'}`, `Records: ${filtered.length}`, `Generated: ${formatDate(today)}`],
+          columns: ['Member ID', 'Member name', 'Phone', 'Email', 'Membership', 'Expiry', 'Visits', 'Due', 'Status'],
+          rows: filtered.map(m => [m.memberCode || m.id, m.name, m.phone, m.email || '—', m.plan || '—', formatDate(m.expiry), Number(m.visits || 0), `₹${Number(m.due || 0).toLocaleString('en-IN')}`, m.status || getMembershipStatus(m.expiry)]),
+        })} />
       </div>
       <div className="table-wrap"><table className="members-list-table"><thead><tr><th>Member</th><th>Contact</th><th>Membership</th><th>Expiry</th><th>Visits</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>
         {filtered.map((member) => <tr key={member.id}>
@@ -10294,6 +10381,13 @@ function MembershipsPage({ members, data, setModal, planPrices, setData, setToas
           <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
             <option value="All">All status</option><option value="Active">Active</option><option value="Expiring">Expiring</option><option value="Expired">Expired</option>
           </select>
+          <PrintIconButton label="Print filtered memberships" onClick={() => printProfessionalReport({
+            gymName: data?.settings?.gymName || 'Preface Fitness', title: 'Membership Register',
+            subtitle: 'Membership list based on the plan and status filters currently applied',
+            meta: [`Plan: ${planFilter}`, `Status: ${statusFilter}`, `Records: ${filteredMembers.length}`, `Generated: ${formatDate(today)}`],
+            columns: ['Member ID', 'Member name', 'Plan', 'Start date', 'Expiry date', 'Days remaining', 'Due', 'Status'],
+            rows: filteredMembers.map(m => { const days = getDaysRemaining(m.expiry); return [m.memberCode || m.id, m.name, m.plan || '—', formatDate(m.start), formatDate(m.expiry), days < 0 ? `${Math.abs(days)} overdue` : `${days} days`, `₹${Number(m.due || 0).toLocaleString('en-IN')}`, getMembershipStatus(m.expiry)]; }),
+          })} />
         </div>
       </div>
 
@@ -10399,6 +10493,39 @@ function RenewalModal({ member, onClose, onRenew, planPrices }) {
 
     <ModalActions onClose={onClose} disabled={!form.plan || !form.paymentDate || !form.packageStartDate} onSave={() => onRenew({ ...form, amount: Number(form.amount || 0), paid: Number(form.paid || 0) })} saveLabel="Renew membership" />
   </Modal>;
+}
+
+function PrintIconButton({ onClick, label = 'Print snapshot' }) {
+  return <button type="button" className="pf-print-icon-btn" onClick={onClick} title={label} aria-label={label} style={{width:36,height:36,minWidth:36,display:'inline-grid',placeItems:'center',padding:0,border:'1px solid #b9d9dc',borderRadius:11,background:'linear-gradient(180deg,#ffffff 0%,#e8f4f5 100%)',color:'#087f78',boxShadow:'0 3px 0 #b6d4d8,0 5px 10px rgba(24,73,91,.12)',cursor:'pointer',transition:'transform .12s ease,box-shadow .12s ease',verticalAlign:'middle'}} onMouseDown={e=>{e.currentTarget.style.transform='translateY(2px)';e.currentTarget.style.boxShadow='0 1px 0 #b6d4d8,0 2px 5px rgba(24,73,91,.12)';}} onMouseUp={e=>{e.currentTarget.style.transform='';e.currentTarget.style.boxShadow='0 3px 0 #b6d4d8,0 5px 10px rgba(24,73,91,.12)';}} onMouseLeave={e=>{e.currentTarget.style.transform='';e.currentTarget.style.boxShadow='0 3px 0 #b6d4d8,0 5px 10px rgba(24,73,91,.12)';}}>
+    <Printer size={17} strokeWidth={2.4} />
+  </button>;
+}
+
+function printProfessionalReport({ gymName = 'Preface Fitness', title, subtitle = '', meta = [], columns = [], rows = [], sections = [] }) {
+  const esc = (value) => escapeHtml(value === null || value === undefined || value === '' ? '—' : value);
+  const table = (heads, body) => `<div class="pf-report-table-wrap"><table class="pf-report-table"><thead><tr>${heads.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${body.length ? body.map(row => `<tr>${row.map(cell => `<td>${esc(cell)}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${Math.max(1, heads.length)}" class="pf-empty">No records for this selection.</td></tr>`}</tbody></table></div>`;
+  const metaHtml = meta.map(item => `<span>${esc(item)}</span>`).join('');
+  const sectionsHtml = sections.map(section => `<section class="pf-report-section"><h2>${esc(section.title)}</h2>${table(section.columns || [], section.rows || [])}</section>`).join('');
+  const html = `<main class="pf-report-sheet">
+    <header class="pf-report-header"><div><div class="pf-report-kicker">PREFACE FITNESS · OFFICIAL REPORT</div><h1>${esc(gymName)}</h1><p>${esc(subtitle)}</p></div><div class="pf-report-mark">PF</div></header>
+    <div class="pf-report-title-row"><div><div class="pf-report-overline">SNAPSHOT REPORT</div><h2>${esc(title)}</h2></div><div class="pf-report-generated">Generated<br><strong>${esc(formatDate(today))}</strong></div></div>
+    ${metaHtml ? `<div class="pf-report-meta">${metaHtml}</div>` : ''}
+    ${table(columns, rows)}${sectionsHtml}
+    <footer class="pf-report-footer"><span>Preface Fitness · Management Snapshot</span><span>Confidential · For internal use</span></footer>
+  </main>
+  <style>
+    body{background:#edf3f8!important;color:#20334c!important;font-family:Arial,Helvetica,sans-serif!important}
+    .pf-report-sheet{max-width:1100px;margin:20px auto;padding:28px 32px;background:#fff;border:1px solid #dce6ef;border-radius:16px;box-shadow:0 12px 34px rgba(23,55,87,.09);font-size:11px;line-height:1.5}
+    .pf-report-header{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:20px 22px;background:linear-gradient(112deg,#123b5b,#126c78);border-bottom:5px solid #18a99a;border-radius:12px;color:#fff}
+    .pf-report-kicker{font-size:9px;font-weight:900;letter-spacing:2px;color:#a8eee1}.pf-report-header h1{margin:5px 0 3px;font-size:25px;letter-spacing:.2px;color:#fff}.pf-report-header p{margin:0;color:#d9f0f1;font-size:11px}.pf-report-mark{width:54px;height:54px;border:2px solid rgba(255,255,255,.7);border-radius:15px;display:grid;place-items:center;font-size:20px;font-weight:900;color:#fff;background:rgba(255,255,255,.12)}
+    .pf-report-title-row{display:flex;justify-content:space-between;align-items:end;gap:16px;margin:22px 0 12px}.pf-report-overline{font-size:8px;letter-spacing:1.7px;color:#159482;font-weight:900}.pf-report-title-row h2{margin:3px 0 0;font-size:20px;color:#183b59}.pf-report-generated{text-align:right;color:#718096;font-size:9px}.pf-report-generated strong{color:#26425e;font-size:11px}
+    .pf-report-meta{display:flex;flex-wrap:wrap;gap:7px;margin:0 0 15px}.pf-report-meta span{padding:6px 10px;border:1px solid #cfe7e4;border-radius:20px;background:#f0faf8;color:#31596b;font-size:9px;font-weight:700}
+    .pf-report-table-wrap{width:100%;overflow:visible;margin:10px 0 18px;border:1px solid #d7e2ec;border-radius:9px}.pf-report-table{width:100%;border-collapse:collapse;table-layout:auto;font-size:9px}.pf-report-table th{padding:9px 8px;text-align:left;background:#eaf3f8;color:#1b4962;border-bottom:2px solid #169b8c;font-size:8px;letter-spacing:.35px;text-transform:uppercase}.pf-report-table td{padding:8px;border-bottom:1px solid #e2eaf0;color:#3e5368;vertical-align:top;overflow-wrap:anywhere}.pf-report-table tbody tr:nth-child(even) td{background:#f7fbfc}.pf-report-table tbody tr:last-child td{border-bottom:0}.pf-empty{text-align:center;color:#8191a2!important;padding:18px!important}
+    .pf-report-section{margin-top:20px;break-inside:avoid}.pf-report-section h2{margin:0;padding:9px 12px;border-left:4px solid #13a18e;background:#f0f7f8;color:#1b4962;font-size:13px}
+    .pf-report-footer{display:flex;justify-content:space-between;gap:12px;margin-top:25px;padding-top:10px;border-top:2px solid #d9e7ec;color:#718096;font-size:8px;letter-spacing:.3px}
+    @page{size:A4 landscape;margin:10mm}@media print{body{background:#fff!important}.pf-report-sheet{max-width:none;margin:0;padding:0;border:0;border-radius:0;box-shadow:none}.pf-report-header,.pf-report-table th,.pf-report-meta span,.pf-report-section h2{-webkit-print-color-adjust:exact;print-color-adjust:exact}.pf-report-table tr{break-inside:avoid}.pf-report-section{break-inside:avoid}}
+  </style>`;
+  openPrintWindow(`${gymName} - ${title}`, html);
 }
 
 function PageTitle({ title, subtitle, action }) { return <div className="page-heading compact"><div><div className="eyebrow">PREFACE FITNESS</div><h1>{title}</h1><p>{subtitle}</p></div>{action && <div className="heading-actions">{action}</div>}</div>; }
@@ -11418,7 +11545,7 @@ function MemberModal({ onClose, onSave, member, planPrices, existingMemberIds = 
       <FormField label="Payment mode"><select value={form.paymentMode || 'Cash'} onChange={(e) => update('paymentMode', e.target.value)}><option>Cash</option><option>UPI</option><option>Card</option><option>Bank transfer</option></select></FormField>
     </div>
     <div className="form-grid two">
-      <FormField label="Invoice / tax mode"><select value={form.gstMode || 'without'} onChange={(e) => update('gstMode', e.target.value)}><option value="without">Bill without GST</option><option value="gst">Tax Invoice with GST</option></select></FormField>
+      <GstModeToggle value={form.gstMode || 'without'} onChange={(mode) => update('gstMode', mode)} />
       <FormField label="GST rate (%)"><input type="number" min="0" step="0.01" value={form.gstRate ?? 5} onChange={(e) => update('gstRate', e.target.value)} disabled={form.gstMode !== 'gst'} /></FormField>
     </div>
 
@@ -11481,10 +11608,6 @@ function InvoiceOptionsModal({ member, payment, payments = [], mode = 'single', 
     <div className="invoice-choice-card">
       <div><div className="eyebrow">INVOICE SCOPE</div><strong>{mode === 'member' ? 'Select the membership subscription' : 'This invoice is for one payment only'}</strong><span>{mode === 'member' ? 'All recorded payments belonging to the selected subscription will appear on the invoice. Renewals are listed separately.' : 'Only the selected payment transaction will be included.'}</span></div>
       {mode === 'member' && <FormField label="Membership / subscription"><select value={selectedGroup?.id || ''} onChange={(e) => setSelectedGroupId(e.target.value)}>{groups.map((g) => <option key={g.id} value={g.id}>{g.label} · Plan value ₹{Number(g.planTotal || 0).toLocaleString('en-IN')}</option>)}</select></FormField>}
-      <div className="invoice-choice-options">
-        <label className={`invoice-choice ${gstMode === 'gst' ? 'selected' : ''}`}><input type="radio" name="invoice-gst-mode" checked={gstMode === 'gst'} onChange={() => setGstMode('gst')} /><div><strong>Tax Invoice with GST</strong><span>Shows GSTIN, taxable value, CGST and SGST.</span></div></label>
-        <label className={`invoice-choice ${gstMode === 'without' ? 'selected' : ''}`}><input type="radio" name="invoice-gst-mode" checked={gstMode === 'without'} onChange={() => setGstMode('without')} /><div><strong>Bill without GST</strong><span>Shows the same professional bill without tax breakup.</span></div></label>
-      </div>
       <div className="form-grid two">
         <FormField label="GST rate (%)"><input type="number" min="0" step="0.01" disabled={gstMode !== 'gst'} value={gstRate} onChange={(e) => setGstRate(e.target.value)} /></FormField>
         <FormField label={mode === 'member' ? 'Subscription value' : 'Invoice value'}><input readOnly value={`₹${invoiceAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`} /></FormField>
@@ -11492,7 +11615,11 @@ function InvoiceOptionsModal({ member, payment, payments = [], mode = 'single', 
       {mode === 'member' && selectedGroup && <div className="invoice-tax-preview"><div><span>Payments included</span><strong>{selectedGroup.payments.length}</strong></div><div><span>Paid in this subscription</span><strong>₹{selectedGroup.payments.reduce((sum, p) => sum + Number(p.amount || 0), 0).toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div><div><span>Balance</span><strong>₹{Number(selectedGroup.balance || 0).toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div><div className="grand"><span>Subscription total</span><strong>₹{invoiceAmount.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div></div>}
       <div className="invoice-tax-preview"><div><span>Taxable</span><strong>₹{gst.taxable.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div><div><span>CGST</span><strong>₹{gst.cgst.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div><div><span>SGST</span><strong>₹{gst.sgst.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div><div className="grand"><span>Total</span><strong>₹{invoiceAmount.toLocaleString('en-IN',{minimumFractionDigits:2})}</strong></div></div>
     </div>
-    <ModalActions onClose={onClose} disabled={!member || (mode === 'member' && !selectedGroup)} onSave={() => onPrint(gstMode, Number(gstRate || 0), selectedPayment)} saveLabel={gstMode === 'gst' ? 'Generate GST invoice' : 'Generate bill'} />
+    <div className="modal-actions" style={{display:'flex',alignItems:'center',gap:12}}>
+      <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'center',padding:'0 3px'}}><GstModeToggle value={gstMode} onChange={setGstMode} /></div>
+      <button type="button" className="btn btn-primary" disabled={!member || (mode === 'member' && !selectedGroup)} onClick={() => onPrint(gstMode, Number(gstRate || 0), selectedPayment)}><CheckCircle2 size={17} /> {gstMode === 'gst' ? 'Generate GST invoice' : 'Generate bill'}</button>
+    </div>
   </Modal>;
 }
 
@@ -11539,9 +11666,10 @@ function PaymentModal({ members, onClose, onSave, settings = {} }) {
       <FormField label="Payment mode"><select value={form.mode} onChange={(e) => update('mode', e.target.value)}><option>Cash</option><option>UPI</option><option>Card</option><option>Bank transfer</option></select></FormField>
       <FormField label="Payment type"><select value={form.type} onChange={(e) => update('type', e.target.value)}><option>Membership</option><option>PT</option><option>Class</option><option>Other</option></select></FormField>
     </div>
-    <div className="form-section-title">Invoice / tax details</div>
-    <div className="form-grid three">
-      <FormField label="Bill type"><select value={form.gstMode} onChange={(e) => update('gstMode', e.target.value)}><option value="without">Bill without GST</option><option value="gst">Tax Invoice with GST</option></select></FormField>
+    <div style={{display:'flex',justifyContent:'flex-end',alignItems:'center',margin:'12px 0 5px',minHeight:26}}>
+      <GstModeToggle value={form.gstMode || 'without'} onChange={(mode) => update('gstMode', mode)} />
+    </div>
+    <div className="form-grid two" style={{maxWidth:'760px',marginLeft:0,marginRight:'auto'}}>
       <FormField label="GST rate (%)"><input type="number" min="0" step="0.01" value={form.gstRate} disabled={form.gstMode !== 'gst'} onChange={(e) => update('gstRate', e.target.value)} /></FormField>
       <FormField label="Invoice total"><input value={`₹${invoiceBase.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`} readOnly /></FormField>
     </div>
@@ -11582,6 +11710,41 @@ function Modal({ title, onClose, children, wide }) {
         {children}
       </div>
     </div>
+  );
+}
+
+function GstModeToggle({ value, onChange }) {
+  const enabled = value === 'gst';
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={enabled}
+      aria-label="Invoice option"
+      title=" "
+      onClick={() => onChange(enabled ? 'without' : 'gst')}
+      style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-start',
+        width: '42px', height: '24px', minWidth: '42px', padding: '3px',
+        border: '1px solid ' + (enabled ? '#0b927e' : '#cbd5df'),
+        borderRadius: '999px', cursor: 'pointer',
+        background: enabled
+          ? 'linear-gradient(180deg, #22b69e 0%, #078b79 100%)'
+          : 'linear-gradient(180deg, #e7edf2 0%, #cbd6df 100%)',
+        boxShadow: enabled
+          ? 'inset 0 1px 2px rgba(255,255,255,.25), 0 2px 0 #087564'
+          : 'inset 0 1px 2px rgba(255,255,255,.7), 0 2px 0 #aab8c4',
+        transition: 'background .18s ease, box-shadow .18s ease'
+      }}
+    >
+      <span style={{
+        display: 'block', width: '16px', height: '16px', borderRadius: '50%',
+        background: 'linear-gradient(180deg, #fff 0%, #edf3f7 100%)',
+        boxShadow: '0 1px 3px rgba(20,45,60,.3)',
+        transform: enabled ? 'translateX(17px)' : 'translateX(0)',
+        transition: 'transform .18s ease'
+      }} />
+    </button>
   );
 }
 
@@ -13088,12 +13251,13 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
         {activeSettingsTab === 'general' && (
           <div className="settings-tab-panel">
 <section className="card">
-          <div className="card-header"><div><h3>Gym & billing details</h3><p>These details are used on member bills and invoices. Invoice numbers use separate Series A (GST) and Series B (non-GST) counters by financial year.</p></div></div>
+          <div className="card-header"><div><h3>Gym & billing details</h3><p>These details are used on member bills and invoices.</p></div></div>
           <div className="form-grid two">
             <FormField label="Gym name"><input value={form.gymName} onChange={(e) => setForm((f) => ({...f,gymName:e.target.value}))} /></FormField>
             <div style={{gridColumn:'1 / -1',display:'grid',gridTemplateColumns:'repeat(2,minmax(0,1fr))',gap:'16px'}}>
               {['A','B'].map((letter) => {
                 const key = letter === 'A' ? 'invoiceSeriesA' : 'invoiceSeriesB';
+                const displaySeries = letter === 'A' ? 'G' : 'N';
                 const series = form[key] || getInvoiceSeriesSettings(current, key);
                 const fy = String(series.financialYear || currentFinancialYear());
                 const nextNumber = Number(series.yearlyNext?.[fy] ?? series.nextNumber ?? 1);
@@ -13136,14 +13300,14 @@ function SettingsPage({ exportBackup, importBackup, onExportExcel, onImportExcel
                     await saveCloudSettings({ [key]: updatedSeries });
                     const width = Math.min(12, Math.max(1, Number(updatedSeries.numberLength) || 6));
                     const prefix = String(updatedSeries.prefix || 'PO').trim() || 'PO';
-                    showActionFeedback(`Series ${letter} applied. Next invoice: ${prefix}/${chosenYear}/${String(chosenNumber).padStart(width, '0')}`);
+                    showActionFeedback(`Series ${displaySeries} applied. Next invoice: ${prefix}/${chosenYear}/${String(chosenNumber).padStart(width, '0')}`);
                   } catch (error) {
-                    console.error(`Invoice Series ${letter} save failed:`, error);
-                    showActionFeedback(error?.message || `Series ${letter} was updated locally, but cloud save failed.`, 'error');
+                    console.error(`Invoice Series ${displaySeries} save failed:`, error);
+                    showActionFeedback(error?.message || `Series ${displaySeries} was updated locally, but cloud save failed.`, 'error');
                   }
                 };
                 return <div key={key} style={{border:'1px solid #e5e7eb',borderRadius:'12px',padding:'14px',display:'grid',gap:'10px'}}>
-                  <strong>Invoice Series {letter} · {letter === 'A' ? 'GST invoices' : 'Non-GST invoices'}</strong>
+                  <strong>Invoice Series {displaySeries}</strong>
                   <FormField label="Prefix"><input value={series.prefix || ''} onChange={(e) => updateSeries({prefix:e.target.value})} placeholder="PO" /></FormField>
                   <FormField label="Number length"><input type="number" min="1" max="12" value={series.numberLength ?? 6} onChange={(e) => updateSeries({numberLength:Math.min(12,Math.max(1,Number(e.target.value)||1))})} /></FormField>
                   <div style={{fontSize:'13px',color:'#94a3b8'}}>Next: {preview}</div>
